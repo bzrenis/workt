@@ -1,0 +1,54 @@
+// Test script per verificare che CalculationService funzioni senza errori
+const CalculationService = require('./src/services/CalculationService').default;
+
+console.log('Testing CalculationService...');
+
+// Test entry basico
+const testEntry = {
+  date: '2025-06-25',
+  workStart1: '08:00',
+  workEnd1: '17:00',
+  departureCompany: '07:30',
+  arrivalSite: '08:00',
+  departureReturn: '17:00',
+  arrivalCompany: '17:30',
+  interventi: [],
+  isStandbyDay: false
+};
+
+const testSettings = {
+  contract: {
+    hourlyRate: 16.41,
+    dailyRate: 109.195,
+    monthlyRate: 2839.07,
+    overtimeRates: {
+      day: 1.2,
+      nightUntil22: 1.25,
+      nightAfter22: 1.35,
+      holiday: 1.3,
+      nightHoliday: 1.5
+    }
+  },
+  travelCompensationRate: 1.0,
+  standbySettings: {
+    dailyAllowance: 50,
+    standbyDays: {}
+  }
+};
+
+try {
+  console.log('Testing calculateEarningsBreakdown...');
+  const breakdown = CalculationService.calculateEarningsBreakdown(testEntry, testSettings);
+  console.log('✓ calculateEarningsBreakdown working');
+  console.log('Breakdown result:', JSON.stringify(breakdown, null, 2));
+
+  console.log('Testing calculateIntegratedBreakdown...');
+  const integrated = CalculationService.calculateIntegratedBreakdown(testEntry, testSettings);
+  console.log('✓ calculateIntegratedBreakdown working');
+  console.log('Integrated result:', JSON.stringify(integrated, null, 2));
+
+  console.log('All tests passed!');
+} catch (error) {
+  console.error('Error during testing:', error);
+  console.error('Error stack:', error.stack);
+}
