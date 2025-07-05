@@ -43,7 +43,15 @@ export const useDatabase = () => {
         if (!existingSettings.netCalculation) {
           updatedSettings.netCalculation = {
             method: existingSettings.netCalculationMethod || 'irpef',
-            customDeductionRate: existingSettings.customNetPercentage || 25
+            customDeductionRate: existingSettings.customNetPercentage || 32,
+            useActualAmount: false // Default: usa stima annuale
+          };
+          needsUpdate = true;
+        } else if (existingSettings.netCalculation.useActualAmount === undefined) {
+          // Migrazione: aggiungi useActualAmount se manca
+          updatedSettings.netCalculation = {
+            ...existingSettings.netCalculation,
+            useActualAmount: false
           };
           needsUpdate = true;
         }

@@ -16,7 +16,10 @@ const NetCalculationSettingsScreen = ({ navigation }) => {
   const { settings, updateSettings } = useSettings();
   const [method, setMethod] = useState(settings?.netCalculation?.method || 'irpef');
   const [customPercentage, setCustomPercentage] = useState(
-    String(settings?.netCalculation?.customDeductionRate || 25)
+    String(settings?.netCalculation?.customDeductionRate || 32)
+  );
+  const [useActualAmount, setUseActualAmount] = useState(
+    settings?.netCalculation?.useActualAmount ?? false
   );
   const [previewAmount] = useState(2839.07); // Esempio per preview
 
@@ -43,7 +46,8 @@ const NetCalculationSettingsScreen = ({ navigation }) => {
         ...settings,
         netCalculation: {
           method: method,
-          customDeductionRate: customPerc || 25
+          customDeductionRate: customPerc || 32,
+          useActualAmount: useActualAmount
         }
       });
 
@@ -53,9 +57,13 @@ const NetCalculationSettingsScreen = ({ navigation }) => {
           onPress: () => {
             // Naviga indietro e forza refresh della dashboard
             navigation.goBack();
-            // Notifica la dashboard che le impostazioni sono cambiate
-            if (navigation.state?.routeName !== 'NetCalculationSettings') {
-              navigation.navigate('Dashboard', { refreshCalculations: true });
+            // Se veniamo dalla dashboard, forza il refresh
+            if (navigation.getState()?.routes?.some(route => route.name === 'Dashboard')) {
+              // Usa navigation params per segnalare che serve refresh
+              navigation.navigate('Dashboard', { 
+                refreshCalculations: true,
+                timestamp: Date.now() // Per forzare re-render
+              });
             }
           }
         }
@@ -158,6 +166,53 @@ const NetCalculationSettingsScreen = ({ navigation }) => {
             </Text>
           </View>
         )}
+      </View>
+
+      {/* Modalità di calcolo */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Base di Calcolo</Text>
+        
+        <TouchableOpacity
+          style={[styles.option, !useActualAmount && styles.selectedOption]}
+          onPress={() => setUseActualAmount(false)}
+        >
+          <View style={styles.optionContent}>
+            <View style={styles.optionHeader}>
+              <Ionicons 
+                name="trending-up" 
+                size={24} 
+                color={!useActualAmount ? '#007AFF' : '#666'} 
+              />
+              <Text style={[styles.optionTitle, !useActualAmount && styles.selectedText]}>
+                Stima Annuale (Consigliato)
+              </Text>
+            </View>
+            <Text style={styles.optionDescription}>
+              Per guadagni bassi, calcola basandosi sullo stipendio base annuale per maggiore accuratezza
+            </Text>
+          </View>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.option, useActualAmount && styles.selectedOption]}
+          onPress={() => setUseActualAmount(true)}
+        >
+          <View style={styles.optionContent}>
+            <View style={styles.optionHeader}>
+              <Ionicons 
+                name="calculator" 
+                size={24} 
+                color={useActualAmount ? '#007AFF' : '#666'} 
+              />
+              <Text style={[styles.optionTitle, useActualAmount && styles.selectedText]}>
+                Cifra Presente
+              </Text>
+            </View>
+            <Text style={styles.optionDescription}>
+              Calcola sempre sulla cifra mensile effettiva, anche se molto bassa
+            </Text>
+          </View>
+        </TouchableOpacity>
       </View>
 
       {/* Preview */}

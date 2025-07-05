@@ -67,7 +67,8 @@ export const DEFAULT_SETTINGS = {
   // 💰 Impostazioni per calcolo netto stipendio
   netCalculation: {
     method: 'irpef', // 'irpef' (aliquote reali) o 'custom' (percentuale manuale)
-    customDeductionRate: 25, // Percentuale trattenute personalizzata
+    customDeductionRate: 32, // Percentuale trattenute personalizzata (default più realistico)
+    useActualAmount: false, // Se true, calcola sulla cifra presente, se false usa stima annuale
   },
 };
 

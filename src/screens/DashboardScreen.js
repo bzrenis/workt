@@ -18,6 +18,7 @@ import { formatDate, formatCurrency } from '../utils';
 import { useSettings, useCalculationService } from '../hooks';
 import DatabaseService from '../services/DatabaseService';
 import { createWorkEntryFromData } from '../utils/earningsHelper';
+import { RealPayslipCalculator } from '../services/RealPayslipCalculator';
 
 const { width } = Dimensions.get('window');
 
@@ -34,8 +35,8 @@ const formatSafeHours = (hours) => {
   return `${wholeHours}:${minutes.toString().padStart(2, '0')}`;
 };
 
-const DashboardScreen = ({ navigation }) => {
-  const { settings, isLoading: settingsLoading } = useSettings();
+const DashboardScreen = ({ navigation, route }) => {
+  const { settings, isLoading: settingsLoading, refreshSettings } = useSettings();
   const calculationService = useCalculationService();
   
   const [currentDate] = useState(new Date());
@@ -44,6 +45,31 @@ const DashboardScreen = ({ navigation }) => {
   const [monthlyAggregated, setMonthlyAggregated] = useState({});
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+
+  // 🔄 Ascolta parametri di navigazione per refresh automatico
+  useEffect(() => {
+    if (route?.params?.refreshCalculations) {
+      console.log('🔄 DASHBOARD - Refresh richiesto dalle impostazioni');
+      // Reset del parametro per evitare loop infiniti
+      navigation.setParams({ refreshCalculations: false });
+      
+      // Forza ricaricamento impostazioni e ricalcolo
+      const refreshData = async () => {
+        await refreshSettings();
+        await loadData();
+      };
+      
+      refreshData();
+    }
+  }, [route?.params?.refreshCalculations, route?.params?.timestamp]);
+
+  // 🔄 Effetto per ricaricamento automatico quando cambiano le impostazioni
+  useEffect(() => {
+    if (!settingsLoading && settings) {
+      console.log('🔄 DASHBOARD - Impostazioni aggiornate, ricalcolo...');
+      calculateMonthlyAggregation(workEntries);
+    }
+  }, [settings?.netCalculation?.method, settings?.netCalculation?.customDeductionRate, settings?.netCalculation?.useActualAmount]);
 
   // 🔍 DEBUG SETTINGS CARICAMENTO
   useEffect(() => {
@@ -723,8 +749,16 @@ const DashboardScreen = ({ navigation }) => {
 
   const onRefresh = React.useCallback(async () => {
     setRefreshing(true);
-    await loadData();
-    setRefreshing(false);
+    try {
+      // Refresh sia impostazioni che dati
+      await refreshSettings();
+      await loadData();
+      console.log('🔄 DASHBOARD - Refresh manuale completato');
+    } catch (error) {
+      console.error('Errore nel refresh:', error);
+    } finally {
+      setRefreshing(false);
+    }
   }, []);
 
   // Navigazione tra i mesi
@@ -1215,9 +1249,80 @@ const DashboardScreen = ({ navigation }) => {
 
       <View style={styles.totalSection}>
         <View style={styles.totalRow}>
-          <Text style={styles.totalLabel}>Totale Guadagno Mensile</Text>
+          <Text style={styles.totalLabel}>Totale Guadagno Mensile (Lordo)</Text>
           <Text style={styles.totalAmount}>{formatSafeAmount(monthlyAggregated.totalEarnings || 0)}</Text>
         </View>
+        
+        {/* Calcolo netto con trattenute */}
+        {(() => {
+          const grossAmount = monthlyAggregated.totalEarnings || 0;
+          if (grossAmount > 0) {
+            try {
+              // 💰 Usa impostazioni salvate dall'utente con default IRPEF
+              const payslipSettings = {
+                method: settings?.netCalculation?.method || 'irpef', // Default IRPEF
+                customDeductionRate: settings?.netCalculation?.customDeductionRate || 32 // Fallback 32% realistico
+              };
+              
+              // 🎯 Scelta base di calcolo: cifra presente vs stima annuale
+              let calculationBase = grossAmount;
+              let isEstimated = false;
+              
+              const useActualAmount = settings?.netCalculation?.useActualAmount ?? false;
+              
+              if (!useActualAmount && grossAmount < 1500 && settings?.contract?.monthlyGrossSalary) {
+                // Stima annuale: stipendio base * 12 + extra del mese * 12
+                const baseAnnual = settings.contract.monthlyGrossSalary * 12;
+                const extraMonthly = Math.max(0, grossAmount - settings.contract.monthlyGrossSalary);
+                const estimatedAnnual = baseAnnual + (extraMonthly * 12);
+                calculationBase = estimatedAnnual / 12;
+                isEstimated = true;
+              }
+              
+              const netCalculation = RealPayslipCalculator.calculateNetFromGross(calculationBase, payslipSettings);
+              
+              return (
+                <>
+                  <View style={[styles.totalRow, { marginTop: 8, marginBottom: 4 }]}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.totalLabel, { color: '#2e7d32' }]}>Totale Netto Stimato</Text>
+                    </View>
+                    <TouchableOpacity
+                      style={styles.settingsButton}
+                      onPress={() => navigation.navigate('NetCalculationSettings')}
+                    >
+                      <Ionicons name="settings-outline" size={16} color="#666" />
+                    </TouchableOpacity>
+                    <Text style={[styles.totalAmount, { color: '#2e7d32', marginLeft: 8 }]}>{formatSafeAmount(netCalculation.net)}</Text>
+                  </View>
+                  <Text style={[styles.totalSubtext, { fontSize: 12, color: '#666' }]}>
+                    Trattenute: {formatSafeAmount(netCalculation.totalDeductions)} ({(netCalculation.deductionRate * 100).toFixed(1)}% - {payslipSettings.method === 'custom' ? 'Personalizzato' : 'IRPEF + INPS + Addizionali'})
+                  </Text>
+                  {isEstimated && (
+                    <Text style={[styles.totalSubtext, { fontSize: 11, color: '#999', fontStyle: 'italic' }]}>
+                      *Calcolo basato su stima annuale (€{calculationBase.toFixed(2)}/mese)
+                    </Text>
+                  )}
+                  {!isEstimated && calculationBase === grossAmount && (
+                    <Text style={[styles.totalSubtext, { fontSize: 11, color: '#666' }]}>
+                      Calcolato sulla cifra presente (€{grossAmount.toFixed(2)})
+                    </Text>
+                  )}
+                </>
+              );
+            } catch (error) {
+              console.warn('Errore calcolo netto:', error);
+              return (
+                <View style={[styles.totalRow, { marginTop: 8 }]}>
+                  <Text style={[styles.totalLabel, { color: '#666' }]}>Totale Netto Stimato</Text>
+                  <Text style={[styles.totalAmount, { color: '#666' }]}>Calcolo non disponibile</Text>
+                </View>
+              );
+            }
+          }
+          return null;
+        })()}
+        
         <Text style={styles.totalSubtext}>
           Include attività ordinarie, interventi in reperibilità e indennità (esclusi rimborsi pasti)
         </Text>
@@ -1641,6 +1746,13 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: 'bold',
     color: '#1976d2',
+  },
+  settingsButton: {
+    padding: 8,
+    borderRadius: 20,
+    backgroundColor: '#f5f5f5',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   totalSubtext: {
     fontSize: 14,
