@@ -1264,6 +1264,12 @@ const DashboardScreen = ({ navigation, route }) => {
                 customDeductionRate: settings?.netCalculation?.customDeductionRate || 32 // Fallback 32% realistico
               };
               
+              console.log('🔍 DASHBOARD - Impostazioni per calcolo netto:');
+              console.log('- Settings disponibili:', !!settings?.netCalculation);
+              console.log('- Metodo utilizzato:', payslipSettings.method);
+              console.log('- Percentuale utilizzata:', payslipSettings.customDeductionRate);
+              console.log('- Usa cifra presente:', settings?.netCalculation?.useActualAmount ?? false);
+              
               // 🎯 Scelta base di calcolo: cifra presente vs stima annuale
               let calculationBase = grossAmount;
               let isEstimated = false;
@@ -1283,17 +1289,9 @@ const DashboardScreen = ({ navigation, route }) => {
               
               return (
                 <>
-                  <View style={[styles.totalRow, { marginTop: 8, marginBottom: 4 }]}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={[styles.totalLabel, { color: '#2e7d32' }]}>Totale Netto Stimato</Text>
-                    </View>
-                    <TouchableOpacity
-                      style={styles.settingsButton}
-                      onPress={() => navigation.navigate('NetCalculationSettings')}
-                    >
-                      <Ionicons name="settings-outline" size={16} color="#666" />
-                    </TouchableOpacity>
-                    <Text style={[styles.totalAmount, { color: '#2e7d32', marginLeft: 8 }]}>{formatSafeAmount(netCalculation.net)}</Text>
+                  <View style={[styles.totalRow, { marginTop: 8 }]}>
+                    <Text style={[styles.totalLabel, { color: '#2e7d32' }]}>Totale Netto Stimato</Text>
+                    <Text style={[styles.totalAmount, { color: '#2e7d32' }]}>{formatSafeAmount(netCalculation.net)}</Text>
                   </View>
                   <Text style={[styles.totalSubtext, { fontSize: 12, color: '#666' }]}>
                     Trattenute: {formatSafeAmount(netCalculation.totalDeductions)} ({(netCalculation.deductionRate * 100).toFixed(1)}% - {payslipSettings.method === 'custom' ? 'Personalizzato' : 'IRPEF + INPS + Addizionali'})
@@ -1746,13 +1744,6 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: 'bold',
     color: '#1976d2',
-  },
-  settingsButton: {
-    padding: 8,
-    borderRadius: 20,
-    backgroundColor: '#f5f5f5',
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   totalSubtext: {
     fontSize: 14,

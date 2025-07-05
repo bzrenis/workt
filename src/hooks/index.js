@@ -237,11 +237,22 @@ export const useSettings = () => {
 
     try {
       setIsLoading(true);
+      console.log('🔍 HOOK - loadSettings: Caricamento da database...');
+      
       const appSettings = await DatabaseService.getSetting('appSettings', DEFAULT_SETTINGS);
+      
+      console.log('🔍 HOOK - loadSettings: Dati caricati dal database');
+      if (appSettings?.netCalculation) {
+        console.log('- NetCalculation trovato:', JSON.stringify(appSettings.netCalculation, null, 2));
+      } else {
+        console.log('- NetCalculation NON trovato, usando default');
+      }
+      
       setSettings(appSettings);
       setError(null);
-      setRetryCount(0);    } catch (err) {
-      console.error('Error loading settings:', err);
+      setRetryCount(0);
+    } catch (err) {
+      console.error('❌ HOOK - Error loading settings:', err);
       await DatabaseHealthService.logDatabaseError('loadSettings', err);
       setRetryCount(prev => prev + 1);
       
@@ -259,11 +270,17 @@ export const useSettings = () => {
 
   const updateSettings = async (newSettings) => {
     try {
+      console.log('🔧 HOOK - updateSettings chiamato');
+      console.log('- Nuove impostazioni da salvare:', JSON.stringify(newSettings.netCalculation, null, 2));
+      
       await DatabaseService.setSetting('appSettings', newSettings);
       setSettings(newSettings);
       setRetryCount(0);
+      
+      console.log('✅ HOOK - updateSettings completato');
+      console.log('- Settings state aggiornato:', JSON.stringify(newSettings.netCalculation, null, 2));
     } catch (err) {
-      console.error('Error updating settings:', err);
+      console.error('❌ HOOK - Error updating settings:', err);
       throw err;
     }
   };
@@ -284,7 +301,10 @@ export const useSettings = () => {
     error,
     updateSettings,
     updatePartialSettings,
-    refreshSettings: () => loadSettings(true),
+    refreshSettings: () => {
+      console.log('🔄 HOOK - refreshSettings chiamato, ricaricando da database...');
+      return loadSettings(true);
+    },
     canRetry: retryCount < maxRetries
   };
 };

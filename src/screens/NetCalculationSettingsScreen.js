@@ -13,7 +13,7 @@ import { useSettings } from '../hooks';
 import RealPayslipCalculator from '../services/RealPayslipCalculator';
 
 const NetCalculationSettingsScreen = ({ navigation }) => {
-  const { settings, updateSettings } = useSettings();
+  const { settings, updateSettings, refreshSettings } = useSettings();
   const [method, setMethod] = useState(settings?.netCalculation?.method || 'irpef');
   const [customPercentage, setCustomPercentage] = useState(
     String(settings?.netCalculation?.customDeductionRate || 32)
@@ -22,6 +22,33 @@ const NetCalculationSettingsScreen = ({ navigation }) => {
     settings?.netCalculation?.useActualAmount ?? false
   );
   const [previewAmount] = useState(2839.07); // Esempio per preview
+
+  // Debug caricamento impostazioni
+  React.useEffect(() => {
+    console.log('🔍 CARICAMENTO IMPOSTAZIONI NETTO:');
+    console.log('- Settings ricevuti:', !!settings);
+    if (settings?.netCalculation) {
+      console.log('- Metodo dal DB:', settings.netCalculation.method);
+      console.log('- Percentuale dal DB:', settings.netCalculation.customDeductionRate);
+      console.log('- Usa cifra presente dal DB:', settings.netCalculation.useActualAmount);
+      
+      // Aggiorna stati se diversi
+      if (settings.netCalculation.method !== method) {
+        setMethod(settings.netCalculation.method);
+        console.log('🔄 Aggiornato metodo:', settings.netCalculation.method);
+      }
+      if (String(settings.netCalculation.customDeductionRate) !== customPercentage) {
+        setCustomPercentage(String(settings.netCalculation.customDeductionRate));
+        console.log('🔄 Aggiornata percentuale:', settings.netCalculation.customDeductionRate);
+      }
+      if (settings.netCalculation.useActualAmount !== useActualAmount) {
+        setUseActualAmount(settings.netCalculation.useActualAmount);
+        console.log('🔄 Aggiornata modalità:', settings.netCalculation.useActualAmount);
+      }
+    } else {
+      console.log('❌ Nessuna impostazione netCalculation trovata');
+    }
+  }, [settings]);
 
   // Calcola preview in tempo reale
   const getPreviewCalculation = () => {
@@ -42,14 +69,29 @@ const NetCalculationSettingsScreen = ({ navigation }) => {
         return;
       }
 
-      await updateSettings({
+      const newSettings = {
         ...settings,
         netCalculation: {
           method: method,
           customDeductionRate: customPerc || 32,
           useActualAmount: useActualAmount
         }
-      });
+      };
+
+      console.log('🔧 SALVATAGGIO IMPOSTAZIONI NETTO:');
+      console.log('- Metodo:', method);
+      console.log('- Percentuale:', customPerc);
+      console.log('- Usa cifra presente:', useActualAmount);
+      console.log('- Settings completi:', JSON.stringify(newSettings.netCalculation, null, 2));
+
+      await updateSettings(newSettings);
+      
+      console.log('✅ Salvataggio completato, ricarico impostazioni...');
+      
+      // 🔄 Forza il ricaricamento delle impostazioni dal database
+      await refreshSettings();
+      
+      console.log('✅ Impostazioni ricaricate, tutto completato');
 
       Alert.alert('Successo', 'Impostazioni salvate correttamente', [
         { 
