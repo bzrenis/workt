@@ -1276,13 +1276,28 @@ const DashboardScreen = ({ navigation, route }) => {
               
               const useActualAmount = settings?.netCalculation?.useActualAmount ?? false;
               
-              if (!useActualAmount && grossAmount < 1500 && settings?.contract?.monthlyGrossSalary) {
-                // Stima annuale: stipendio base * 12 + extra del mese * 12
-                const baseAnnual = settings.contract.monthlyGrossSalary * 12;
-                const extraMonthly = Math.max(0, grossAmount - settings.contract.monthlyGrossSalary);
-                const estimatedAnnual = baseAnnual + (extraMonthly * 12);
-                calculationBase = estimatedAnnual / 12;
+              console.log('🔧 DASHBOARD DEBUG - Condizioni per stima annuale:');
+              console.log(`- useActualAmount: ${useActualAmount}`);
+              console.log(`- !useActualAmount: ${!useActualAmount}`);
+              console.log(`- contract disponibile: ${!!settings?.contract}`);
+              console.log(`- monthlyGrossSalary: ${settings?.contract?.monthlyGrossSalary}`);
+              console.log(`- monthlyGrossSalary truthy: ${!!settings?.contract?.monthlyGrossSalary}`);
+              console.log(`- Condizione IF completa: ${!useActualAmount && settings?.contract?.monthlyGrossSalary}`);
+              
+              // ✅ Se l'utente ha scelto "stima annuale", usa SEMPRE lo stipendio base
+              if (!useActualAmount && settings?.contract?.monthlyGrossSalary) {
+                // Usa lo stipendio base mensile per garantire percentuali consistenti
+                calculationBase = settings.contract.monthlyGrossSalary;
                 isEstimated = true;
+                
+                console.log('🎯 DASHBOARD - Usando stima annuale (stipendio base):');
+                console.log(`- Importo lordo effettivo: €${grossAmount.toFixed(2)}`);
+                console.log(`- Base calcolo (stipendio base): €${calculationBase.toFixed(2)}`);
+                console.log(`- Percentuale trattenute costante basata su stipendio standard`);
+              } else {
+                console.log('🎯 DASHBOARD - Usando cifra presente:');
+                console.log(`- Importo lordo: €${grossAmount.toFixed(2)}`);
+                console.log(`- useActualAmount: ${useActualAmount}`);
               }
               
               const netCalculation = RealPayslipCalculator.calculateNetFromGross(calculationBase, payslipSettings);
@@ -1298,7 +1313,7 @@ const DashboardScreen = ({ navigation, route }) => {
                   </Text>
                   {isEstimated && (
                     <Text style={[styles.totalSubtext, { fontSize: 11, color: '#999', fontStyle: 'italic' }]}>
-                      *Calcolo basato su stima annuale (€{calculationBase.toFixed(2)}/mese)
+                      *Calcolo basato su stipendio standard (€{calculationBase.toFixed(2)}/mese)
                     </Text>
                   )}
                   {!isEstimated && calculationBase === grossAmount && (
