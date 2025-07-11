@@ -152,6 +152,14 @@ class CalculationService {
     const dailyRate = contract.dailyRate || (contract.monthlySalary / 26);
     const travelCompensationRate = settings.travelCompensationRate || 1.0;
     const travelHoursSetting = settings.travelHoursSetting || 'EXCESS_AS_TRAVEL';
+    
+    // Log della modalità di calcolo viaggio utilizzata
+    console.log(`[CalculationService] calculateDailyEarnings - Modalità calcolo viaggio: ${travelHoursSetting}`, {
+      workEntry: workEntry.date,
+      settingsPassed: settings.travelHoursSetting,
+      settingsComplete: settings,
+      travelCompensationRate
+    });
     const standbySettings = settings.standbySettings || {};
     const standbyDays = standbySettings.standbyDays || {};
     const dailyAllowance = parseFloat(standbySettings.dailyAllowance) || 0;
@@ -209,39 +217,91 @@ class CalculationService {
     let regularHours = 0;
     let travelPay = 0;
 
-    // LOGICA CCNL: paga base giornaliera se lavoro+viaggio >= 8h
+    // LOGICA CCNL: gestione modalità viaggio
     const standardWorkDay = getWorkDayHours();
-    const totalRegularHours = workHours + travelHours;
-    if (totalRegularHours >= standardWorkDay) {
-      regularPay = dailyRate;
-      regularHours = standardWorkDay;
-      const extraHours = totalRegularHours - standardWorkDay;
-      if (extraHours > 0) {
-        if (travelHoursSetting === 'EXCESS_AS_TRAVEL') {
-          // Le ore oltre 8h sono pagate come viaggio
-          travelPay = extraHours * baseRate * travelCompensationRate;
-          overtimeHours = 0;
-        } else if (travelHoursSetting === 'EXCESS_AS_OVERTIME') {
-          // Le ore oltre 8h sono pagate come straordinario
+    console.log(`[CalculationService] Applicazione modalità viaggio: ${travelHoursSetting}`, {
+      workHours,
+      travelHours,
+      standardWorkDay,
+      totalHours: workHours + travelHours
+    });
+    
+    if (travelHoursSetting === 'TRAVEL_SEPARATE') {
+      console.log(`[CalculationService] Applicando modalità TRAVEL_SEPARATE`);
+      // NUOVA MODALITÀ: Viaggio sempre pagato separatamente con tariffa viaggio
+      travelPay = travelHours * baseRate * travelCompensationRate;
+      
+      // Per il lavoro, verifica se completare con diaria o ore effettive
+      if (workHours >= standardWorkDay) {
+        regularPay = dailyRate;
+        regularHours = standardWorkDay;
+        const extraWorkHours = workHours - standardWorkDay;
+        if (extraWorkHours > 0) {
           let overtimeBonusRate = this.getHourlyRateWithBonus({
             baseRate,
             isOvertime: true,
             isNight: workEntry.isNight || false,
             isHoliday,
-            isSunday
+            isSunday,
+            contract
           });
-          overtimePay = extraHours * overtimeBonusRate;
-          overtimeHours = extraHours;
-        } else {
-          // Default: nessun extra
-          overtimeHours = 0;
+          overtimePay = extraWorkHours * overtimeBonusRate;
+          overtimeHours = extraWorkHours;
         }
+      } else {
+        regularPay = baseRate * workHours;
+        regularHours = workHours;
+        overtimeHours = 0;
       }
     } else {
-      // Se meno di 8h, paga solo le ore effettive
-      regularPay = baseRate * totalRegularHours;
-      regularHours = totalRegularHours;
-      overtimeHours = 0;
+      console.log(`[CalculationService] Applicando modalità ${travelHoursSetting} (logica esistente)`);
+      // LOGICHE ESISTENTI: considera viaggio + lavoro insieme
+      const totalRegularHours = workHours + travelHours;
+      if (totalRegularHours >= standardWorkDay) {
+        regularPay = dailyRate;
+        regularHours = standardWorkDay;
+        const extraHours = totalRegularHours - standardWorkDay;
+        if (extraHours > 0) {
+          if (travelHoursSetting === 'EXCESS_AS_TRAVEL') {
+            console.log(`[CalculationService] Ore extra (${extraHours}h) pagate come viaggio`);
+            // Le ore oltre 8h sono pagate come viaggio
+            travelPay = extraHours * baseRate * travelCompensationRate;
+            overtimeHours = 0;
+          } else if (travelHoursSetting === 'EXCESS_AS_OVERTIME') {
+            console.log(`[CalculationService] Ore extra (${extraHours}h) pagate come straordinario`);
+            // Le ore oltre 8h sono pagate come straordinario
+            let overtimeBonusRate = this.getHourlyRateWithBonus({
+              baseRate,
+              isOvertime: true,
+              isNight: workEntry.isNight || false,
+              isHoliday,
+              isSunday,
+              contract
+            });
+            overtimePay = extraHours * overtimeBonusRate;
+            overtimeHours = extraHours;
+          } else {
+            console.log(`[CalculationService] Modalità AS_WORK: ore extra incluse nel normale lavoro`);
+            // AS_WORK: Default nessun extra, tutto come lavoro normale
+            overtimeHours = 0;
+          }
+        }
+      } else {
+        console.log(`[CalculationService] Totale ore (${totalRegularHours}h) < giornata standard: calcolo proporzionale`);
+        // Se meno di 8h, paga solo le ore effettive
+        if (travelHoursSetting === 'AS_WORK') {
+          console.log(`[CalculationService] Modalità AS_WORK: tutto come lavoro normale`);
+          // Tutto come lavoro normale
+          regularPay = baseRate * totalRegularHours;
+          regularHours = totalRegularHours;
+        } else {
+          console.log(`[CalculationService] Altre modalità: pagamento ore effettive`);
+          // Per altre modalità, ancora paga tutto come ore effettive
+          regularPay = baseRate * totalRegularHours;
+          regularHours = totalRegularHours;
+        }
+        overtimeHours = 0;
+      }
     }
 
     // Lavoro ordinario notturno/festivo/domenicale
@@ -252,7 +312,8 @@ class CalculationService {
         isOvertime: false,
         isNight: workEntry.isNight || false,
         isHoliday,
-        isSunday
+        isSunday,
+        contract
       });
       ordinaryBonusPay = totalRegularHours * (ordinaryBonusRate - baseRate);
     }
@@ -959,52 +1020,68 @@ class CalculationService {
     // Segmenti di intervento reperibilità (inclusi tutti i viaggi di partenza e ritorno)
     const segments = [];
     if (workEntry.interventi && Array.isArray(workEntry.interventi)) {
-      workEntry.interventi.forEach(iv => {
+      console.log(`[DEBUG] calculateStandbyBreakdown - Processing ${workEntry.interventi.length} interventi for ${workEntry.date}`);
+      workEntry.interventi.forEach((iv, index) => {
+        console.log(`[DEBUG] Intervento ${index + 1}:`, iv);
+        
         // Viaggio di partenza (azienda -> luogo intervento)
         if (iv.departure_company && iv.arrival_site) {
           segments.push({ start: iv.departure_company, end: iv.arrival_site, type: 'standby_travel' });
+          console.log(`[DEBUG] Added travel segment: ${iv.departure_company} → ${iv.arrival_site}`);
         }
         // Primo turno lavoro
         if (iv.work_start_1 && iv.work_end_1) {
           segments.push({ start: iv.work_start_1, end: iv.work_end_1, type: 'standby_work' });
+          console.log(`[DEBUG] Added work segment 1: ${iv.work_start_1} → ${iv.work_end_1}`);
         }
         // Secondo turno lavoro
         if (iv.work_start_2 && iv.work_end_2) {
           segments.push({ start: iv.work_start_2, end: iv.work_end_2, type: 'standby_work' });
+          console.log(`[DEBUG] Added work segment 2: ${iv.work_start_2} → ${iv.work_end_2}`);
         }
         // Viaggio di ritorno (luogo intervento -> azienda)
         if (iv.departure_return && iv.arrival_company) {
           segments.push({ start: iv.departure_return, end: iv.arrival_company, type: 'standby_travel' });
+          console.log(`[DEBUG] Added return segment: ${iv.departure_return} → ${iv.arrival_company}`);
         }
       });
+    } else {
+      console.log(`[DEBUG] calculateStandbyBreakdown - No valid interventi array for ${workEntry.date}:`, workEntry.interventi);
     }
+    
+    console.log(`[DEBUG] Total segments extracted: ${segments.length}`, segments);
 
-    // Suddivisione minuti per fascia oraria (incluso sabato)
+    // Suddivisione minuti per fascia oraria CCNL (tre fasce: diurno, serale, notturno)
     const minuteDetails = {
-      work: { ordinary: 0, night: 0, saturday: 0, saturday_night: 0, holiday: 0, night_holiday: 0 },
-      travel: { ordinary: 0, night: 0, saturday: 0, saturday_night: 0, holiday: 0, night_holiday: 0 }
+      work: { ordinary: 0, evening: 0, night: 0, saturday: 0, saturday_night: 0, holiday: 0, night_holiday: 0 },
+      travel: { ordinary: 0, evening: 0, night: 0, saturday: 0, saturday_night: 0, holiday: 0, night_holiday: 0 }
     };
 
     for (const segment of segments) {
       const startMinutes = this.parseTime(segment.start);
       const duration = this.calculateTimeDifference(segment.start, segment.end);
+      console.log(`[DEBUG] Processing segment ${segment.type}: ${segment.start} → ${segment.end}, duration: ${duration} min`);
+      
       for (let i = 0; i < duration; i++) {
         const currentMinute = (startMinutes + i) % 1440;
         const hour = Math.floor(currentMinute / 60);
-        const night = isNightWork(hour);
         let key = 'ordinary';
         
-        // Logica di classificazione per interventi di reperibilità
-        if ((isHoliday || isSunday) && night) {
-          key = 'night_holiday';
+        // Logica di classificazione CCNL Metalmeccanico PMI per interventi di reperibilità
+        if ((isHoliday || isSunday) && (hour >= 22 || hour < 6)) {
+          key = 'night_holiday'; // Festivo notturno
         } else if (isHoliday || isSunday) {
-          key = 'holiday';
-        } else if (isSaturday && night) {
-          key = 'saturday_night';
+          key = 'holiday'; // Festivo diurno/serale
+        } else if (isSaturday && (hour >= 22 || hour < 6)) {
+          key = 'saturday_night'; // Sabato notturno
         } else if (isSaturday) {
-          key = 'saturday';
-        } else if (night) {
-          key = 'night';
+          key = 'saturday'; // Sabato diurno/serale
+        } else if (hour >= 22 || hour < 6) {
+          key = 'night'; // Notturno (22:00-06:00) +35%
+        } else if (hour >= 20 && hour < 22) {
+          key = 'evening'; // Serale (20:00-22:00) +25%
+        } else {
+          key = 'ordinary'; // Diurno (06:00-20:00) +20%
         }
         
         // Somma minuti
@@ -1022,6 +1099,9 @@ class CalculationService {
       hours.work[k] = this.minutesToHours(minuteDetails.work[k]);
       hours.travel[k] = this.minutesToHours(minuteDetails.travel[k]);
     });
+    
+    console.log(`[DEBUG] Final minute breakdown for ${workEntry.date}:`, minuteDetails);
+    console.log(`[DEBUG] Final hour breakdown for ${workEntry.date}:`, hours);
 
     // Calcolo guadagni per fascia oraria
     const earnings = {
@@ -1040,10 +1120,11 @@ class CalculationService {
     const totalDailyHours = ordinaryTotalHours + standbyTotalHours;
     const standardWorkDay = getWorkDayHours(); // 8 ore
     
-    // Nei giorni feriali, se il totale supera le 8 ore, le ore eccedenti di reperibilità 
+    // Nei giorni feriali, se le ORE ORDINARIE superano le 8 ore, le ore eccedenti di reperibilità 
     // potrebbero essere considerate straordinarie secondo normativa CCNL
+    // CORREZIONE: il controllo deve essere SOLO sulle ore ordinarie, non sul totale
     const isWeekday = !isSaturday && !isSunday && !isHoliday;
-    const shouldApplyOvertimeToStandby = isWeekday && totalDailyHours > standardWorkDay;
+    const shouldApplyOvertimeToStandby = isWeekday && ordinaryTotalHours >= standardWorkDay;
     
     console.log(`[CalculationService] Verifica limite 8 ore per ${workEntry.date}:`, {
       isWeekday,
@@ -1056,17 +1137,32 @@ class CalculationService {
 
     // Maggiorazioni CCNL per interventi di reperibilità
     const ccnlRates = contract.overtimeRates || {};
-    const multipliers = {
+    
+    // Multipliers per LAVORO (includono logica straordinario se supera 8h)
+    const workMultipliers = {
       ordinary: shouldApplyOvertimeToStandby ? (ccnlRates.day || 1.2) : 1.0, // Se supera 8h feriali, diventa straordinario
+      evening: shouldApplyOvertimeToStandby ? (ccnlRates.nightUntil22 || 1.25) : (ccnlRates.nightUntil22 || 1.25), // Serale 20:00-22:00 +25%
       night: shouldApplyOvertimeToStandby ? (ccnlRates.nightAfter22 || 1.35) : 1.25, // Straordinario notturno o ordinario notturno
       saturday: ccnlRates.saturday || 1.25, // Maggiorazione sabato configurabile
       saturday_night: (ccnlRates.saturday || 1.25) * 1.25, // Sabato + notturno
       holiday: shouldApplyOvertimeToStandby ? (ccnlRates.holiday || 1.35) : 1.30, // Straordinario festivo o ordinario festivo
       night_holiday: shouldApplyOvertimeToStandby ? 1.60 : 1.55 // Maggiorazione composta per straordinario o ordinario
     };
+    
+    // Multipliers per VIAGGI (solo maggiorazioni di fascia oraria, MAI straordinari)
+    const travelMultipliers = {
+      ordinary: 1.0, // Viaggi diurni sempre a tariffa base
+      evening: ccnlRates.nightUntil22 || 1.25, // Viaggi serali sempre +25% (fascia oraria)
+      night: 1.25, // Viaggi notturni sempre +25% (fascia oraria, non straordinario)
+      saturday: 1.0, // Viaggi sabato a tariffa base (solo fascia oraria conta)
+      saturday_night: 1.25, // Viaggi sabato notte +25% (solo fascia notturna)
+      holiday: 1.0, // Viaggi festivi a tariffa base
+      night_holiday: 1.25 // Viaggi festivi notte +25% (solo fascia notturna)
+    };
+    
     Object.keys(hours.work).forEach(k => {
-      earnings.work[k] = hours.work[k] * baseRate * (multipliers[k] || 1.0);
-      earnings.travel[k] = hours.travel[k] * baseRate * travelCompensationRate * (multipliers[k] || 1.0);
+      earnings.work[k] = hours.work[k] * baseRate * (workMultipliers[k] || 1.0);
+      earnings.travel[k] = hours.travel[k] * baseRate * travelCompensationRate * (travelMultipliers[k] || 1.0);
     });
 
     // Guadagno totale reperibilità (inclusa indennità)
@@ -1135,19 +1231,19 @@ class CalculationService {
   }
 
   getRateMultiplierForCategory(category, contract) {
-    const ccnlRates = contract.overtimeRates; // Assumendo che le maggiorazioni siano qui
+    const ccnlRates = contract.overtimeRates; // Maggiorazioni CCNL
     if (category.includes('standby')) {
         // La reperibilità segue le stesse maggiorazioni del lavoro normale/straordinario
         category = category.replace('standby_', '');
     }
 
-    if (category === 'overtime_night_holiday') return ccnlRates.nightHolidayOvertime || 1.55; // Esempio
-    if (category === 'overtime_holiday') return ccnlRates.holiday || 1.55;
-    if (category === 'overtime_night') return ccnlRates.nightAfter22 || 1.50;
-    if (category === 'overtime') return ccnlRates.day || 1.30;
-    if (category === 'ordinary_night_holiday') return ccnlRates.nightHoliday || 1.50;
-    if (category === 'ordinary_holiday') return ccnlRates.holiday || 1.40;
-    if (category === 'ordinary_night') return ccnlRates.nightUntil22 || 1.20;
+    if (category === 'overtime_night_holiday') return ccnlRates.holiday || 1.3; // Festivo
+    if (category === 'overtime_holiday') return ccnlRates.holiday || 1.3; // Festivo
+    if (category === 'overtime_night') return ccnlRates.nightAfter22 || 1.35; // Notturno +35%
+    if (category === 'overtime') return ccnlRates.day || 1.20; // Diurno +20%
+    if (category === 'ordinary_night_holiday') return ccnlRates.holiday || 1.3; // Festivo
+    if (category === 'ordinary_holiday') return ccnlRates.holiday || 1.3; // Festivo
+    if (category === 'ordinary_night') return ccnlRates.nightUntil22 || 1.25; // Serale +25%
     
     return 1.0; // ordinary
   }
@@ -1280,14 +1376,24 @@ class CalculationService {
     isOvertime = false,
     isNight = false,
     isHoliday = false,
-    isSunday = false
+    isSunday = false,
+    contract = null
   }) {
-    if (isOvertime && isNight) return baseRate * 1.5; // Straordinario notturno +50%
-    if (isOvertime && (isHoliday || isSunday)) return baseRate * 1.5; // Straordinario festivo/domenicale +50%
-    if (isOvertime) return baseRate * 1.2; // Straordinario diurno +20%
-    if (isNight && isHoliday) return baseRate * 1.6; // Lavoro ordinario notturno festivo +60%
-    if (isNight) return baseRate * 1.25; // Lavoro ordinario notturno +25%
-    if (isHoliday || isSunday) return baseRate * 1.3; // Lavoro ordinario festivo/domenicale +30%
+    // Usa i tassi CCNL se disponibili, altrimenti fallback
+    const rates = contract?.overtimeRates || {
+      day: 1.20,
+      nightUntil22: 1.25,
+      nightAfter22: 1.35,
+      saturday: 1.25,
+      holiday: 1.3
+    };
+
+    if (isOvertime && isNight) return baseRate * (rates.nightAfter22 || 1.35); // Straordinario notturno +35%
+    if (isOvertime && (isHoliday || isSunday)) return baseRate * (rates.holiday || 1.3); // Straordinario festivo/domenicale +30%
+    if (isOvertime) return baseRate * (rates.day || 1.20); // Straordinario diurno +20%
+    if (isNight && isHoliday) return baseRate * (rates.holiday || 1.3); // Lavoro ordinario notturno festivo +30%
+    if (isNight) return baseRate * (rates.nightUntil22 || 1.25); // Lavoro ordinario notturno +25%
+    if (isHoliday || isSunday) return baseRate * (rates.holiday || 1.3); // Lavoro ordinario festivo/domenicale +30%
     return baseRate;
   }
 

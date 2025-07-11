@@ -16,9 +16,9 @@ export const CCNL_CONTRACTS = {
     workingDaysPerMonth: 26, // Standard per calcolo giornaliero
     workingHoursPerDay: 8, // Standard CCNL
     overtimeRates: {
-      day: 1.20, // +20% Straordinario diurno
-      nightUntil22: 1.25, // +25% Notturno fino alle 22:00
-      nightAfter22: 1.35, // +35% Notturno oltre le 22:00
+      day: 1.20, // +20% Straordinario diurno (06:00-20:00)
+      nightUntil22: 1.25, // +25% Straordinario serale (20:00-22:00)
+      nightAfter22: 1.35, // +35% Straordinario notturno (22:00-06:00)
       saturday: 1.25, // +25% Sabato (conforme CCNL)
       holiday: 1.3, // +30% Festivo/Domenica (già presente, per chiarezza)
     },
@@ -38,7 +38,7 @@ export const CCNL_CONTRACTS = {
 export const DEFAULT_SETTINGS = {
   contract: CCNL_CONTRACTS.METALMECCANICO_PMI_L5,
   travelCompensationRate: 1.0, // 100% of hourly rate
-  travelHoursSetting: 'EXCESS_AS_TRAVEL', // 'AS_WORK', 'EXCESS_AS_TRAVEL', 'EXCESS_AS_OVERTIME'
+  travelHoursSetting: 'TRAVEL_SEPARATE', // 'AS_WORK', 'TRAVEL_SEPARATE', 'EXCESS_AS_TRAVEL', 'EXCESS_AS_OVERTIME'
   standbySettings: {
     enabled: false,
     dailyAllowance: 0,
@@ -74,11 +74,16 @@ export const DEFAULT_SETTINGS = {
 
 // Calculation utilities
 export const calculateOvertimeRate = (hour, contract = CCNL_CONTRACTS.METALMECCANICO_PMI_L5) => {
+  // CCNL Metalmeccanico PMI - Fasce orarie straordinari:
+  // Notturno (22:00-06:00): +35%
   if (hour >= 22 || hour < 6) {
     return contract.hourlyRate * contract.overtimeRates.nightAfter22;
-  } else if (hour >= contract.nightWorkStart) {
+  }
+  // Serale (20:00-22:00): +25%
+  else if (hour >= 20 && hour < 22) {
     return contract.hourlyRate * contract.overtimeRates.nightUntil22;
   }
+  // Diurno (06:00-20:00): +20%
   return contract.hourlyRate * contract.overtimeRates.day;
 };
 
