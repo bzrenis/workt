@@ -7,7 +7,7 @@ Un'applicazione React Native per Android per il tracciamento delle ore di lavoro
 - **Tracciamento Ore Completo**: Registrazione di ore lavoro, viaggio, reperibilità e doppi turni
 - **Modifica Flessibile**: Possibilità di cancellare facilmente qualsiasi orario inserito
 - **Calcolo Automatico CCNL**: Retribuzione calcolata automaticamente basata su CCNL Metalmeccanico PMI Livello 5
-- **Verifica Conformità**: Validazione automatica dei dati con busta paga reale (B.Z. S.R.L.)
+- **Verifica Conformità**: Validazione automatica dei dati con CCNL Metalmeccanico PMI
 - **Database Locale SQLite**: Archiviazione dati offline sicura e veloce
 - **Sistema Backup Avanzato**: Backup locale automatico e ripristino dati con esportazione
 - **Dashboard Intelligente**: Panoramica mensile dettagliata con statistiche e analisi progressi
@@ -22,7 +22,7 @@ Un'applicazione React Native per Android per il tracciamento delle ore di lavoro
 ### ✅ Funzionalità Implementate
 
 - ✅ **Database SQLite**: Completamente funzionale con tutte le tabelle
-- ✅ **Calcoli CCNL**: Implementati e verificati con busta paga reale
+- ✅ **Calcoli CCNL**: Implementati e verificati secondo CCNL Metalmeccanico PMI
 - ✅ **Tutte le schermate**: Dashboard, inserimento orari, impostazioni complete
 - ✅ **Sistema backup**: Locale con esportazione e ripristino
 - ✅ **Validazione dati**: Controlli automatici e verifica conformità CCNL
@@ -31,7 +31,7 @@ Un'applicazione React Native per Android per il tracciamento delle ore di lavoro
 
 ### 🚀 Pronto per il Test
 
-L'app può essere immediatamente testata su Android tramite Expo Go. Tutti i calcoli sono basati sui dati reali della busta paga B.Z. S.R.L. di LIKAJ RENIS (maggio 2025).
+L'app può essere immediatamente testata su Android tramite Expo Go. Tutti i calcoli sono basati sui parametri standard del CCNL Metalmeccanico PMI Level 5.
 
 ## 📱 Installazione e Avvio
 
@@ -80,12 +80,12 @@ src/
 
 - **CCNL Metalmeccanico PMI - Livello 5 (Operaio Qualificato Specializzato)** (default)
 - Possibilità di scegliere altri contratti o importarli in qualsiasi momento dalle impostazioni
-- Retribuzione mensile: €2,839.07 (verificata da busta paga B.Z. S.R.L.)
+- Retribuzione mensile: €2,839.07 (CCNL Metalmeccanico PMI Level 5)
 - Retribuzione giornaliera: €109.195 (mensile/26)
 - Retribuzione oraria: €16.41081 (mensile/173)
 - Progressione di carriera: Livello 3 → Livello 5 (+2 livelli di avanzamento! 🎉)
 - Calcolo automatico di tariffe giornaliere e orarie
-- Verifica automatica conformità CCNL con dati busta paga
+- Verifica automatica conformità CCNL
 - **Gestione automatica dei festivi nazionali**: i giorni festivi italiani (inclusi Pasqua e Pasquetta) sono riconosciuti e le maggiorazioni CCNL applicate automaticamente.
 - **Personalizzazione maggiorazioni**: puoi modificare le percentuali delle maggiorazioni CCNL dalle impostazioni contratto.
 - **Importazione contratti**: puoi aggiungere nuovi contratti CCNL da file o da URL in qualsiasi momento, senza obbligo al primo avvio.
@@ -211,7 +211,7 @@ Form completo per registrare:
 
 ### ✨ **Precisione Calcoli**
 
-- Basata su **dati reali** di busta paga B.Z. S.R.L.
+- Basata su **parametri standard CCNL** Metalmeccanico PMI
 - **Verifica automatica** conformità CCNL Metalmeccanico PMI
 - **Calcoli certificati** per straordinari, viaggi e reperibilità
 - **Maggiorazioni CCNL** applicate automaticamente e mostrate in modo trasparente nelle impostazioni

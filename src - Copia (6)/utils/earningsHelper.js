@@ -45,7 +45,18 @@ export const createWorkEntryFromData = (entry, calculationServiceInstance = null
     workEnd2: workEntryData.work_end_2 || '',
     departureReturn: workEntryData.departure_return || '',
     arrivalCompany: workEntryData.arrival_company || '',
-    interventi: workEntryData.interventi || [],
+    // Parse interventi se è una stringa JSON
+    interventi: (() => {
+      if (typeof workEntryData.interventi === 'string') {
+        try {
+          return JSON.parse(workEntryData.interventi);
+        } catch (error) {
+          console.warn('Errore parsing interventi:', error);
+          return [];
+        }
+      }
+      return workEntryData.interventi || [];
+    })(),
     // Convert all boolean fields to 0/1
     mealLunchVoucher: workEntryData.meal_lunch_voucher === 1 ? 1 : 0,
     mealLunchCash: parseFloat(workEntryData.meal_lunch_cash || 0),
@@ -57,7 +68,10 @@ export const createWorkEntryFromData = (entry, calculationServiceInstance = null
     isStandbyDay: workEntryData.is_standby_day === 1 ? 1 : 0,
     standbyAllowance: workEntryData.standby_allowance === 1 ? 1 : 0,
     completamentoGiornata: workEntryData.completamento_giornata || 'nessuno',
-    dayType: workEntryData.day_type || workEntryData.dayType || 'lavorativa'
+    dayType: workEntryData.day_type || workEntryData.dayType || 'lavorativa',
+    // Campi per giorni fissi
+    isFixedDay: workEntryData.is_fixed_day === 1 || ['ferie', 'malattia', 'permesso', 'riposo'].includes(workEntryData.day_type || workEntryData.dayType),
+    fixedEarnings: parseFloat(workEntryData.fixed_earnings || 0)
   };
 
   // Log per debug risultato finale

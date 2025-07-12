@@ -1,8 +1,11 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import DatabaseService from '../services/DatabaseService';
 import DatabaseHealthService from '../services/DatabaseHealthService';
-import CalculationService from '../services/CalculationService';
+import { useCalculationService } from './useCalculationService';
+import { useVacationAutoCompile } from './useVacationAutoCompile';
 import { DEFAULT_SETTINGS } from '../constants';
+
+export { useCalculationService, useVacationAutoCompile };
 
 export const useDatabase = () => {
   const [isInitialized, setIsInitialized] = useState(false);
@@ -18,10 +21,57 @@ export const useDatabase = () => {
       setIsLoading(true);
       await DatabaseService.ensureInitialized();
       
-      // Initialize default settings if not exists
+      // Initialize default settings if not exists OR migrate old structure
       const existingSettings = await DatabaseService.getSetting('appSettings');
       if (!existingSettings) {
+        console.log('🆕 Primo avvio - impostazioni default');
         await DatabaseService.setSetting('appSettings', DEFAULT_SETTINGS);
+      } else {
+        // Verifica integrità del contratto
+        const contractValid = existingSettings.contract && 
+                             typeof existingSettings.contract === 'object' &&
+                             existingSettings.contract.monthlySalary &&
+                             existingSettings.contract.overtimeRates;
+        
+        if (!contractValid) {
+          console.log('🚨 Contratto corrotto - reset completo');
+          await DatabaseService.setSetting('appSettings', DEFAULT_SETTINGS);
+        } else {
+          // Migrazione: aggiungi netCalculation se non esiste o ha struttura vecchia
+          let needsUpdate = false;
+          const updatedSettings = { ...existingSettings };
+        
+        if (!existingSettings.netCalculation) {
+          updatedSettings.netCalculation = {
+            method: existingSettings.netCalculationMethod || 'irpef',
+            customDeductionRate: existingSettings.customNetPercentage || 32,
+            useActualAmount: false // Default: usa stima annuale
+          };
+          needsUpdate = true;
+        } else if (existingSettings.netCalculation.useActualAmount === undefined) {
+          // Migrazione: aggiungi useActualAmount se manca
+          updatedSettings.netCalculation = {
+            ...existingSettings.netCalculation,
+            useActualAmount: false
+          };
+          needsUpdate = true;
+        }
+        
+        // Pulisci le vecchie proprietà se esistono
+        if (existingSettings.netCalculationMethod !== undefined) {
+          delete updatedSettings.netCalculationMethod;
+          needsUpdate = true;
+        }
+        if (existingSettings.customNetPercentage !== undefined) {
+          delete updatedSettings.customNetPercentage;
+          needsUpdate = true;
+        }
+        
+          if (needsUpdate) {
+            console.log('🔄 Migrazione impostazioni...');
+            await DatabaseService.setSetting('appSettings', updatedSettings);
+          }
+        }
       }
       
       setIsInitialized(true);
@@ -111,10 +161,12 @@ export const useWorkEntries = (year, month, showAllEntries = false) => {
       loadEntries(true);
     }
   }, [year, month]);
+  const calculationService = useCalculationService();
+
   const addEntry = async (workEntry) => {
     try {
       const settings = await DatabaseService.getSetting('appSettings', DEFAULT_SETTINGS);
-      const earnings = CalculationService.calculateDailyEarnings(workEntry, settings);
+      const earnings = calculationService.calculateDailyEarnings(workEntry, settings);
       
       const entryWithEarnings = {
         ...workEntry,
@@ -133,7 +185,7 @@ export const useWorkEntries = (year, month, showAllEntries = false) => {
   const updateEntry = async (id, workEntry) => {
     try {
       const settings = await DatabaseService.getSetting('appSettings', DEFAULT_SETTINGS);
-      const earnings = CalculationService.calculateDailyEarnings(workEntry, settings);
+      const earnings = calculationService.calculateDailyEarnings(workEntry, settings);
       
       const entryWithEarnings = {
         ...workEntry,
@@ -145,18 +197,9 @@ export const useWorkEntries = (year, month, showAllEntries = false) => {
     } catch (err) {
       console.error('Error updating work entry:', err);
       throw err;
-    }  };
-
-  return {
-    entries,
-    isLoading,
-    error,
-    addEntry,
-    updateEntry,
-    deleteEntry,
-    refreshEntries: () => loadEntries(true),    canRetry: retryCount < maxRetries,
-    retryCount
+    }
   };
+
   const deleteEntry = async (id) => {
     try {
       await DatabaseService.deleteWorkEntry(id);
@@ -165,7 +208,9 @@ export const useWorkEntries = (year, month, showAllEntries = false) => {
       console.error('Error deleting work entry:', err);
       throw err;
     }
-  };  return {
+  };
+
+  return {
     entries,
     isLoading,
     error,
@@ -193,11 +238,22 @@ export const useSettings = () => {
 
     try {
       setIsLoading(true);
+      console.log('🔍 HOOK - loadSettings: Caricamento da database...');
+      
       const appSettings = await DatabaseService.getSetting('appSettings', DEFAULT_SETTINGS);
+      
+      console.log('🔍 HOOK - loadSettings: Dati caricati dal database');
+      if (appSettings?.netCalculation) {
+        console.log('- NetCalculation trovato:', JSON.stringify(appSettings.netCalculation, null, 2));
+      } else {
+        console.log('- NetCalculation NON trovato, usando default');
+      }
+      
       setSettings(appSettings);
       setError(null);
-      setRetryCount(0);    } catch (err) {
-      console.error('Error loading settings:', err);
+      setRetryCount(0);
+    } catch (err) {
+      console.error('❌ HOOK - Error loading settings:', err);
       await DatabaseHealthService.logDatabaseError('loadSettings', err);
       setRetryCount(prev => prev + 1);
       
@@ -215,11 +271,17 @@ export const useSettings = () => {
 
   const updateSettings = async (newSettings) => {
     try {
+      console.log('🔧 HOOK - updateSettings chiamato');
+      console.log('- Nuove impostazioni da salvare:', JSON.stringify(newSettings.netCalculation, null, 2));
+      
       await DatabaseService.setSetting('appSettings', newSettings);
       setSettings(newSettings);
       setRetryCount(0);
+      
+      console.log('✅ HOOK - updateSettings completato');
+      console.log('- Settings state aggiornato:', JSON.stringify(newSettings.netCalculation, null, 2));
     } catch (err) {
-      console.error('Error updating settings:', err);
+      console.error('❌ HOOK - Error updating settings:', err);
       throw err;
     }
   };
@@ -240,7 +302,10 @@ export const useSettings = () => {
     error,
     updateSettings,
     updatePartialSettings,
-    refreshSettings: () => loadSettings(true),
+    refreshSettings: () => {
+      console.log('🔄 HOOK - refreshSettings chiamato, ricaricando da database...');
+      return loadSettings(true);
+    },
     canRetry: retryCount < maxRetries
   };
 };
@@ -300,35 +365,62 @@ export const useStandbyCalendar = (year, month) => {
 
 export const useMonthlySummary = (year, month) => {
   const [summary, setSummary] = useState(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
   const [lastRefreshTime, setLastRefreshTime] = useState(0);
-  const { entries, refreshEntries, canRetry: entriesCanRetry } = useWorkEntries(year, month);
-  const { settings, canRetry: settingsCanRetry } = useSettings();
+  const { settings } = useSettings();
+  const calculationService = useCalculationService();
+  const [entries, setEntries] = useState([]);
   const minRefreshInterval = 1000; // 1 secondo
-
+  
+  // Carica gli inserimenti del mese
   useEffect(() => {
-    if (entries.length > 0 && settings) {
-      calculateSummary();
-    } else {
-      setSummary(null);
-    }
-  }, [entries, settings]);
+    const loadEntries = async () => {
+      try {
+        setIsLoading(true);
+        if (!year || !month) return;
+        
+        // Usa la funzione getWorkEntries che richiede year e month
+        const data = await DatabaseService.getWorkEntries(year, month);
+        setEntries(data || []);
+      } catch (err) {
+        console.error('Error loading month entries:', err);
+        setError(err);
+      }
+    };
+    
+    loadEntries();
+  }, [year, month]);
+  
+  // Calcola il riepilogo quando entrambi entries e settings sono pronti
+  useEffect(() => {
+    const calculateSummary = async () => {
+      try {
+        if (!entries || !settings || !Array.isArray(entries) || !year || !month) {
+          console.log('Skip calculation: missing data or invalid parameters', { 
+            hasEntries: Boolean(entries), 
+            isArray: Array.isArray(entries), 
+            entriesLength: entries ? entries.length : 0,
+            hasSettings: Boolean(settings),
+            year: year,
+            month: month
+          });
+          return;
+        }
+        
+        const monthlySummary = calculationService.calculateMonthlySummary(entries, settings, month, year);
+        setSummary(monthlySummary);
+        setError(null);
+      } catch (err) {
+        console.error('Error calculating monthly summary:', err);
+        setError(err);
+      } finally {
+        setIsLoading(false);
+      }
+    };
 
-  const calculateSummary = async () => {
-    try {
-      setIsLoading(true);
-      const monthlySummary = CalculationService.calculateMonthlySummary(entries, settings);
-      setSummary(monthlySummary);
-      setError(null);
-    } catch (err) {
-      console.error('Error calculating monthly summary:', err);
-      setError(err);
-      setSummary(null);
-    } finally {
-      setIsLoading(false);
-    }
-  };
+    calculateSummary();
+  }, [entries, settings, calculationService]);
 
   const refreshSummary = async (forceRefresh = false) => {
     // Prevenzione spam di refresh
@@ -338,32 +430,22 @@ export const useMonthlySummary = (year, month) => {
       return;
     }
 
-    // Non tentare refresh se non ci sono retry disponibili
-    if (!entriesCanRetry && !settingsCanRetry && !forceRefresh) {
-      console.log('Dashboard: Nessun retry disponibile, saltando refresh...');
-      return;
-    }
-
     try {
       console.log('Dashboard: Refreshing summary and entries...');
       setLastRefreshTime(now);
+      setIsLoading(true);
       
-      // Prima ricarica gli entries dal database
-      await refreshEntries();
-      // Il summary viene ricalcolato automaticamente tramite useEffect
-      
-      console.log('Dashboard: Refresh completed successfully');
+      // Reload entries usando getWorkEntries che richiede year e month
+      const data = await DatabaseService.getWorkEntries(year, month);
+      setEntries(data || []);
     } catch (err) {
-      console.error('Error refreshing summary:', err);
+      console.error('Error refreshing monthly summary:', err);
       setError(err);
     }
   };
 
-  return {
-    summary,
-    isLoading,
-    error,
-    refreshSummary,
-    canRefresh: entriesCanRetry || settingsCanRetry
-  };
+  // Può effettuare il refresh
+  const canRefresh = !isLoading;
+
+  return { summary, isLoading, error, refreshSummary, canRefresh };
 };

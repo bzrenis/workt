@@ -29,12 +29,13 @@ This is a React Native Expo application for tracking work hours with automatic s
 - Follow React Native best practices for performance
 
 ## Salary Calculation Logic
-Base the calculations on Italian CCNL Metalmeccanico PMI Level 5:
-- Monthly salary: €2,839.07
-- Daily rate: €109.195
-- Hourly rate: €16.41081
+Base the calculations on Italian CCNL Metalmeccanico PMI Level 5 (configurable for multi-user):
+- Monthly salary: €2,839.07 (Level 5 standard, user configurable)
+- Daily rate: €109.195 (calculated from monthly)
+- Hourly rate: €16.41081 (calculated from monthly)
 - Overtime rates: +20% day, +25% night until 22h, +35% night after 22h
-- Travel compensation: 100% of hourly rate (configurable)
+- Travel compensation: 100% of hourly rate (configurable per user)
+- Multi-user support: each user can configure their own contract parameters
 
 When writing code, prioritize:
 1. Type safety and data validation
@@ -42,3 +43,4 @@ When writing code, prioritize:
 3. Italian localization
 4. Mobile-first responsive design
 5. Offline-first functionality
+6. Multi-user privacy and data separation

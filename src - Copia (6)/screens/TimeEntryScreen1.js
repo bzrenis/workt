@@ -564,7 +564,7 @@ const TimeEntryScreen = ({ navigation, route }) => {
                 flexDirection: 'row',
                 alignItems: 'center'
               }}>
-                <Ionicons name="car-sport-outline" size={14} color="#607D8B" style={{marginRight: 4}} />
+                <Ionicons name="car-outline" size={14} color="#607D8B" style={{marginRight: 4}} />
                 <Text style={{fontSize: 13, color: '#555'}}>
                   {item.vehicle_driven || item.vehicleDriven}
                 </Text>

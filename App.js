@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -17,9 +17,14 @@ import MealSettingsScreen from './src/screens/MealSettingsScreen';
 import BackupScreen from './src/screens/BackupScreen';
 import TimeEntryForm from './src/screens/TimeEntryForm';
 import NetCalculationSettingsScreen from './src/screens/NetCalculationSettingsScreen';
+import VacationManagementScreen from './src/screens/VacationManagementScreen';
+import VacationRequestForm from './src/screens/VacationRequestForm';
+import VacationSettingsScreen from './src/screens/VacationSettingsScreen';
 
 import { useDatabase } from './src/hooks';
 import DatabaseHealthService from './src/services/DatabaseHealthService';
+import NotificationService from './src/services/NotificationService';
+import DebugSettingsScreen from './src/screens/DebugSettingsScreen';
 
 const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
@@ -58,6 +63,21 @@ function SettingsStack() {
         options={{ title: 'Rimborsi Pasti' }}
       />
       <Stack.Screen 
+        name="VacationManagement" 
+        component={VacationManagementScreen} 
+        options={{ title: 'Ferie e Permessi' }}
+      />
+      <Stack.Screen 
+        name="VacationRequestForm" 
+        component={VacationRequestForm} 
+        options={{ title: 'Richiesta Ferie/Permessi' }}
+      />
+      <Stack.Screen 
+        name="VacationSettings" 
+        component={VacationSettingsScreen} 
+        options={{ title: 'Configurazione Ferie/Permessi' }}
+      />
+      <Stack.Screen 
         name="Backup" 
         component={BackupScreen} 
         options={{ title: 'Backup e Ripristino' }}
@@ -66,6 +86,16 @@ function SettingsStack() {
         name="TravelAllowanceSettings" 
         component={require('./src/screens/TravelAllowanceSettings').default} 
         options={{ title: 'Indennità Trasferta' }}
+      />
+      <Stack.Screen 
+        name="NotificationSettings" 
+        component={require('./src/screens/NotificationSettingsScreen').default} 
+        options={{ title: 'Notifiche' }}
+      />
+      <Stack.Screen 
+        name="DebugSettings" 
+        component={DebugSettingsScreen} 
+        options={{ title: 'Debug Settings' }}
       />
     </Stack.Navigator>
   );
@@ -127,6 +157,19 @@ export default function App() {
     if (isInitialized) {
       console.log('App: Database initialized, starting health monitoring...');
       DatabaseHealthService.startPeriodicHealthCheck(30000); // Check ogni 30 secondi
+      
+      // Inizializza il servizio notifiche
+      console.log('App: Initializing notification service...');
+      NotificationService.setupNotificationListener();
+      
+      // Programma le notifiche se abilitate
+      NotificationService.getSettings().then(settings => {
+        if (settings.enabled) {
+          NotificationService.scheduleNotifications(settings);
+        }
+      }).catch(error => {
+        console.log('App: Error loading notification settings (non-critical):', error.message);
+      });
       
       return () => {
         console.log('App: Stopping database health monitoring...');

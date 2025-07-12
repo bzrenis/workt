@@ -14,7 +14,7 @@
 - **Gestione trasferte** e viaggi con calcoli automatici
 
 #### ✅ Sistema di Calcolo Stipendio
-- **Stipendio base**: €2,839.07 mensili
+- **Stipendio base**: €2,839.07 mensili (CCNL Metalmeccanico PMI Level 5)
 - **Paga oraria**: €16.41081
 - **Straordinari**: +20% giorno, +25% notte fino 22h, +35% notte dopo 22h
 - **Calcolo netto reale** con trattenute IRPEF/INPS accurate
@@ -50,7 +50,7 @@ src/
 ### 🔧 Configurazioni CCNL
 
 #### Tariffe Base (Livello 5)
-- **Stipendio mensile**: €2,839.07
+- **Stipendio mensile**: €2,839.07 (CCNL Metalmeccanico PMI Level 5)
 - **Paga giornaliera**: €109.195
 - **Paga oraria**: €16.41081
 

@@ -74,7 +74,7 @@ const ContractSettingsScreen = ({ navigation }) => {
     setFormData({
       monthlySalary: salary.toString(),
       travelCompensationRate: (settings.travelCompensationRate * 100).toString(),
-      saturdayBonus: contract.overtimeRates?.saturday ? ((contract.overtimeRates.saturday * 100 - 100).toString()) : '15',
+      saturdayBonus: contract.overtimeRates?.saturday ? ((contract.overtimeRates.saturday * 100 - 100).toString()) : '25',
     });
     calculateRates(salary);
   }, [settings]);
@@ -124,7 +124,7 @@ const ContractSettingsScreen = ({ navigation }) => {
     try {
       const monthlySalary = getSafeSalary(formData.monthlySalary);
       const travelRate = parseFloat(formData.travelCompensationRate) / 100;
-      const saturdayBonus = typeof formData.saturdayBonus === 'string' ? parseFloat(formData.saturdayBonus.replace(',', '.')) : 15;
+      const saturdayBonus = typeof formData.saturdayBonus === 'string' ? parseFloat(formData.saturdayBonus.replace(',', '.')) : 25;
 
       if (isNaN(monthlySalary) || monthlySalary <= 0) {
         Alert.alert('Errore', 'Inserisci una retribuzione mensile valida');
@@ -132,6 +132,10 @@ const ContractSettingsScreen = ({ navigation }) => {
       }
       if (isNaN(travelRate) || travelRate < 0 || travelRate > 2) {
         Alert.alert('Errore', 'Inserisci una percentuale di retribuzione viaggio valida (0-200)');
+        return;
+      }
+      if (isNaN(saturdayBonus) || saturdayBonus < 0 || saturdayBonus > 100) {
+        Alert.alert('Errore', 'Inserisci una maggiorazione sabato valida (0-100%)');
         return;
       }
 
@@ -147,7 +151,7 @@ const ContractSettingsScreen = ({ navigation }) => {
         hourlyRate: calculatedRates?.officialHourlyRate || (monthlySalary / 173),
         overtimeRates: {
           ...selectedContractTemplate.overtimeRates,
-          saturday: 1 + (isNaN(saturdayBonus) ? 0.15 : saturdayBonus / 100),
+          saturday: 1 + (isNaN(saturdayBonus) ? 0.25 : saturdayBonus / 100),
         },
         bonusRates: bonusRates,
       };
@@ -439,9 +443,12 @@ const ContractSettingsScreen = ({ navigation }) => {
         </TouchableOpacity>
         {showBonusSettings && (
           <View style={{backgroundColor:'#f9f9f9',padding:10,borderRadius:8,marginBottom:12}}>
-            {/* Campo sabato */}
+            <Text style={{fontSize:13,color:'#666',marginBottom:8,fontStyle:'italic'}}>
+              Configura le maggiorazioni CCNL. La maggiorazione del sabato attualmente è impostata al 25% secondo CCNL Metalmeccanico.
+            </Text>
+            {/* Campo maggiorazione sabato */}
             <View key="saturday" style={{flexDirection:'row',alignItems:'center',marginBottom:6}}>
-              <Text style={{flex:2}}>Sabato</Text>
+              <Text style={{flex:2,fontWeight:'bold',color:'#1976d2'}}>Maggiorazione Sabato</Text>
               <TextInput
                 style={{flex:1,borderWidth:1,borderColor:'#ddd',borderRadius:4,padding:4,marginLeft:8}}
                 value={formData.saturdayBonus}
@@ -474,8 +481,8 @@ const ContractSettingsScreen = ({ navigation }) => {
             ))}
             <TouchableOpacity style={{marginTop:8,backgroundColor:'#1976d2',padding:8,borderRadius:6,alignSelf:'flex-end'}} onPress={async()=>{
               // Aggiorna anche la maggiorazione sabato nel contratto
-              const saturdayBonus = typeof formData.saturdayBonus === 'string' ? parseFloat(formData.saturdayBonus.replace(',', '.')) : 15;
-              await updatePartialSettings({ contract: { ...settings.contract, bonusRates, overtimeRates: { ...settings.contract.overtimeRates, saturday: 1 + (isNaN(saturdayBonus) ? 0.15 : saturdayBonus / 100) } } });
+              const saturdayBonus = typeof formData.saturdayBonus === 'string' ? parseFloat(formData.saturdayBonus.replace(',', '.')) : 25;
+              await updatePartialSettings({ contract: { ...settings.contract, bonusRates, overtimeRates: { ...settings.contract.overtimeRates, saturday: 1 + (isNaN(saturdayBonus) ? 0.25 : saturdayBonus / 100) } } });
               setShowBonusSettings(false);
               Alert.alert('Salvato','Maggiorazioni personalizzate salvate!');
             }}>

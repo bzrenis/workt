@@ -30,6 +30,7 @@ const dayTypeLabels = {
   permesso: { label: 'Permesso', color: '#ef6c00', icon: 'clock-outline' },
   malattia: { label: 'Malattia', color: '#d32f2f', icon: 'medical-bag' },
   riposo: { label: 'Riposo compensativo', color: '#757575', icon: 'sleep' },
+  festivo: { label: 'Festivo', color: '#9c27b0', icon: 'calendar-star' },
 };
 
 // Componente per il badge informativo migliorato
@@ -86,18 +87,18 @@ const EarningsBreakdown = ({ breakdown, onPress }) => {
   const [expanded, setExpanded] = useState(false);
 
   const components = [];
-  if (breakdown.ordinary?.total > 0) {
-    components.push({ label: 'Ordinario', value: breakdown.ordinary.total, color: '#2196F3' });
+  if (breakdown?.ordinary?.total > 0) {
+    components.push({ label: 'Ordinario', value: breakdown?.ordinary?.total, color: '#2196F3' });
   }
   if (breakdown.standby?.totalEarnings > 0) {
-    const interventions = breakdown.standby.totalEarnings - (breakdown.standby.dailyIndemnity || 0);
+    const interventions = (breakdown.standby?.totalEarnings || 0) - (breakdown.standby?.dailyIndemnity || 0);
     components.push({ label: 'Interventi', value: interventions, color: '#FF9800' });
   }
-  if (breakdown.allowances?.standby > 0) {
-    components.push({ label: 'Ind. Reperibilità', value: breakdown.allowances.standby, color: '#4CAF50' });
+  if (breakdown?.allowances?.standby > 0) {
+    components.push({ label: 'Ind. Reperibilità', value: breakdown?.allowances?.standby, color: '#4CAF50' });
   }
-  if (breakdown.allowances?.travel > 0) {
-    components.push({ label: 'Ind. Trasferta', value: breakdown.allowances.travel, color: '#9C27B0' });
+  if (breakdown?.allowances?.travel > 0) {
+    components.push({ label: 'Ind. Trasferta', value: breakdown?.allowances?.travel, color: '#9C27B0' });
   }
 
   return (
@@ -111,7 +112,7 @@ const EarningsBreakdown = ({ breakdown, onPress }) => {
     >
       <View style={styles.earningsHeader}>
         <Text style={styles.earningsTotal}>
-          {formatCurrency(breakdown.totalEarnings)}
+          {formatCurrency(breakdown?.totalEarnings || 0)}
         </Text>
         <MaterialCommunityIcons 
           name={expanded ? 'chevron-up' : 'chevron-down'} 
@@ -263,14 +264,14 @@ const AdvancedHoursBreakdown = ({ breakdown, settings }) => {
   };
 
   const hasOrdinaryHours = breakdown.ordinary?.hours && 
-    (breakdown.ordinary.hours.lavoro_giornaliera > 0 || 
-     breakdown.ordinary.hours.viaggio_giornaliera > 0 || 
-     breakdown.ordinary.hours.lavoro_extra > 0 || 
-     breakdown.ordinary.hours.viaggio_extra > 0);
+    (breakdown?.ordinary?.hours.lavoro_giornaliera > 0 || 
+     breakdown?.ordinary?.hours.viaggio_giornaliera > 0 || 
+     breakdown?.ordinary?.hours.lavoro_extra > 0 || 
+     breakdown?.ordinary?.hours.viaggio_extra > 0);
 
   const hasStandbyHours = breakdown.standby?.workHours && 
-    (Object.values(breakdown.standby.workHours).some(h => h > 0) || 
-     Object.values(breakdown.standby.travelHours).some(h => h > 0));
+    (Object.values(breakdown?.standby?.workHours).some(h => h > 0) || 
+     Object.values(breakdown?.standby?.travelHours).some(h => h > 0));
 
   if (!hasOrdinaryHours && !hasStandbyHours) return null;
 
@@ -289,37 +290,37 @@ const AdvancedHoursBreakdown = ({ breakdown, settings }) => {
           
           {/* Prime 8 ore giorni feriali */}
           {(!breakdown.details?.isSaturday && !breakdown.details?.isSunday && !breakdown.details?.isHoliday) &&
-            (breakdown.ordinary.hours.lavoro_giornaliera > 0 || breakdown.ordinary.hours.viaggio_giornaliera > 0) && (
+            (breakdown?.ordinary?.hours.lavoro_giornaliera > 0 || breakdown?.ordinary?.hours.viaggio_giornaliera > 0) && (
               <View style={styles.breakdownItemContainer}>
                 <DetailRow 
                   label="Giornaliero (prime 8h)" 
                   value={formatSafeHours(
-                    (breakdown.ordinary.hours.lavoro_giornaliera || 0) +
-                    (breakdown.ordinary.hours.viaggio_giornaliera || 0)
+                    (breakdown?.ordinary?.hours.lavoro_giornaliera || 0) +
+                    (breakdown?.ordinary?.hours.viaggio_giornaliera || 0)
                   )}
                   calculation={(() => {
-                    const totalOrdinaryHours = (breakdown.ordinary.hours.lavoro_giornaliera || 0) + 
-                                             (breakdown.ordinary.hours.viaggio_giornaliera || 0);
+                    const totalOrdinaryHours = (breakdown?.ordinary?.hours.lavoro_giornaliera || 0) + 
+                                             (breakdown?.ordinary?.hours.viaggio_giornaliera || 0);
                     const dailyRate = settings.contract?.dailyRate || 109.19;
                     if (totalOrdinaryHours >= 8) {
-                      return `${dailyRate.toFixed(2).replace('.', ',')} € × 1 giorno = ${breakdown.ordinary.earnings.giornaliera.toFixed(2).replace('.', ',')} €`;
+                      return `${dailyRate.toFixed(2).replace('.', ',')} € × 1 giorno = ${breakdown?.ordinary?.earnings.giornaliera.toFixed(2).replace('.', ',')} €`;
                     } else {
                       const percentage = (totalOrdinaryHours / 8 * 100).toFixed(0);
-                      return `${dailyRate.toFixed(2).replace('.', ',')} € × ${percentage}% = ${breakdown.ordinary.earnings.giornaliera.toFixed(2).replace('.', ',')} €`;
+                      return `${dailyRate.toFixed(2).replace('.', ',')} € × ${percentage}% = ${breakdown?.ordinary?.earnings.giornaliera.toFixed(2).replace('.', ',')} €`;
                     }
                   })()}
                 />
-                {breakdown.ordinary.hours.lavoro_giornaliera > 0 && (
+                {breakdown?.ordinary?.hours.lavoro_giornaliera > 0 && (
                   <DetailRow 
                     label="- Lavoro" 
-                    value={formatSafeHours(breakdown.ordinary.hours.lavoro_giornaliera)}
+                    value={formatSafeHours(breakdown?.ordinary?.hours.lavoro_giornaliera)}
                     isSubitem={true}
                   />
                 )}
-                {breakdown.ordinary.hours.viaggio_giornaliera > 0 && (
+                {breakdown?.ordinary?.hours.viaggio_giornaliera > 0 && (
                   <DetailRow 
                     label="- Viaggio" 
-                    value={formatSafeHours(breakdown.ordinary.hours.viaggio_giornaliera)}
+                    value={formatSafeHours(breakdown?.ordinary?.hours.viaggio_giornaliera)}
                     isSubitem={true}
                   />
                 )}
@@ -328,31 +329,31 @@ const AdvancedHoursBreakdown = ({ breakdown, settings }) => {
 
           {/* Lavoro/Viaggio weekend/festivi */}
           {(breakdown.details?.isSaturday || breakdown.details?.isSunday || breakdown.details?.isHoliday) &&
-            (breakdown.ordinary.hours.lavoro_giornaliera > 0 || breakdown.ordinary.hours.viaggio_giornaliera > 0) && (
+            (breakdown?.ordinary?.hours.lavoro_giornaliera > 0 || breakdown?.ordinary?.hours.viaggio_giornaliera > 0) && (
               <DetailRow 
                 label={`Lavoro ordinario ${breakdown.details?.isSunday ? 'domenica' : 
                        breakdown.details?.isHoliday ? 'festivo' : 'sabato'}`}
-                value={formatSafeHours((breakdown.ordinary.hours.lavoro_giornaliera || 0) + 
-                                      (breakdown.ordinary.hours.viaggio_giornaliera || 0))}
+                value={formatSafeHours((breakdown?.ordinary?.hours.lavoro_giornaliera || 0) + 
+                                      (breakdown?.ordinary?.hours.viaggio_giornaliera || 0))}
                 calculation={(() => {
                   const base = settings.contract?.hourlyRate || 16.41;
                   const multiplier = breakdown.details?.isSunday || breakdown.details?.isHoliday 
                     ? settings.contract?.overtimeRates?.holiday || 1.3
                     : settings.contract?.overtimeRates?.saturday || 1.25;
-                  const ore = (breakdown.ordinary.hours.lavoro_giornaliera || 0) + 
-                            (breakdown.ordinary.hours.viaggio_giornaliera || 0);
+                  const ore = (breakdown?.ordinary?.hours.lavoro_giornaliera || 0) + 
+                            (breakdown?.ordinary?.hours.viaggio_giornaliera || 0);
                   return `${base.toFixed(2).replace('.', ',')} € × ${multiplier.toFixed(2).replace('.', ',')} × ${formatSafeHours(ore)} = ${(base * multiplier * ore).toFixed(2).replace('.', ',')} €`;
                 })()}
               />
           )}
 
           {/* Ore extra */}
-          {breakdown.ordinary.hours.lavoro_extra > 0 && (
+          {breakdown?.ordinary?.hours.lavoro_extra > 0 && (
             <DetailRow 
               label={`Lavoro extra (oltre 8h)${breakdown.details?.isSaturday ? ' (Sabato)' : 
                      breakdown.details?.isSunday ? ' (Domenica)' : 
                      breakdown.details?.isHoliday ? ' (Festivo)' : ''}`}
-              value={formatSafeHours(breakdown.ordinary.hours.lavoro_extra)}
+              value={formatSafeHours(breakdown?.ordinary?.hours.lavoro_extra)}
               calculation={(() => {
                 const base = settings.contract?.hourlyRate || 16.41;
                 let overtime;
@@ -364,26 +365,26 @@ const AdvancedHoursBreakdown = ({ breakdown, settings }) => {
                   overtime = settings.contract?.overtimeRates?.day || 1.2;
                 }
                 const rate = base * overtime;
-                return `${rate.toFixed(2).replace('.', ',')} € × ${formatSafeHours(breakdown.ordinary.hours.lavoro_extra)} = ${breakdown.ordinary.earnings.lavoro_extra.toFixed(2).replace('.', ',')} €`;
+                return `${rate.toFixed(2).replace('.', ',')} € × ${formatSafeHours(breakdown?.ordinary?.hours.lavoro_extra)} = ${breakdown?.ordinary?.earnings.lavoro_extra.toFixed(2).replace('.', ',')} €`;
               })()}
             />
           )}
 
-          {breakdown.ordinary.hours.viaggio_extra > 0 && (
+          {breakdown?.ordinary?.hours.viaggio_extra > 0 && (
             <DetailRow 
               label="Viaggio extra (oltre 8h)"
-              value={formatSafeHours(breakdown.ordinary.hours.viaggio_extra)}
+              value={formatSafeHours(breakdown?.ordinary?.hours.viaggio_extra)}
               calculation={(() => {
                 const base = settings.contract?.hourlyRate || 16.41;
                 const rate = base * (settings.travelCompensationRate || 1.0);
-                return `${rate.toFixed(2).replace('.', ',')} € × ${formatSafeHours(breakdown.ordinary.hours.viaggio_extra)} = ${breakdown.ordinary.earnings.viaggio_extra.toFixed(2).replace('.', ',')} €`;
+                return `${rate.toFixed(2).replace('.', ',')} € × ${formatSafeHours(breakdown?.ordinary?.hours.viaggio_extra)} = ${breakdown?.ordinary?.earnings.viaggio_extra.toFixed(2).replace('.', ',')} €`;
               })()}
             />
           )}
 
           <DetailRow 
             label="Totale ordinario" 
-            value={formatSafeAmount(breakdown.ordinary.total || 0)}
+            value={formatSafeAmount(breakdown?.ordinary?.total || 0)}
             highlight={true}
           />
         </>
@@ -394,62 +395,94 @@ const AdvancedHoursBreakdown = ({ breakdown, settings }) => {
         <>
           <Text style={styles.breakdownSubtitle}>Interventi Reperibilità</Text>
           
-          {breakdown.standby.workHours?.ordinary > 0 && (
+          {breakdown?.standby?.workHours?.ordinary > 0 && (
             <DetailRow 
               label="Lavoro diurno"
-              value={formatSafeHours(breakdown.standby.workHours.ordinary)}
+              value={formatSafeHours(breakdown?.standby?.workHours.ordinary)}
               calculation={formatRateCalc(
-                breakdown.standby.workHours.ordinary,
+                breakdown?.standby?.workHours.ordinary,
                 settings.contract?.hourlyRate || 16.41,
-                breakdown.standby.workEarnings?.ordinary || 0
+                breakdown?.standby?.workEarnings?.ordinary || 0
               )}
             />
           )}
           
-          {breakdown.standby.workHours?.night > 0 && (
+          {breakdown?.standby?.workHours?.evening > 0 && (
             <DetailRow 
-              label="Lavoro notturno (+25%)"
-              value={formatSafeHours(breakdown.standby.workHours.night)}
+              label="Lavoro serale (+25%)"
+              value={formatSafeHours(breakdown?.standby?.workHours.evening)}
               calculation={formatRateCalc(
-                breakdown.standby.workHours.night,
-                (settings.contract?.hourlyRate || 16.41) * 1.25,
-                breakdown.standby.workEarnings?.night || 0
+                breakdown?.standby?.workHours.evening,
+                (settings.contract?.hourlyRate || 16.41) * (settings.contract?.overtimeRates?.nightUntil22 || 1.25),
+                breakdown?.standby?.workEarnings?.evening || 0
               )}
             />
           )}
           
-          {breakdown.standby.travelHours?.ordinary > 0 && (
+          {breakdown?.standby?.workHours?.night > 0 && (
+            <DetailRow 
+              label="Lavoro notturno (+35%)"
+              value={formatSafeHours(breakdown?.standby?.workHours.night)}
+              calculation={formatRateCalc(
+                breakdown?.standby?.workHours.night,
+                (settings.contract?.hourlyRate || 16.41) * (settings.contract?.overtimeRates?.nightAfter22 || 1.35),
+                breakdown?.standby?.workEarnings?.night || 0
+              )}
+            />
+          )}
+          
+          {breakdown?.standby?.travelHours?.ordinary > 0 && (
             <DetailRow 
               label="Viaggio diurno"
-              value={formatSafeHours(breakdown.standby.travelHours.ordinary)}
-              duration={`Durata: ${formatSafeHours(breakdown.standby.travelHours.ordinary)}`}
+              value={formatSafeHours(breakdown?.standby?.travelHours.ordinary)}
+              duration={`Durata: ${formatSafeHours(breakdown?.standby?.travelHours.ordinary)}`}
               calculation={formatRateCalc(
-                breakdown.standby.travelHours.ordinary,
+                breakdown?.standby?.travelHours.ordinary,
                 (settings.contract?.hourlyRate || 16.41) * (settings.travelCompensationRate || 1.0),
-                breakdown.standby.travelEarnings?.ordinary || 0
+                breakdown?.standby?.travelEarnings?.ordinary || 0
               )}
             />
           )}
           
-          {breakdown.standby.travelHours?.night > 0 && (
+          {breakdown?.standby?.travelHours?.evening > 0 && (
             <DetailRow 
-              label="Viaggio notturno (+25%)"
-              value={formatSafeHours(breakdown.standby.travelHours.night)}
-              duration={`Durata: ${formatSafeHours(breakdown.standby.travelHours.night)}`}
+              label="Viaggio serale (+25%)"
+              value={formatSafeHours(breakdown?.standby?.travelHours.evening)}
+              duration={`Durata: ${formatSafeHours(breakdown?.standby?.travelHours.evening)}`}
               calculation={formatRateCalc(
-                breakdown.standby.travelHours.night,
-                (settings.contract?.hourlyRate || 16.41) * 1.25 * (settings.travelCompensationRate || 1.0),
-                breakdown.standby.travelEarnings?.night || 0
+                breakdown?.standby?.travelHours.evening,
+                (settings.contract?.hourlyRate || 16.41) * (settings.contract?.overtimeRates?.nightUntil22 || 1.25) * (settings.travelCompensationRate || 1.0),
+                breakdown?.standby?.travelEarnings?.evening || 0
+              )}
+            />
+          )}
+          
+          {breakdown?.standby?.travelHours?.night > 0 && (
+            <DetailRow 
+              label="Viaggio notturno (+35%)"
+              value={formatSafeHours(breakdown?.standby?.travelHours.night)}
+              duration={`Durata: ${formatSafeHours(breakdown?.standby?.travelHours.night)}`}
+              calculation={formatRateCalc(
+                breakdown?.standby?.travelHours.night,
+                (settings.contract?.hourlyRate || 16.41) * (settings.contract?.overtimeRates?.nightAfter22 || 1.35) * (settings.travelCompensationRate || 1.0),
+                breakdown?.standby?.travelEarnings?.night || 0
               )}
             />
           )}
 
           {/* Totale reperibilità (lavoro + viaggi interventi) */}
           {(() => {
-            const totalStandbyWork = Object.values(breakdown.standby.workHours || {}).reduce((sum, h) => sum + h, 0);
-            const totalStandbyTravel = Object.values(breakdown.standby.travelHours || {}).reduce((sum, h) => sum + h, 0);
+            const totalStandbyWork = Object.values(breakdown?.standby?.workHours || {}).reduce((sum, h) => sum + h, 0);
+            const totalStandbyTravel = Object.values(breakdown?.standby?.travelHours || {}).reduce((sum, h) => sum + h, 0);
             const totalStandbyHours = totalStandbyWork + totalStandbyTravel;
             const totalStandbyEarnings = (breakdown.standby?.totalEarnings || 0) - (breakdown.standby?.dailyIndemnity || 0);
+            
+            console.log(`🔍 DEBUG Totale reperibilità:`);
+            console.log(`   workHours:`, breakdown?.standby?.workHours);
+            console.log(`   travelHours:`, breakdown?.standby?.travelHours);
+            console.log(`   totalStandbyWork: ${totalStandbyWork}h`);
+            console.log(`   totalStandbyTravel: ${totalStandbyTravel}h`);
+            console.log(`   totalStandbyHours: ${totalStandbyHours}h`);
             
             return (
               <DetailRow 
@@ -583,12 +616,12 @@ const TimeEntryScreen = () => {
                 <Text style={styles.dayTypeBadgeText}>{dayTypeInfo.label}</Text>
               </View>
             )}
-            <Text style={styles.totalEarnings}>{formatCurrency(breakdown.totalEarnings)}</Text>
+            <Text style={styles.totalEarnings}>{formatCurrency(breakdown?.totalEarnings || 0)}</Text>
           </View>
         </View>
 
         {/* Sezione Sito e Veicolo */}
-        {(item.site_name || item.vehicle_driven) && (
+        {(item.site_name || item.vehicle_driven || item.targa_veicolo || item.targaVeicolo) && (
           <DetailSection
             title="Informazioni Lavoro"
             icon="briefcase"
@@ -601,6 +634,12 @@ const TimeEntryScreen = () => {
               <DetailRow 
                 label="Veicolo" 
                 value={item.vehicle_driven === 'andata_ritorno' ? 'Andata/Ritorno' : item.vehicle_driven} 
+              />
+            )}
+            {(item.targa_veicolo || item.targaVeicolo) && (
+              <DetailRow 
+                label="Targa/Numero veicolo" 
+                value={item.targa_veicolo || item.targaVeicolo}
               />
             )}
           </DetailSection>
@@ -750,48 +789,57 @@ const TimeEntryScreen = () => {
                       />
                     )}
                   </View>
-                ))}
-                {/* Totale complessivo interventi - sempre visibile e in evidenza */}
-                {(() => {
-                  const numInterventi = workEntry.interventi ? workEntry.interventi.length : 0;
-                  
-                  // Calcola il totale di tutti gli interventi (lavoro + viaggi)
-                  let totalAllInterventiHours = 0;
-                  
-                  workEntry.interventi.forEach(intervento => {
-                    // Ore lavoro
-                    if (intervento.work_start_1 && intervento.work_end_1) {
-                      const durationMinutes = calculationService.calculateTimeDifference(intervento.work_start_1, intervento.work_end_1);
-                      totalAllInterventiHours += calculationService.minutesToHours(durationMinutes);
-                    }
-                    if (intervento.work_start_2 && intervento.work_end_2) {
-                      const durationMinutes = calculationService.calculateTimeDifference(intervento.work_start_2, intervento.work_end_2);
-                      totalAllInterventiHours += calculationService.minutesToHours(durationMinutes);
-                    }
-                    // Ore viaggio andata
-                    if (intervento.departure_company && intervento.arrival_site) {
-                      const durationMinutes = calculationService.calculateTimeDifference(intervento.departure_company, intervento.arrival_site);
-                      totalAllInterventiHours += calculationService.minutesToHours(durationMinutes);
-                    }
-                    // Ore viaggio ritorno
-                    if (intervento.departure_return && intervento.arrival_company) {
-                      const durationMinutes = calculationService.calculateTimeDifference(intervento.departure_return, intervento.arrival_company);
-                      totalAllInterventiHours += calculationService.minutesToHours(durationMinutes);
-                    }
-                  });
-                  
-                  if (totalAllInterventiHours > 0) {
-                    const label = numInterventi > 1 ? "Totale Tutti Interventi (lavoro+viaggi)" : "Totale Intervento (lavoro+viaggi)";
-                    return (
-                      <DetailRow 
-                        label={label}
-                        value={formatSafeHours(totalAllInterventiHours)}
-                        highlight={true}
-                      />
-                    );
-                  }
-                  return null;
-                })()}
+                ))}          {/* Totale complessivo interventi - sempre visibile e in evidenza */}
+          {(() => {
+            const numInterventi = workEntry.interventi ? workEntry.interventi.length : 0;
+            
+            // Calcola il totale di tutti gli interventi (lavoro + viaggi)
+            let totalAllInterventiHours = 0;
+            
+            workEntry.interventi.forEach(intervento => {
+              // Ore lavoro
+              if (intervento.work_start_1 && intervento.work_end_1) {
+                const durationMinutes = calculationService.calculateTimeDifference(intervento.work_start_1, intervento.work_end_1);
+                const hours = calculationService.minutesToHours(durationMinutes);
+                totalAllInterventiHours += hours;
+                console.log(`🔧 DEBUG - Lavoro 1: ${intervento.work_start_1}-${intervento.work_end_1} = ${durationMinutes}min = ${hours}h`);
+              }
+              if (intervento.work_start_2 && intervento.work_end_2) {
+                const durationMinutes = calculationService.calculateTimeDifference(intervento.work_start_2, intervento.work_end_2);
+                const hours = calculationService.minutesToHours(durationMinutes);
+                totalAllInterventiHours += hours;
+                console.log(`🔧 DEBUG - Lavoro 2: ${intervento.work_start_2}-${intervento.work_end_2} = ${durationMinutes}min = ${hours}h`);
+              }
+              // Ore viaggio andata
+              if (intervento.departure_company && intervento.arrival_site) {
+                const durationMinutes = calculationService.calculateTimeDifference(intervento.departure_company, intervento.arrival_site);
+                const hours = calculationService.minutesToHours(durationMinutes);
+                totalAllInterventiHours += hours;
+                console.log(`🔧 DEBUG - Viaggio A: ${intervento.departure_company}-${intervento.arrival_site} = ${durationMinutes}min = ${hours}h`);
+              }
+              // Ore viaggio ritorno
+              if (intervento.departure_return && intervento.arrival_company) {
+                const durationMinutes = calculationService.calculateTimeDifference(intervento.departure_return, intervento.arrival_company);
+                const hours = calculationService.minutesToHours(durationMinutes);
+                totalAllInterventiHours += hours;
+                console.log(`🔧 DEBUG - Viaggio R: ${intervento.departure_return}-${intervento.arrival_company} = ${durationMinutes}min = ${hours}h`);
+              }
+            });
+            
+            console.log(`🎯 DEBUG - Totale interventi calcolato: ${totalAllInterventiHours}h`);
+            
+            if (totalAllInterventiHours > 0) {
+              const label = numInterventi > 1 ? "Totale Tutti Interventi (lavoro+viaggi)" : "Totale Intervento (lavoro+viaggi)";
+              return (
+                <DetailRow 
+                  label={label}
+                  value={formatSafeHours(totalAllInterventiHours)}
+                  highlight={true}
+                />
+              );
+            }
+            return null;
+          })()}
                 {calculationService.calculateStandbyTravelHours && (
                   <DetailRow 
                     label="Totale Ore Viaggio Interventi" 
@@ -814,20 +862,20 @@ const TimeEntryScreen = () => {
           {breakdown.ordinary?.total > 0 && (
             <DetailRow 
               label="Attività Ordinarie" 
-              value={formatCurrency(breakdown.ordinary.total)}
+              value={formatCurrency(breakdown?.ordinary?.total)}
             />
           )}
           
-          {breakdown.standby && breakdown.standby.totalEarnings > 0 && (
+          {breakdown.standby && breakdown.standby?.totalEarnings > 0 && (
             <>
               <DetailRow 
                 label="Interventi Reperibilità" 
-                value={formatCurrency((breakdown.standby.totalEarnings || 0) - (breakdown.standby.dailyIndemnity || 0))}
+                value={formatCurrency((breakdown.standby?.totalEarnings || 0) - (breakdown.standby?.dailyIndemnity || 0))}
               />
               {breakdown.allowances?.standby > 0 && (
                 <DetailRow 
                   label="Indennità Reperibilità" 
-                  value={formatCurrency(breakdown.allowances.standby)}
+                  value={formatCurrency(breakdown?.allowances?.standby)}
                 />
               )}
             </>
@@ -836,24 +884,24 @@ const TimeEntryScreen = () => {
           {!breakdown.standby?.totalEarnings && breakdown.allowances?.standby > 0 && (
             <DetailRow 
               label="Indennità Reperibilità" 
-              value={formatCurrency(breakdown.allowances.standby)}
+              value={formatCurrency(breakdown?.allowances?.standby)}
             />
           )}
           
           {breakdown.allowances?.travel > 0 && (
             <DetailRow 
               label="Indennità Trasferta" 
-              value={formatCurrency(breakdown.allowances.travel)}
+              value={formatCurrency(breakdown?.allowances?.travel)}
             />
           )}
           
           {/* Totale ore giornata completo */}
           {(() => {
             const ordinaryHours = breakdown.ordinary?.hours ? 
-              Object.values(breakdown.ordinary.hours).reduce((sum, h) => sum + h, 0) : 0;
+              Object.values(breakdown?.ordinary?.hours).reduce((sum, h) => sum + h, 0) : 0;
             const standbyHours = breakdown.standby ? 
-              (Object.values(breakdown.standby.workHours || {}).reduce((sum, h) => sum + h, 0) +
-               Object.values(breakdown.standby.travelHours || {}).reduce((sum, h) => sum + h, 0)) : 0;
+              (Object.values(breakdown?.standby?.workHours || {}).reduce((sum, h) => sum + h, 0) +
+               Object.values(breakdown?.standby?.travelHours || {}).reduce((sum, h) => sum + h, 0)) : 0;
             const totalDayHours = ordinaryHours + standbyHours;
             
             if (totalDayHours > 0) {
@@ -869,7 +917,7 @@ const TimeEntryScreen = () => {
           
           <View style={styles.totalRow}>
             <Text style={styles.totalLabel}>TOTALE GIORNATA</Text>
-            <Text style={styles.totalValue}>{formatCurrency(breakdown.totalEarnings)}</Text>
+            <Text style={styles.totalValue}>{formatCurrency(breakdown?.totalEarnings || 0)}</Text>
           </View>
           
           {/* Rimborsi Pasti sotto il totale con dettaglio cash/buono */}
@@ -878,7 +926,7 @@ const TimeEntryScreen = () => {
               <View style={styles.mealSeparator} />
               <DetailRow 
                 label="Rimborsi Pasti (non tassabili)" 
-                value={formatCurrency(breakdown.allowances.meal)}
+                value={formatCurrency(breakdown?.allowances?.meal)}
               />
               {/* Dettaglio composizione rimborsi pasti con logica uguale al form */}
               {(workEntry.mealLunchVoucher || workEntry.mealLunchCash > 0) && (
@@ -1017,7 +1065,7 @@ const TimeEntryScreen = () => {
       }
       const workEntry = createWorkEntryFromData(item, calculationService);
       const breakdown = calculationService.calculateEarningsBreakdown(workEntry, settings);
-      return sum + breakdown.totalEarnings;
+      return sum + (breakdown?.totalEarnings || 0);
     }, 0);
 
     const workDays = data.filter(item => item.type !== 'standby_only').length;
@@ -1054,7 +1102,7 @@ const TimeEntryScreen = () => {
   const getDayEfficiency = (stats, breakdown) => {
     const hourlyRate = 16.41; // Tariffa oraria base
     const expectedEarningsForHours = stats.totalHours * hourlyRate;
-    const actualEarnings = breakdown.totalEarnings;
+    const actualEarnings = breakdown?.totalEarnings || 0;
     const efficiency = actualEarnings / expectedEarningsForHours;
     
     if (efficiency >= 1.5) return { level: 'excellent', color: '#4CAF50', label: 'Eccellente' };

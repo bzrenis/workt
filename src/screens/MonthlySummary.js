@@ -111,50 +111,50 @@ const ModernEntryItem = ({ item, index }) => {
         
         <View style={styles.modernBreakdownContainer}>
           {/* Attività ordinarie */}
-          {breakdown.ordinary && breakdown.ordinary.total > 0 && (
+          {breakdown.ordinary && breakdown?.ordinary?.total > 0 && (
             <View style={styles.modernBreakdownSection}>
               <View style={styles.sectionHeader}>
                 <MaterialCommunityIcons name="briefcase" size={16} color="#2196F3" />
                 <Text style={styles.modernSectionLabel}>Attività ordinarie</Text>
-                <Text style={styles.modernSectionValue}>{formatCurrency(breakdown.ordinary.total)}</Text>
+                <Text style={styles.modernSectionValue}>{formatCurrency(breakdown?.ordinary?.total)}</Text>
               </View>
               
-              {breakdown.ordinary.hours.lavoro_giornaliera + breakdown.ordinary.hours.viaggio_giornaliera > 0 && (
+              {breakdown?.ordinary?.hours.lavoro_giornaliera + breakdown?.ordinary?.hours.viaggio_giornaliera > 0 && (
                 <Text style={styles.modernBreakdownDetail}>
                   Giornaliero: {formatSafeHours(
-                    breakdown.ordinary.hours.lavoro_giornaliera + 
-                    breakdown.ordinary.hours.viaggio_giornaliera
+                    breakdown?.ordinary?.hours.lavoro_giornaliera + 
+                    breakdown?.ordinary?.hours.viaggio_giornaliera
                   )} ore
                 </Text>
               )}
               
-              {breakdown.ordinary.hours.lavoro_extra > 0 && (
+              {breakdown?.ordinary?.hours.lavoro_extra > 0 && (
                 <Text style={styles.modernBreakdownDetail}>
-                  Lavoro extra: {formatSafeHours(breakdown.ordinary.hours.lavoro_extra)} ore
+                  Lavoro extra: {formatSafeHours(breakdown?.ordinary?.hours.lavoro_extra)} ore
                 </Text>
               )}
               
-              {breakdown.ordinary.hours.viaggio_extra > 0 && (
+              {breakdown?.ordinary?.hours.viaggio_extra > 0 && (
                 <Text style={styles.modernBreakdownDetail}>
-                  Viaggio extra: {formatSafeHours(breakdown.ordinary.hours.viaggio_extra)} ore
+                  Viaggio extra: {formatSafeHours(breakdown?.ordinary?.hours.viaggio_extra)} ore
                 </Text>
               )}
             </View>
           )}
           
           {/* Reperibilità */}
-          {breakdown.standby && breakdown.standby.total > 0 && (
+          {breakdown.standby && breakdown?.standby?.total > 0 && (
             <View style={styles.modernBreakdownSection}>
               <View style={styles.sectionHeader}>
                 <MaterialCommunityIcons name="phone-in-talk" size={16} color="#9C27B0" />
                 <Text style={styles.modernSectionLabel}>Reperibilità</Text>
-                <Text style={styles.modernSectionValue}>{formatCurrency(breakdown.standby.total)}</Text>
+                <Text style={styles.modernSectionValue}>{formatCurrency(breakdown?.standby?.total)}</Text>
               </View>
               
-              {Object.values(breakdown.standby.workHours || {}).some(h => h > 0) && (
+              {Object.values(breakdown?.standby?.workHours || {}).some(h => h > 0) && (
                 <Text style={styles.modernBreakdownDetail}>
                   Interventi: {formatSafeHours(
-                    Object.values(breakdown.standby.workHours).reduce((sum, h) => sum + h, 0)
+                    Object.values(breakdown?.standby?.workHours).reduce((sum, h) => sum + h, 0)
                   )} ore
                 </Text>
               )}
@@ -162,23 +162,23 @@ const ModernEntryItem = ({ item, index }) => {
           )}
           
           {/* Indennità */}
-          {breakdown.allowances && breakdown.allowances.travel > 0 && (
+          {breakdown.allowances && breakdown?.allowances?.travel > 0 && (
             <View style={styles.modernBreakdownSection}>
               <View style={styles.sectionHeader}>
                 <MaterialCommunityIcons name="briefcase-variant" size={16} color="#FF9800" />
                 <Text style={styles.modernSectionLabel}>Indennità trasferta</Text>
-                <Text style={styles.modernSectionValue}>{formatCurrency(breakdown.allowances.travel)}</Text>
+                <Text style={styles.modernSectionValue}>{formatCurrency(breakdown?.allowances?.travel)}</Text>
               </View>
             </View>
           )}
           
           {/* Rimborsi pasti */}
-          {breakdown.allowances && breakdown.allowances.meal > 0 && (
+          {breakdown.allowances && breakdown?.allowances?.meal > 0 && (
             <View style={styles.modernBreakdownSection}>
               <View style={styles.sectionHeader}>
                 <MaterialCommunityIcons name="food" size={16} color="#4CAF50" />
                 <Text style={styles.modernSectionLabel}>Rimborsi pasti</Text>
-                <Text style={styles.modernSectionValue}>{formatCurrency(breakdown.allowances.meal)}</Text>
+                <Text style={styles.modernSectionValue}>{formatCurrency(breakdown?.allowances?.meal)}</Text>
               </View>
               <Text style={styles.modernBreakdownDetail}>Non inclusi nel totale (non tassabili)</Text>
             </View>
@@ -266,23 +266,23 @@ const MonthlySummary = ({ month, year }) => {
       if (!breakdown) return;
       
       // Somma tutte le categorie
-      if (breakdown.ordinary && breakdown.ordinary.earnings) {
+      if (breakdown.ordinary && breakdown?.ordinary?.earnings) {
         totalOrdinary += 
-          (breakdown.ordinary.earnings.giornaliera || 0) + 
-          (breakdown.ordinary.earnings.viaggio_extra || 0) +
-          (breakdown.ordinary.earnings.lavoro_extra || 0);
+          (breakdown?.ordinary?.earnings.giornaliera || 0) + 
+          (breakdown?.ordinary?.earnings.viaggio_extra || 0) +
+          (breakdown?.ordinary?.earnings.lavoro_extra || 0);
       }
       
       if (breakdown.standby) {
-        totalStandby += breakdown.standby.total || 0;
+        totalStandby += breakdown?.standby?.total || 0;
       }
       
       if (breakdown.allowances) {
         // Indennità trasferta
-        totalAllowances += breakdown.allowances.travel || 0;
+        totalAllowances += breakdown?.allowances?.travel || 0;
         
         // Rimborsi pasti (separati dal totale generale)
-        totalMealAllowances += breakdown.allowances.meal || 0;
+        totalMealAllowances += breakdown?.allowances?.meal || 0;
       }
       
       grandTotal += breakdown.total || 0;

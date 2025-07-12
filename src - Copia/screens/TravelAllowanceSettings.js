@@ -11,6 +11,7 @@ const TravelAllowanceSettings = ({ navigation }) => {
   const [enabled, setEnabled] = useState(settings.travelAllowance?.enabled || false);
   const [dailyAmount, setDailyAmount] = useState(settings.travelAllowance?.dailyAmount?.toString() || DEFAULT_ALLOWANCE.toString());
   const [autoActivate, setAutoActivate] = useState(settings.travelAllowance?.autoActivate || false);
+  const [applyOnSpecialDays, setApplyOnSpecialDays] = useState(settings.travelAllowance?.applyOnSpecialDays || false);
   // Opzioni di attivazione indennità
   const options = [
     { key: 'WITH_TRAVEL', label: 'Solo se presenti ore di viaggio', group: 'base' },
@@ -19,6 +20,7 @@ const TravelAllowanceSettings = ({ navigation }) => {
     { key: 'ALSO_ON_STANDBY', label: 'Anche nei giorni reperibili non lavorativi con intervento', group: 'extra' },
     { key: 'FULL_ALLOWANCE_HALF_DAY', label: 'Tariffa piena anche con mezza giornata', group: 'amount' },
     { key: 'HALF_ALLOWANCE_HALF_DAY', label: 'Metà indennità se mezza giornata', group: 'amount' },
+    { key: 'PROPORTIONAL_CCNL', label: 'Calcolo proporzionale CCNL (ore/8 × indennità)', group: 'amount', recommended: true },
   ];
 
   // Permetti selezione multipla, ma solo una per gruppo base e amount
@@ -44,6 +46,7 @@ const TravelAllowanceSettings = ({ navigation }) => {
     setEnabled(settings.travelAllowance?.enabled || false);
     setDailyAmount(settings.travelAllowance?.dailyAmount?.toString() || DEFAULT_ALLOWANCE.toString());
     setAutoActivate(settings.travelAllowance?.autoActivate || false);
+    setApplyOnSpecialDays(settings.travelAllowance?.applyOnSpecialDays || false);
     setSelectedOptions(settings.travelAllowance?.selectedOptions || ['WITH_TRAVEL']);
   }, [settings]);
 
@@ -54,6 +57,7 @@ const TravelAllowanceSettings = ({ navigation }) => {
           enabled,
           dailyAmount: parseFloat(dailyAmount) || 0,
           autoActivate,
+          applyOnSpecialDays,
           selectedOptions
         }
       });
@@ -109,16 +113,52 @@ const TravelAllowanceSettings = ({ navigation }) => {
                   Se attivo, l'indennità viene applicata automaticamente nei giorni con viaggio.
                 </Text>
               </View>
+              
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Applica nei giorni speciali (domenica e festivi)</Text>
+                <Switch
+                  value={applyOnSpecialDays}
+                  onValueChange={setApplyOnSpecialDays}
+                  trackColor={{ false: '#ccc', true: '#607D8B' }}
+                  thumbColor={applyOnSpecialDays ? '#fff' : '#f4f3f4'}
+                />
+                <Text style={styles.inputHelp}>
+                  Se attivo, l'indennità viene applicata anche nelle domeniche e nei giorni festivi.
+                  Normalmente secondo CCNL, nei giorni domenicali e festivi l'indennità di trasferta non viene applicata.
+                  {'\n'}NOTA: Il sabato è sempre considerato un giorno lavorativo normale per l'indennità trasferta.
+                </Text>
+              </View>
               <View style={styles.inputGroup}>
                 <Text style={styles.inputLabel}>Regole di attivazione</Text>
                 {options.map(opt => (
                   <TouchableOpacity
                     key={opt.key}
-                    style={[styles.optionRow, selectedOptions.includes(opt.key) && styles.selectedOption]}
+                    style={[
+                      styles.optionRow, 
+                      selectedOptions.includes(opt.key) && styles.selectedOption,
+                      opt.recommended && styles.recommendedOption
+                    ]}
                     onPress={() => handleOptionToggle(opt.key, opt.group)}
                   >
-                    <Ionicons name={selectedOptions.includes(opt.key) ? 'checkbox' : 'square-outline'} size={20} color={selectedOptions.includes(opt.key) ? '#607D8B' : '#aaa'} style={{marginRight:8}} />
-                    <Text style={styles.optionLabel}>{opt.label}</Text>
+                    <Ionicons 
+                      name={selectedOptions.includes(opt.key) ? 'checkbox' : 'square-outline'} 
+                      size={20} 
+                      color={selectedOptions.includes(opt.key) ? '#607D8B' : '#aaa'} 
+                      style={{marginRight:8}} 
+                    />
+                    <View style={styles.optionContent}>
+                      <Text style={[styles.optionLabel, opt.recommended && styles.recommendedLabel]}>
+                        {opt.label}
+                        {opt.recommended && (
+                          <Text style={styles.recommendedBadge}> ✅ CCNL</Text>
+                        )}
+                      </Text>
+                      {opt.key === 'PROPORTIONAL_CCNL' && (
+                        <Text style={styles.optionDescription}>
+                          Conforme al CCNL. Esempi: 6h = 75% indennità, 7h = 87.5% indennità
+                        </Text>
+                      )}
+                    </View>
                   </TouchableOpacity>
                 ))}
               </View>
@@ -128,7 +168,9 @@ const TravelAllowanceSettings = ({ navigation }) => {
         <View style={styles.infoBox}>
           <Ionicons name="information-circle-outline" size={18} color="#607D8B" style={{marginRight:4}} />
           <Text style={styles.infoText}>
-            L'indennità trasferta è un contributo giornaliero previsto dal CCNL o da accordi aziendali. Puoi scegliere quando attivarla: solo con viaggio, sempre, anche nei giorni reperibili con intervento, e se pagare metà o l'intero importo in caso di mezza giornata lavorata.
+            L'indennità trasferta è un contributo giornaliero previsto dal CCNL o da accordi aziendali. 
+            {'\n\n'}✅ <Text style={{fontWeight: 'bold'}}>NOVITÀ CCNL</Text>: Il calcolo proporzionale è conforme al CCNL Metalmeccanico PMI e calcola l'indennità in base alle ore effettive lavorate: (ore_totali / 8) × indennità_giornaliera.
+            {'\n\n'}Puoi scegliere quando attivarla: solo con viaggio, sempre, anche nei giorni reperibili con intervento, e come calcolare l'importo per giornate parziali.
           </Text>
         </View>
         <TouchableOpacity style={styles.saveButton} onPress={handleSave}>
@@ -155,7 +197,12 @@ const styles = StyleSheet.create({
   inputHelp: { fontSize: 12, color: '#888', marginTop: 4 },
   optionRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 6 },
   selectedOption: { backgroundColor: '#e3eafc', borderRadius: 6 },
+  recommendedOption: { borderWidth: 1, borderColor: '#4CAF50', borderRadius: 6, paddingHorizontal: 4 },
+  optionContent: { flex: 1 },
   optionLabel: { fontSize: 15, color: '#222' },
+  recommendedLabel: { fontWeight: 'bold' },
+  recommendedBadge: { fontSize: 12, color: '#4CAF50', fontWeight: 'bold' },
+  optionDescription: { fontSize: 12, color: '#666', marginTop: 2, fontStyle: 'italic' },
   infoBox: { flexDirection: 'row', alignItems: 'flex-start', backgroundColor: '#f0f4ff', borderRadius: 8, padding: 10, margin: 16 },
   infoText: { fontSize: 13, color: '#607D8B', flex: 1 },
   saveButton: { backgroundColor: '#607D8B', borderRadius: 8, padding: 14, margin: 16, alignItems: 'center' },

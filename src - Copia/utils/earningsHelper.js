@@ -2,7 +2,7 @@
  * utilities/earningsHelper.js
  * Funzioni helper per la gestione unificata dei calcoli dei guadagni
  */
-import CalculationService from '../services/CalculationService';
+// Non importiamo più CalculationService, verrà passato come parametro
 
 // Cache per memorizzare i risultati dei calcoli e migliorare le performance
 const breakdownCache = new Map();
@@ -24,31 +24,57 @@ const generateCacheKey = (item, settings) => {
  * @param {Object} item - Entry dal database
  * @returns {Object} - Work entry nel formato atteso dal CalculationService
  */
-export const createWorkEntryFromData = (item) => {
-  return {
-    date: item.date,
-    siteName: item.site_name || '',
-    vehicleDriven: item.veicolo || '',
-    departureCompany: item.viaggi?.[0]?.departure_company || '',
-    arrivalSite: item.viaggi?.[0]?.arrival_site || '',
-    workStart1: item.viaggi?.[0]?.work_start_1 || '',
-    workEnd1: item.viaggi?.[0]?.work_end_1 || '',
-    workStart2: item.viaggi?.[0]?.work_start_2 || '',
-    workEnd2: item.viaggi?.[0]?.work_end_2 || '',
-    departureReturn: item.viaggi?.[0]?.departure_return || '',
-    arrivalCompany: item.viaggi?.[0]?.arrival_company || '',
-    interventi: item.interventi || [],
-    mealLunchVoucher: item.pasti?.pranzo === 1 ? 1 : 0,
-    mealLunchCash: parseFloat(item.mealLunchCash) || 0,
-    mealDinnerVoucher: item.pasti?.cena === 1 ? 1 : 0,
-    mealDinnerCash: parseFloat(item.mealDinnerCash) || 0,
-    travelAllowance: item.trasferta === 1 ? 1 : 0,
-    travelAllowancePercent: item.trasfertaPercent || 1.0,
-    isStandbyDay: item.reperibilita === 1 ? 1 : 0,
-    standbyAllowance: item.reperibilita === 1 ? 1 : 0,
-    completamentoGiornata: item.completamentoGiornata || 'nessuno',
-    isHoliday: item.is_holiday === 1
+export const createWorkEntryFromData = (entry, calculationServiceInstance = null) => {
+  // Se riceviamo un oggetto con item (da renderItem di FlatList/SectionList)
+  // prendiamo l'entry dall'item
+  const workEntryData = entry.item || entry;
+
+  // Log per debug
+  console.log('Input entry:', JSON.stringify(workEntryData, null, 2));
+  
+  // Crea workEntry con i valori corretti
+  const workEntry = {
+    date: workEntryData.date,
+    siteName: workEntryData.site_name || '',
+    vehicleDriven: workEntryData.vehicle_driven || '',
+    departureCompany: workEntryData.departure_company || '',
+    arrivalSite: workEntryData.arrival_site || '',
+    workStart1: workEntryData.work_start_1 || '',
+    workEnd1: workEntryData.work_end_1 || '',
+    workStart2: workEntryData.work_start_2 || '',
+    workEnd2: workEntryData.work_end_2 || '',
+    departureReturn: workEntryData.departure_return || '',
+    arrivalCompany: workEntryData.arrival_company || '',
+    // Parse interventi se è una stringa JSON
+    interventi: (() => {
+      if (typeof workEntryData.interventi === 'string') {
+        try {
+          return JSON.parse(workEntryData.interventi);
+        } catch (error) {
+          console.warn('Errore parsing interventi:', error);
+          return [];
+        }
+      }
+      return workEntryData.interventi || [];
+    })(),
+    // Convert all boolean fields to 0/1
+    mealLunchVoucher: workEntryData.meal_lunch_voucher === 1 ? 1 : 0,
+    mealLunchCash: parseFloat(workEntryData.meal_lunch_cash || 0),
+    mealDinnerVoucher: workEntryData.meal_dinner_voucher === 1 ? 1 : 0,
+    mealDinnerCash: parseFloat(workEntryData.meal_dinner_cash || 0),
+    travelAllowance: workEntryData.travel_allowance === 1 ? 1 : 0,
+    travelAllowancePercent: parseFloat(workEntryData.travel_allowance_percent || 1.0),
+    trasfertaManualOverride: workEntryData.trasferta_manual_override === 1,
+    isStandbyDay: workEntryData.is_standby_day === 1 ? 1 : 0,
+    standbyAllowance: workEntryData.standby_allowance === 1 ? 1 : 0,
+    completamentoGiornata: workEntryData.completamento_giornata || 'nessuno',
+    dayType: workEntryData.day_type || workEntryData.dayType || 'lavorativa'
   };
+
+  // Log per debug risultato finale
+  console.log('Created workEntry:', JSON.stringify(workEntry, null, 2));
+  
+  return workEntry;
 };
 
 /**
@@ -95,9 +121,10 @@ export const getSafeSettings = (settings) => {
  * Implementa caching per migliorare le performance e gestione degli errori
  * @param {Object} item - Elemento dal database
  * @param {Object} settings - Impostazioni dell'applicazione
+ * @param {Object} calculationServiceInstance - Istanza del servizio di calcolo
  * @returns {Object} - Breakdown calcolato
  */
-export const calculateItemBreakdown = (item, settings) => {
+export const calculateItemBreakdown = (item, settings, calculationServiceInstance = null) => {
   try {
     // Genera una chiave di cache unica per questa combinazione item+settings
     const cacheKey = generateCacheKey(item, settings);
@@ -108,13 +135,19 @@ export const calculateItemBreakdown = (item, settings) => {
     }
     
     // Se non in cache, calcola normalmente
-    const workEntry = createWorkEntryFromData(item);
+    const workEntry = createWorkEntryFromData(item, calculationServiceInstance);
     const safeSettings = getSafeSettings(settings);
     
     // Calcola con gestione degli errori
     let result;
     try {
-      result = CalculationService.calculateEarningsBreakdown(workEntry, safeSettings);
+      if (calculationServiceInstance) {
+        result = calculationServiceInstance.calculateEarningsBreakdown(workEntry, safeSettings);
+      } else {
+        // Fallback, ma non dovrebbe mai accadere
+        console.warn('CalculationService non fornito, impossibile calcolare il breakdown');
+        throw new Error('CalculationService non fornito');
+      }
     } catch (calcError) {
       console.warn('Errore nel calcolo del breakdown:', calcError);
       // Restituisci un breakdown vuoto ma valido in caso di errore di calcolo

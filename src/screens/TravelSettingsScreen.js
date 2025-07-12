@@ -14,7 +14,7 @@ import { useSettings } from '../hooks';
 
 const TravelSettingsScreen = ({ navigation }) => {
   const { settings, updatePartialSettings, isLoading } = useSettings();
-  const [selectedOption, setSelectedOption] = useState('EXCESS_AS_TRAVEL');
+  const [selectedOption, setSelectedOption] = useState('TRAVEL_SEPARATE');
 
   useEffect(() => {
     if (settings.travelHoursSetting) {
@@ -28,6 +28,12 @@ const TravelSettingsScreen = ({ navigation }) => {
       title: 'Come ore lavorative',
       description: 'Le ore di viaggio vengono considerate come ore lavorative normali',
       example: 'Esempio: 2h viaggio + 6h lavoro = 8h retribuzione giornaliera'
+    },
+    {
+      id: 'TRAVEL_SEPARATE',
+      title: 'Viaggio con tariffa separata',
+      description: 'Le ore di viaggio vengono sempre pagate con tariffa viaggio, indipendentemente dalle ore totali',
+      example: 'Esempio: 2h viaggio + 6h lavoro = 6h retribuzione giornaliera + 2h retribuzione viaggio'
     },
     {
       id: 'EXCESS_AS_TRAVEL',

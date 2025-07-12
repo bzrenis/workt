@@ -17,6 +17,7 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { formatDate, formatCurrency } from '../utils';
 import { useSettings, useCalculationService } from '../hooks';
 import DatabaseService from '../services/DatabaseService';
+import FixedDaysService from '../services/FixedDaysService';
 import { createWorkEntryFromData } from '../utils/earningsHelper';
 import { RealPayslipCalculator } from '../services/RealPayslipCalculator';
 
@@ -45,6 +46,8 @@ const DashboardScreen = ({ navigation, route }) => {
   const [monthlyAggregated, setMonthlyAggregated] = useState({});
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [fixedDaysData, setFixedDaysData] = useState(null);
+  const [fixedDaysLoading, setFixedDaysLoading] = useState(true);
 
   // 🔄 Ascolta parametri di navigazione per refresh automatico
   useEffect(() => {
@@ -92,11 +95,54 @@ const DashboardScreen = ({ navigation, route }) => {
       
       // Calcola aggregazione mensile
       await calculateMonthlyAggregation(entries);
+      
+      // Carica dati giorni fissi (ferie, permessi, etc.)
+      await loadFixedDaysData();
     } catch (error) {
       console.error('Errore nel caricamento dati:', error);
       Alert.alert('Errore', 'Impossibile caricare i dati.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Carica dati dei giorni fissi (ferie, permessi, malattia, riposo, festivi)
+  const loadFixedDaysData = async () => {
+    try {
+      setFixedDaysLoading(true);
+      const startDate = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 1);
+      const endDate = new Date(selectedDate.getFullYear(), selectedDate.getMonth() + 1, 0);
+      
+      // Carica dati giorni fissi usando FixedDaysService
+      if (FixedDaysService && typeof FixedDaysService.getFixedDaysSummary === 'function') {
+        const data = await FixedDaysService.getFixedDaysSummary(startDate, endDate);
+        setFixedDaysData(data);
+      } else {
+        console.warn('FixedDaysService.getFixedDaysSummary non disponibile, uso dati mock');
+        // Dati mock se il servizio non è disponibile
+        setFixedDaysData({
+          totalDays: 0,
+          totalEarnings: 0,
+          vacation: { days: 0, earnings: 0 },
+          sick: { days: 0, earnings: 0 },
+          permit: { days: 0, earnings: 0 },
+          compensatory: { days: 0, earnings: 0 },
+          holiday: { days: 0, earnings: 0 }
+        });
+      }
+    } catch (error) {
+      console.error('Errore nel caricamento dati giorni fissi:', error);
+      setFixedDaysData({
+        totalDays: 0,
+        totalEarnings: 0,
+        vacation: { days: 0, earnings: 0 },
+        sick: { days: 0, earnings: 0 },
+        permit: { days: 0, earnings: 0 },
+        compensatory: { days: 0, earnings: 0 },
+        holiday: { days: 0, earnings: 0 }
+      });
+    } finally {
+      setFixedDaysLoading(false);
     }
   };
 
@@ -791,18 +837,18 @@ const DashboardScreen = ({ navigation, route }) => {
   };
 
   // Verifica se ci sono dati da mostrare
-  const hasOrdinaryData = monthlyAggregated.ordinary?.total > 0;
-  const hasStandbyData = monthlyAggregated.standby?.totalEarnings > 0 ||
-    Object.values(monthlyAggregated.standby?.workHours || {}).some(h => h > 0) ||
-    Object.values(monthlyAggregated.standby?.travelHours || {}).some(h => h > 0);
-  const hasAllowancesData = (monthlyAggregated.allowances?.travel > 0 || 
-                            monthlyAggregated.allowances?.meal > 0 || 
-                            monthlyAggregated.allowances?.standby > 0);
+  const hasOrdinaryData = monthlyAggregated?.ordinary?.total > 0;
+  const hasStandbyData = monthlyAggregated?.standby?.totalEarnings > 0 ||
+    Object.values(monthlyAggregated?.standby?.workHours || {}).some(h => h > 0) ||
+    Object.values(monthlyAggregated?.standby?.travelHours || {}).some(h => h > 0);
+  const hasAllowancesData = (monthlyAggregated?.allowances?.travel > 0 || 
+                            monthlyAggregated?.allowances?.meal > 0 || 
+                            monthlyAggregated?.allowances?.standby > 0);
 
   const renderOrdinarySection = () => {
     if (!hasOrdinaryData) return null;
 
-    const ordinary = monthlyAggregated.ordinary;
+    const ordinary = monthlyAggregated?.ordinary || {};
     
     return (
       <View style={styles.sectionCard}>
@@ -908,17 +954,22 @@ const DashboardScreen = ({ navigation, route }) => {
   const renderStandbySection = () => {
     if (!hasStandbyData) return null;
 
-    const standby = monthlyAggregated.standby;
+    const standby = monthlyAggregated?.standby || {};
     
     return (
       <View style={styles.sectionCard}>
         <Text style={styles.sectionTitle}>Interventi Reperibilità</Text>
-        
-        {/* Contatore giorni reperibilità */}
-        {standby.days > 0 && (
+        {/* Contatore interventi reperibilità */}
+        {monthlyAggregated?.analytics?.standbyInterventions > 0 ? (
           <View style={styles.breakdownItem}>
             <Text style={styles.breakdownDetail}>
-              {standby.days} giorni con interventi in reperibilità
+              {monthlyAggregated?.analytics?.standbyInterventions} interventi effettuati in reperibilità
+            </Text>
+          </View>
+        ) : (
+          <View style={styles.breakdownItem}>
+            <Text style={styles.breakdownDetail}>
+              Nessun intervento effettuato in reperibilità
             </Text>
           </View>
         )}
@@ -1082,7 +1133,7 @@ const DashboardScreen = ({ navigation, route }) => {
         <View style={[styles.breakdownRow, styles.totalRow]}>
           <Text style={styles.totalLabel}>Totale reperibilità</Text>
           <Text style={styles.totalAmount}>
-            {formatSafeAmount(standby.totalEarnings - (monthlyAggregated.allowances?.standby || 0))}
+            {formatSafeAmount(standby.totalEarnings - (monthlyAggregated?.allowances?.standby || 0))}
           </Text>
         </View>
       </View>
@@ -1092,8 +1143,8 @@ const DashboardScreen = ({ navigation, route }) => {
   const renderAllowancesSection = () => {
     if (!hasAllowancesData) return null;
 
-    const allowances = monthlyAggregated.allowances;
-    const meals = monthlyAggregated.meals;
+    const allowances = monthlyAggregated?.allowances || {};
+    const meals = monthlyAggregated?.meals || {};
     
     return (
       <View style={styles.sectionCard}>
@@ -1226,23 +1277,23 @@ const DashboardScreen = ({ navigation, route }) => {
       <View style={styles.statsGrid}>
         <View style={styles.statItem}>
           <Text style={styles.statLabel}>Giorni lavorati</Text>
-          <Text style={styles.statValue}>{monthlyAggregated.daysWorked || 0}</Text>
+          <Text style={styles.statValue}>{monthlyAggregated?.daysWorked || 0}</Text>
         </View>
         
         <View style={styles.statItem}>
           <Text style={styles.statLabel}>Ore totali</Text>
-          <Text style={styles.statValue}>{formatSafeHours(monthlyAggregated.totalHours || 0)}</Text>
+          <Text style={styles.statValue}>{formatSafeHours(monthlyAggregated?.totalHours || 0)}</Text>
         </View>
         
         <View style={styles.statItem}>
           <Text style={styles.statLabel}>Rimborsi pasti</Text>
-          <Text style={styles.statValue}>{formatSafeAmount(monthlyAggregated.allowances?.meal || 0)}</Text>
+          <Text style={styles.statValue}>{formatSafeAmount(monthlyAggregated?.allowances?.meal || 0)}</Text>
         </View>
         
         <View style={styles.statItem}>
           <Text style={styles.statLabel}>Indennità</Text>
           <Text style={styles.statValue}>
-            {formatSafeAmount((monthlyAggregated.allowances?.travel || 0) + (monthlyAggregated.allowances?.standby || 0))}
+            {formatSafeAmount((monthlyAggregated?.allowances?.travel || 0) + (monthlyAggregated?.allowances?.standby || 0))}
           </Text>
         </View>
       </View>
@@ -1250,12 +1301,12 @@ const DashboardScreen = ({ navigation, route }) => {
       <View style={styles.totalSection}>
         <View style={styles.totalRow}>
           <Text style={styles.totalLabel}>Totale Guadagno Mensile (Lordo)</Text>
-          <Text style={styles.totalAmount}>{formatSafeAmount(monthlyAggregated.totalEarnings || 0)}</Text>
+          <Text style={styles.totalAmount}>{formatSafeAmount(monthlyAggregated?.totalEarnings || 0)}</Text>
         </View>
         
         {/* Calcolo netto con trattenute */}
         {(() => {
-          const grossAmount = monthlyAggregated.totalEarnings || 0;
+          const grossAmount = monthlyAggregated?.totalEarnings || 0;
           if (grossAmount > 0) {
             try {
               // 💰 Usa impostazioni salvate dall'utente con default IRPEF
@@ -1280,14 +1331,14 @@ const DashboardScreen = ({ navigation, route }) => {
               console.log(`- useActualAmount: ${useActualAmount}`);
               console.log(`- !useActualAmount: ${!useActualAmount}`);
               console.log(`- contract disponibile: ${!!settings?.contract}`);
-              console.log(`- monthlyGrossSalary: ${settings?.contract?.monthlyGrossSalary}`);
-              console.log(`- monthlyGrossSalary truthy: ${!!settings?.contract?.monthlyGrossSalary}`);
-              console.log(`- Condizione IF completa: ${!useActualAmount && settings?.contract?.monthlyGrossSalary}`);
+              console.log(`- monthlySalary: ${settings?.contract?.monthlySalary}`);
+              console.log(`- monthlySalary truthy: ${!!settings?.contract?.monthlySalary}`);
+              console.log(`- Condizione IF completa: ${!useActualAmount && settings?.contract?.monthlySalary}`);
               
               // ✅ Se l'utente ha scelto "stima annuale", usa SEMPRE lo stipendio base
-              if (!useActualAmount && settings?.contract?.monthlyGrossSalary) {
+              if (!useActualAmount && settings?.contract?.monthlySalary) {
                 // Usa lo stipendio base mensile per garantire percentuali consistenti
-                calculationBase = settings.contract.monthlyGrossSalary;
+                calculationBase = settings.contract.monthlySalary;
                 isEstimated = true;
                 
                 console.log('🎯 DASHBOARD - Usando stima annuale (stipendio base):');
@@ -1344,8 +1395,8 @@ const DashboardScreen = ({ navigation, route }) => {
   );
 
   const renderAnalyticsSection = () => {
-    const analytics = monthlyAggregated.analytics;
-    if (!analytics || monthlyAggregated.daysWorked === 0) return null;
+    const analytics = monthlyAggregated?.analytics;
+    if (!analytics || (monthlyAggregated?.daysWorked || 0) === 0) return null;
 
     return (
       <View style={styles.sectionCard}>
@@ -1392,24 +1443,24 @@ const DashboardScreen = ({ navigation, route }) => {
           <Text style={styles.analyticsDetailLabel}>Composizione ore</Text>
           <View style={styles.hoursBreakdown}>
             <Text style={styles.hoursBreakdownItem}>
-              • Regolari: {formatSafeHours(analytics.breakdown.regularHours)} 
-              ({analytics.breakdown.regularHours > 0 ? ((analytics.breakdown.regularHours / monthlyAggregated.totalHours) * 100).toFixed(1) : 0}%)
+              • Regolari: {formatSafeHours(analytics?.breakdown?.regularHours || 0)} 
+              ({(analytics?.breakdown?.regularHours || 0) > 0 ? (((analytics?.breakdown?.regularHours || 0) / (monthlyAggregated?.totalHours || 1)) * 100).toFixed(1) : 0}%)
             </Text>
             <Text style={styles.hoursBreakdownItem}>
-              • Straordinari: {formatSafeHours(analytics.breakdown.overtimeHours)} 
-              ({analytics.overtimePercentage.toFixed(1)}%)
+              • Straordinari: {formatSafeHours(analytics?.breakdown?.overtimeHours || 0)} 
+              ({(analytics?.overtimePercentage || 0).toFixed(1)}%)
             </Text>
             <Text style={styles.hoursBreakdownItem}>
-              • Viaggio Extra: {formatSafeHours(analytics.breakdown.extraTravelHours)} 
-              ({analytics.breakdown.extraTravelHours > 0 ? ((analytics.breakdown.extraTravelHours / monthlyAggregated.totalHours) * 100).toFixed(1) : 0}%)
+              • Viaggio Extra: {formatSafeHours(analytics?.breakdown?.extraTravelHours || 0)} 
+              ({(analytics?.breakdown?.extraTravelHours || 0) > 0 ? (((analytics?.breakdown?.extraTravelHours || 0) / (monthlyAggregated?.totalHours || 1)) * 100).toFixed(1) : 0}%)
             </Text>
             <Text style={styles.hoursBreakdownItem}>
-              • Viaggi: {formatSafeHours(analytics.travelHoursTotal)} 
-              ({analytics.travelHoursTotal > 0 ? ((analytics.travelHoursTotal / monthlyAggregated.totalHours) * 100).toFixed(1) : 0}%)
+              • Viaggi: {formatSafeHours(analytics?.travelHoursTotal || 0)} 
+              ({(analytics?.travelHoursTotal || 0) > 0 ? (((analytics?.travelHoursTotal || 0) / (monthlyAggregated?.totalHours || 1)) * 100).toFixed(1) : 0}%)
             </Text>
             <Text style={styles.hoursBreakdownItem}>
               • Notturne: {formatSafeHours(analytics.nightWorkHours)} 
-              ({analytics.nightWorkHours > 0 ? ((analytics.nightWorkHours / monthlyAggregated.totalHours) * 100).toFixed(1) : 0}%)
+              ({analytics.nightWorkHours > 0 ? ((analytics.nightWorkHours / (monthlyAggregated?.totalHours || 1)) * 100).toFixed(1) : 0}%)
             </Text>
           </View>
         </View>
@@ -1418,8 +1469,8 @@ const DashboardScreen = ({ navigation, route }) => {
   };
 
   const renderWorkPatternSection = () => {
-    const analytics = monthlyAggregated.analytics;
-    if (!analytics || monthlyAggregated.daysWorked === 0) return null;
+    const analytics = monthlyAggregated?.analytics;
+    if (!analytics || (monthlyAggregated?.daysWorked || 0) === 0) return null;
 
     return (
       <View style={styles.sectionCard}>
@@ -1475,8 +1526,8 @@ const DashboardScreen = ({ navigation, route }) => {
   };
 
   const renderEarningsBreakdownSection = () => {
-    const analytics = monthlyAggregated.analytics;
-    if (!analytics || monthlyAggregated.totalEarnings === 0) return null;
+    const analytics = monthlyAggregated?.analytics;
+    if (!analytics || (monthlyAggregated?.totalEarnings || 0) === 0) return null;
 
     return (
       <View style={styles.sectionCard}>
@@ -1489,58 +1540,150 @@ const DashboardScreen = ({ navigation, route }) => {
               <View style={[styles.earningsColorBar, { backgroundColor: '#1976d2' }]} />
               <Text style={styles.earningsItemLabel}>Attività Ordinarie</Text>
               <Text style={styles.earningsItemPercentage}>
-                {analytics.breakdown.ordinaryPercentage.toFixed(1)}%
+                {(analytics?.breakdown?.ordinaryPercentage || 0).toFixed(1)}%
               </Text>
             </View>
             <Text style={styles.earningsItemAmount}>
-              {formatSafeAmount(monthlyAggregated.ordinary.total)}
+              {formatSafeAmount(monthlyAggregated?.ordinary?.total)}
             </Text>
           </View>
 
           {/* Reperibilità */}
-          {monthlyAggregated.standby.totalEarnings > 0 && (
+          {(monthlyAggregated?.standby?.totalEarnings || 0) > 0 && (
             <View style={styles.earningsItem}>
               <View style={styles.earningsItemHeader}>
                 <View style={[styles.earningsColorBar, { backgroundColor: '#e91e63' }]} />
                 <Text style={styles.earningsItemLabel}>Interventi Reperibilità</Text>
                 <Text style={styles.earningsItemPercentage}>
-                  {analytics.breakdown.standbyPercentage.toFixed(1)}%
+                  {(analytics?.breakdown?.standbyPercentage || 0).toFixed(1)}%
                 </Text>
               </View>
               <Text style={styles.earningsItemAmount}>
-                {formatSafeAmount(monthlyAggregated.standby.totalEarnings - (monthlyAggregated.allowances?.standby || 0))}
+                {formatSafeAmount(monthlyAggregated?.standby?.totalEarnings || 0)}
               </Text>
             </View>
           )}
 
-          {/* Indennità */}
-          {((monthlyAggregated.allowances?.travel || 0) + (monthlyAggregated.allowances?.standby || 0)) > 0 && (
+          {/* Altri guadagni se presenti */}
+          {(monthlyAggregated?.travel?.totalEarnings || 0) > 0 && (
             <View style={styles.earningsItem}>
               <View style={styles.earningsItemHeader}>
-                <View style={[styles.earningsColorBar, { backgroundColor: '#ff9800' }]} />
-                <Text style={styles.earningsItemLabel}>Indennità</Text>
+                <View style={[styles.earningsColorBar, { backgroundColor: '#795548' }]} />
+                <Text style={styles.earningsItemLabel}>Viaggi e Trasferte</Text>
                 <Text style={styles.earningsItemPercentage}>
-                  {analytics.breakdown.allowancesPercentage.toFixed(1)}%
+                  {(analytics?.breakdown?.travelPercentage || 0).toFixed(1)}%
                 </Text>
               </View>
               <Text style={styles.earningsItemAmount}>
-                {formatSafeAmount((monthlyAggregated.allowances?.travel || 0) + (monthlyAggregated.allowances?.standby || 0))}
+                {formatSafeAmount(monthlyAggregated?.travel?.totalEarnings || 0)}
               </Text>
             </View>
           )}
         </View>
+      </View>
+    );
+  };
 
-        {/* Rapporto reperibilità */}
-        {analytics.standbyWorkRatio > 0 && (
-          <View style={styles.standbyRatioSection}>
-            <Text style={styles.standbyRatioLabel}>
-              Incidenza reperibilità: {analytics.standbyWorkRatio.toFixed(1)}% del totale
+  const renderWorkPatternsSection = () => {
+    const analytics = monthlyAggregated?.analytics;
+    if (!analytics || (monthlyAggregated?.daysWorked || 0) === 0) return null;
+
+    return (
+      <View style={styles.sectionCard}>
+        <Text style={styles.sectionTitle}>🔄 Pattern Lavorativo</Text>
+        
+        <View style={styles.patternGrid}>
+          <View style={styles.patternItem}>
+            <MaterialCommunityIcons name="calendar-weekend" size={20} color="#ff9800" />
+            <Text style={styles.patternLabel}>Giorni weekend</Text>
+            <Text style={styles.patternValue}>{analytics.weekendWorkDays}</Text>
+          </View>
+          
+          <View style={styles.patternItem}>
+            <MaterialCommunityIcons name="phone-alert" size={20} color="#e91e63" />
+            <Text style={styles.patternLabel}>Interventi reperibilità</Text>
+            <Text style={styles.patternValue}>{analytics?.standbyInterventions || 0}</Text>
+          </View>
+          
+          <View style={styles.patternItem}>
+            <MaterialCommunityIcons name="weather-night" size={20} color="#3f51b5" />
+            <Text style={styles.patternLabel}>Ore notturne</Text>
+            <Text style={styles.patternValue}>{formatSafeHours(analytics?.nightWorkHours || 0)}</Text>
+          </View>
+          
+          <View style={styles.patternItem}>
+            <MaterialCommunityIcons name="car" size={20} color="#795548" />
+            <Text style={styles.patternLabel}>
+              Incidenza reperibilità: {(analytics?.standbyWorkRatio || 0).toFixed(1)}% del totale
             </Text>
             <Text style={styles.standbyRatioSubtext}>
-              {analytics.standbyInterventions} interventi su {monthlyAggregated.daysWorked} giorni lavorati
+              {analytics?.standbyInterventions || 0} interventi su {monthlyAggregated?.daysWorked || 0} giorni lavorati
             </Text>
           </View>
-        )}
+        </View>
+      </View>
+    );
+  };
+
+  const renderFixedDaysSection = () => {
+    if (fixedDaysLoading || !fixedDaysData || fixedDaysData.totalDays === 0) return null;
+
+    return (
+      <View style={styles.sectionCard}>
+        <Text style={styles.sectionTitle}>🏖️ Ferie e Permessi</Text>
+        
+        <View style={styles.fixedDaysGrid}>
+          {fixedDaysData.vacation.days > 0 && (
+            <View style={styles.fixedDayItem}>
+              <MaterialCommunityIcons name="beach" size={20} color="#4caf50" />
+              <Text style={styles.fixedDayLabel}>Ferie</Text>
+              <Text style={styles.fixedDayValue}>{fixedDaysData.vacation.days} giorni</Text>
+              <Text style={styles.fixedDayAmount}>{typeof fixedDaysData.vacation.earnings === 'string' ? fixedDaysData.vacation.earnings : formatSafeAmount(fixedDaysData.vacation.earnings)}</Text>
+            </View>
+          )}
+          
+          {fixedDaysData.sick.days > 0 && (
+            <View style={styles.fixedDayItem}>
+              <MaterialCommunityIcons name="medical-bag" size={20} color="#ff9800" />
+              <Text style={styles.fixedDayLabel}>Malattia</Text>
+              <Text style={styles.fixedDayValue}>{fixedDaysData.sick.days} giorni</Text>
+              <Text style={styles.fixedDayAmount}>{typeof fixedDaysData.sick.earnings === 'string' ? fixedDaysData.sick.earnings : formatSafeAmount(fixedDaysData.sick.earnings)}</Text>
+            </View>
+          )}
+          
+          {fixedDaysData.permit.days > 0 && (
+            <View style={styles.fixedDayItem}>
+              <MaterialCommunityIcons name="calendar-clock" size={20} color="#2196f3" />
+              <Text style={styles.fixedDayLabel}>Permesso</Text>
+              <Text style={styles.fixedDayValue}>{fixedDaysData.permit.days} giorni</Text>
+              <Text style={styles.fixedDayAmount}>{typeof fixedDaysData.permit.earnings === 'string' ? fixedDaysData.permit.earnings : formatSafeAmount(fixedDaysData.permit.earnings)}</Text>
+            </View>
+          )}
+          
+          {fixedDaysData.compensatory.days > 0 && (
+            <View style={styles.fixedDayItem}>
+              <MaterialCommunityIcons name="clock-time-eight" size={20} color="#9c27b0" />
+              <Text style={styles.fixedDayLabel}>Riposo Comp.</Text>
+              <Text style={styles.fixedDayValue}>{fixedDaysData.compensatory.days} giorni</Text>
+              <Text style={styles.fixedDayAmount}>{typeof fixedDaysData.compensatory.earnings === 'string' ? fixedDaysData.compensatory.earnings : formatSafeAmount(fixedDaysData.compensatory.earnings)}</Text>
+            </View>
+          )}
+          
+          {fixedDaysData.holiday.days > 0 && (
+            <View style={styles.fixedDayItem}>
+              <MaterialCommunityIcons name="calendar-star" size={20} color="#ff5722" />
+              <Text style={styles.fixedDayLabel}>Festivi</Text>
+              <Text style={styles.fixedDayValue}>{fixedDaysData.holiday.days} giorni</Text>
+              <Text style={styles.fixedDayAmount}>{typeof fixedDaysData.holiday.earnings === 'string' ? fixedDaysData.holiday.earnings : formatSafeAmount(fixedDaysData.holiday.earnings)}</Text>
+            </View>
+          )}
+        </View>
+        
+        <View style={styles.fixedDaysSummary}>
+          <Text style={styles.fixedDaysSummaryText}>
+            Totale: {fixedDaysData.totalDays} giorni - {formatSafeAmount(fixedDaysData.totalEarnings)}
+          </Text>
+        </View>
       </View>
     );
   };
@@ -1598,7 +1741,7 @@ const DashboardScreen = ({ navigation, route }) => {
         style={styles.scrollView}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
-        {monthlyAggregated.daysWorked > 0 ? (
+        {monthlyAggregated?.daysWorked > 0 ? (
           <>
             {renderSummaryStats()}
             {renderAnalyticsSection()}
@@ -1607,6 +1750,7 @@ const DashboardScreen = ({ navigation, route }) => {
             {renderOrdinarySection()}
             {renderStandbySection()}
             {renderAllowancesSection()}
+            {renderFixedDaysSection()}
           </>
         ) : (
           <View style={styles.emptyState}>
@@ -2031,6 +2175,49 @@ const styles = StyleSheet.create({
   standbyRatioSubtext: {
     fontSize: 12,
     color: '#666',
+  },
+  fixedDaysGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    marginTop: 8,
+  },
+  fixedDayItem: {
+    width: '48%',
+    padding: 12,
+    backgroundColor: '#f0f8ff',
+    borderRadius: 8,
+    marginBottom: 8,
+    alignItems: 'center',
+  },
+  fixedDayLabel: {
+    fontSize: 14,
+    color: '#333',
+    fontWeight: '500',
+    marginTop: 4,
+    marginBottom: 2,
+  },
+  fixedDayValue: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#1976d2',
+  },
+  fixedDayAmount: {
+    fontSize: 14,
+    color: '#666',
+    marginTop: 4,
+  },
+  fixedDaysSummary: {
+    marginTop: 16,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+  },
+  fixedDaysSummaryText: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+    textAlign: 'center',
   },
 });
 

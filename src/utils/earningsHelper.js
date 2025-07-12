@@ -68,7 +68,10 @@ export const createWorkEntryFromData = (entry, calculationServiceInstance = null
     isStandbyDay: workEntryData.is_standby_day === 1 ? 1 : 0,
     standbyAllowance: workEntryData.standby_allowance === 1 ? 1 : 0,
     completamentoGiornata: workEntryData.completamento_giornata || 'nessuno',
-    dayType: workEntryData.day_type || workEntryData.dayType || 'lavorativa'
+    dayType: workEntryData.day_type || workEntryData.dayType || 'lavorativa',
+    // Campi per giorni fissi
+    isFixedDay: workEntryData.is_fixed_day === 1 || ['ferie', 'malattia', 'permesso', 'riposo'].includes(workEntryData.day_type || workEntryData.dayType),
+    fixedEarnings: parseFloat(workEntryData.fixed_earnings || 0)
   };
 
   // Log per debug risultato finale

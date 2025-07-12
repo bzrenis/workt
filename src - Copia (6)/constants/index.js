@@ -16,10 +16,10 @@ export const CCNL_CONTRACTS = {
     workingDaysPerMonth: 26, // Standard per calcolo giornaliero
     workingHoursPerDay: 8, // Standard CCNL
     overtimeRates: {
-      day: 1.20, // +20% Straordinario diurno
-      nightUntil22: 1.25, // +25% Notturno fino alle 22:00
-      nightAfter22: 1.35, // +35% Notturno oltre le 22:00
-      saturday: 1.15, // +15% Sabato (personalizzabile)
+      day: 1.20, // +20% Straordinario diurno (06:00-20:00)
+      nightUntil22: 1.25, // +25% Straordinario serale (20:00-22:00)
+      nightAfter22: 1.35, // +35% Straordinario notturno (22:00-06:00)
+      saturday: 1.25, // +25% Sabato (conforme CCNL)
       holiday: 1.3, // +30% Festivo/Domenica (già presente, per chiarezza)
     },
     nightWorkStart: 22, // 22:00
@@ -38,7 +38,7 @@ export const CCNL_CONTRACTS = {
 export const DEFAULT_SETTINGS = {
   contract: CCNL_CONTRACTS.METALMECCANICO_PMI_L5,
   travelCompensationRate: 1.0, // 100% of hourly rate
-  travelHoursSetting: 'EXCESS_AS_TRAVEL', // 'AS_WORK', 'EXCESS_AS_TRAVEL', 'EXCESS_AS_OVERTIME'
+  travelHoursSetting: 'TRAVEL_SEPARATE', // 'AS_WORK', 'TRAVEL_SEPARATE', 'EXCESS_AS_TRAVEL', 'EXCESS_AS_OVERTIME'
   standbySettings: {
     enabled: false,
     dailyAllowance: 0,
@@ -64,15 +64,26 @@ export const DEFAULT_SETTINGS = {
       autoActivate: false,
     },
   },
+  // 💰 Impostazioni per calcolo netto stipendio
+  netCalculation: {
+    method: 'irpef', // 'irpef' (aliquote reali) o 'custom' (percentuale manuale)
+    customDeductionRate: 32, // Percentuale trattenute personalizzata (default più realistico)
+    useActualAmount: false, // Se true, calcola sulla cifra presente, se false usa stima annuale
+  },
 };
 
 // Calculation utilities
 export const calculateOvertimeRate = (hour, contract = CCNL_CONTRACTS.METALMECCANICO_PMI_L5) => {
+  // CCNL Metalmeccanico PMI - Fasce orarie straordinari:
+  // Notturno (22:00-06:00): +35%
   if (hour >= 22 || hour < 6) {
     return contract.hourlyRate * contract.overtimeRates.nightAfter22;
-  } else if (hour >= contract.nightWorkStart) {
+  }
+  // Serale (20:00-22:00): +25%
+  else if (hour >= 20 && hour < 22) {
     return contract.hourlyRate * contract.overtimeRates.nightUntil22;
   }
+  // Diurno (06:00-20:00): +20%
   return contract.hourlyRate * contract.overtimeRates.day;
 };
 
@@ -240,4 +251,72 @@ export const verifyWithPayslip = () => {
     validation,
     levelCheck
   };
+};
+
+// 💰 TRATTENUTE FISCALI E CONTRIBUTIVE - CCNL METALMECCANICO
+export const TAX_DEDUCTIONS = {
+  // 🏛️ Contributi Previdenziali INPS (a carico del lavoratore)
+  INPS_EMPLOYEE: {
+    rate: 0.0919, // 9.19% - Aliquota contributiva dipendente
+    description: 'Contributi previdenziali INPS a carico del lavoratore',
+    maxAnnualBase: 118000, // Massimale contributivo annuo 2025
+  },
+  
+  // 🏥 Contributi Assicurativi INAIL (non a carico del lavoratore)
+  // INAIL è a carico del datore di lavoro, non viene trattenuto
+  
+  // 💼 Trattenute Fiscali IRPEF
+  IRPEF: {
+    // Scaglioni IRPEF 2025
+    brackets: [
+      { min: 0, max: 28000, rate: 0.23 }, // 23% fino a 28.000€
+      { min: 28000, max: 50000, rate: 0.35 }, // 35% da 28.001€ a 50.000€
+      { min: 50000, max: Infinity, rate: 0.43 } // 43% oltre 50.000€
+    ],
+    description: 'Imposta sul reddito delle persone fisiche',
+  },
+  
+  // 🏛️ Addizionali Regionali e Comunali
+  REGIONAL_TAX: {
+    rate: 0.0173, // 1.73% media nazionale (varia per regione)
+    description: 'Addizionale regionale IRPEF',
+    variable: true, // Varia per regione
+  },
+  
+  MUNICIPAL_TAX: {
+    rate: 0.008, // 0.8% media nazionale (varia per comune)
+    description: 'Addizionale comunale IRPEF', 
+    variable: true, // Varia per comune
+    maxAmount: 800, // Massimo annuo per alcune fasce
+  },
+  
+  // 📋 Detrazioni Fiscali Standard
+  DEDUCTIONS: {
+    workEmployee: {
+      maxAmount: 1880, // Detrazione lavoro dipendente max
+      threshold: 15000, // Soglia di applicazione
+      description: 'Detrazione lavoro dipendente'
+    },
+    personalDeduction: 1990, // Detrazione personale base
+  }
+};
+
+// 🧮 UTILITÀ PER CALCOLO NETTO
+export const PAYROLL_CALCULATIONS = {
+  // Coefficienti rapidi per stima (approssimativa)
+  QUICK_NET_RATES: {
+    LOW_INCOME: 0.85, // < 25.000€ annui ~ 85% netto
+    MEDIUM_INCOME: 0.75, // 25-40.000€ annui ~ 75% netto  
+    HIGH_INCOME: 0.65, // > 40.000€ annui ~ 65% netto
+  },
+  
+  // Soglie di reddito per classificazione
+  INCOME_THRESHOLDS: {
+    LOW: 25000,
+    MEDIUM: 40000,
+  },
+  
+  // Mesi di riferimento per calcolo annuale
+  MONTHS_IN_YEAR: 12,
+  TYPICAL_WORKDAYS_YEAR: 312, // 26 giorni * 12 mesi
 };

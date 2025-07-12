@@ -94,11 +94,32 @@ const SettingsScreen = ({ navigation }) => {
       color: '#4CAF50'
     },
     {
+      title: 'Ferie e Permessi',
+      subtitle: 'Gestione richieste ferie e permessi',
+      icon: 'calendar-account',
+      screen: 'VacationManagement',
+      color: '#E91E63'
+    },
+    {
+      title: 'Notifiche',
+      subtitle: 'Promemoria e avvisi automatici',
+      icon: 'bell-ring',
+      screen: 'NotificationSettings',
+      color: '#FF5722'
+    },
+    {
       title: 'Backup e Ripristino',
       subtitle: 'Salvataggio e ripristino dati',
       icon: 'cloud-sync',
       screen: 'Backup',
       color: '#F44336'
+    },
+    {
+      title: 'Debug Settings',
+      subtitle: 'Test sincronizzazione e notifiche',
+      icon: 'bug',
+      screen: 'DebugSettings',
+      color: '#9C27B0'
     }
   ];
 

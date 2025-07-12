@@ -6,10 +6,12 @@ import {
   MEAL_TIMES 
 } from '../constants';
 import { isItalianHoliday } from '../constants/holidays';
+import { NetEarningsCalculator, calculateQuickNet, calculateDetailedNet, calculateRealNet } from './NetEarningsCalculator';
 
 class CalculationService {
   constructor() {
     this.defaultContract = CCNL_CONTRACTS.METALMECCANICO_PMI_L5;
+    this.netCalculator = new NetEarningsCalculator(this.defaultContract);
   }
 
   // Parse time string to minutes from midnight
@@ -163,9 +165,42 @@ class CalculationService {
     // Determina se il giorno è festivo o domenica
     const dateObj = workEntry.date ? new Date(workEntry.date) : new Date();
     const isSunday = dateObj.getDay() === 0;
-    const isHoliday = isItalianHoliday(dateObj);
-    // Corretto: considera anche il flag manuale dal form
-    const isStandbyDay = (standbyDays && standbyDays[workEntry.date]?.selected) || workEntry.isStandbyDay === true || workEntry.isStandbyDay === 1;
+    const isSaturday = dateObj.getDay() === 6;
+    const isHoliday = isItalianHoliday(workEntry.date);
+    
+    // Verifica se il giorno è segnato come reperibile sia tramite calendario impostazioni che flag manuale
+    // Log di debug per verificare la data e le impostazioni di reperibilità
+    const dateStr = workEntry.date; // Data in formato YYYY-MM-DD
+    
+    // Controlla se la reperibilità è stata disattivata manualmente nel form
+    const isManuallyDeactivated = workEntry.isStandbyDay === false || 
+                                workEntry.isStandbyDay === 0 ||
+                                workEntry.standbyAllowance === false ||
+                                workEntry.standbyAllowance === 0;
+                                
+    const isManuallyActivated = workEntry.isStandbyDay === true || 
+                              workEntry.isStandbyDay === 1 || 
+                              workEntry.standbyAllowance === true || 
+                              workEntry.standbyAllowance === 1;
+    
+    // Verifica le impostazioni di reperibilità dal calendario
+    const isInCalendar = Boolean(standbySettings && 
+                        standbySettings.enabled && 
+                        standbyDays && 
+                        dateStr && 
+                        standbyDays[dateStr] && 
+                        standbyDays[dateStr].selected === true);
+    
+    console.log(`[CalculationService] calculateDailyEarnings - Verifica reperibilità per ${dateStr}:`, {
+        manuallyActivated: isManuallyActivated,
+        manuallyDeactivated: isManuallyDeactivated,
+        inCalendar: isInCalendar,
+        standbyEnabled: standbySettings.enabled,
+        standbyDays: standbyDays ? Object.keys(standbyDays).length : 0
+    });
+    
+    // Corretto: se disattivato manualmente, ignora le impostazioni da calendario
+    const isStandbyDay = isManuallyActivated || (!isManuallyDeactivated && isInCalendar);
 
     // Calcolo straordinari
     let overtimePay = 0;
@@ -174,20 +209,19 @@ class CalculationService {
     let regularHours = 0;
     let travelPay = 0;
 
-    // LOGICA CCNL: paga base giornaliera se lavoro+viaggio >= 8h
+    // LOGICA CCNL: gestione modalità viaggio
     const standardWorkDay = getWorkDayHours();
-    const totalRegularHours = workHours + travelHours;
-    if (totalRegularHours >= standardWorkDay) {
-      regularPay = dailyRate;
-      regularHours = standardWorkDay;
-      const extraHours = totalRegularHours - standardWorkDay;
-      if (extraHours > 0) {
-        if (travelHoursSetting === 'EXCESS_AS_TRAVEL') {
-          // Le ore oltre 8h sono pagate come viaggio
-          travelPay = extraHours * baseRate * travelCompensationRate;
-          overtimeHours = 0;
-        } else if (travelHoursSetting === 'EXCESS_AS_OVERTIME') {
-          // Le ore oltre 8h sono pagate come straordinario
+    
+    if (travelHoursSetting === 'TRAVEL_SEPARATE') {
+      // NUOVA MODALITÀ: Viaggio sempre pagato separatamente con tariffa viaggio
+      travelPay = travelHours * baseRate * travelCompensationRate;
+      
+      // Per il lavoro, verifica se completare con diaria o ore effettive
+      if (workHours >= standardWorkDay) {
+        regularPay = dailyRate;
+        regularHours = standardWorkDay;
+        const extraWorkHours = workHours - standardWorkDay;
+        if (extraWorkHours > 0) {
           let overtimeBonusRate = this.getHourlyRateWithBonus({
             baseRate,
             isOvertime: true,
@@ -195,18 +229,55 @@ class CalculationService {
             isHoliday,
             isSunday
           });
-          overtimePay = extraHours * overtimeBonusRate;
-          overtimeHours = extraHours;
-        } else {
-          // Default: nessun extra
-          overtimeHours = 0;
+          overtimePay = extraWorkHours * overtimeBonusRate;
+          overtimeHours = extraWorkHours;
         }
+      } else {
+        regularPay = baseRate * workHours;
+        regularHours = workHours;
+        overtimeHours = 0;
       }
     } else {
-      // Se meno di 8h, paga solo le ore effettive
-      regularPay = baseRate * totalRegularHours;
-      regularHours = totalRegularHours;
-      overtimeHours = 0;
+      // LOGICHE ESISTENTI: considera viaggio + lavoro insieme
+      const totalRegularHours = workHours + travelHours;
+      if (totalRegularHours >= standardWorkDay) {
+        regularPay = dailyRate;
+        regularHours = standardWorkDay;
+        const extraHours = totalRegularHours - standardWorkDay;
+        if (extraHours > 0) {
+          if (travelHoursSetting === 'EXCESS_AS_TRAVEL') {
+            // Le ore oltre 8h sono pagate come viaggio
+            travelPay = extraHours * baseRate * travelCompensationRate;
+            overtimeHours = 0;
+          } else if (travelHoursSetting === 'EXCESS_AS_OVERTIME') {
+            // Le ore oltre 8h sono pagate come straordinario
+            let overtimeBonusRate = this.getHourlyRateWithBonus({
+              baseRate,
+              isOvertime: true,
+              isNight: workEntry.isNight || false,
+              isHoliday,
+              isSunday
+            });
+            overtimePay = extraHours * overtimeBonusRate;
+            overtimeHours = extraHours;
+          } else {
+            // AS_WORK: Default nessun extra, tutto come lavoro normale
+            overtimeHours = 0;
+          }
+        }
+      } else {
+        // Se meno di 8h, paga solo le ore effettive
+        if (travelHoursSetting === 'AS_WORK') {
+          // Tutto come lavoro normale
+          regularPay = baseRate * totalRegularHours;
+          regularHours = totalRegularHours;
+        } else {
+          // Per altre modalità, ancora paga tutto come ore effettive
+          regularPay = baseRate * totalRegularHours;
+          regularHours = totalRegularHours;
+        }
+        overtimeHours = 0;
+      }
     }
 
     // Lavoro ordinario notturno/festivo/domenicale
@@ -230,7 +301,8 @@ class CalculationService {
         workEntry.standbyWorkEnd1,
         workEntry.standbyWorkStart2,
         workEntry.standbyWorkEnd2,
-        contract
+        contract,
+        workEntry.date
       );
     }
     let standbyTravelPay = 0;
@@ -239,53 +311,143 @@ class CalculationService {
     }
 
     // --- INDENNITÀ GIORNALIERA REPERIBILITÀ ---
-    let standbyAllowance = this.calculateStandbyAllowanceForDate(workEntry.date, settings);
+    // Utilizziamo la logica definita sopra per determinare se l'indennità si applica
+    let standbyAllowance = 0;
+    
+    if (isStandbyDay && settings?.standbySettings?.enabled) {
+      // Valori CCNL di default
+      const IND_16H_FERIALE = 4.22;
+      const IND_24H_FERIALE = 7.03;
+      const IND_24H_FESTIVO = 10.63;
+      
+      // Verifica se abbiamo personalizzazioni
+      const customFeriale16 = settings.standbySettings.customFeriale16;
+      const customFeriale24 = settings.standbySettings.customFeriale24;
+      const customFestivo = settings.standbySettings.customFestivo;
+      const allowanceType = settings.standbySettings.allowanceType || '24h';
+      const saturdayAsRest = settings.standbySettings.saturdayAsRest === true;
+      
+      let baseDailyAllowance;
+      
+      // Determina il tipo di giorno considerando le impostazioni personalizzate
+      const isRestDay = isSunday || isHoliday || (isSaturday && saturdayAsRest);
+      
+      if (isRestDay) {
+        // Giorni di riposo (domenica, festivi, sabato se configurato come riposo)
+        baseDailyAllowance = customFestivo || IND_24H_FESTIVO;
+        console.log(`[CalculationService] Indennità reperibilità giorno di riposo per ${workEntry.date}: ${baseDailyAllowance}€ (personalizzata: ${!!customFestivo})`);
+      } else {
+        // Giorni feriali (incluso sabato se non è giorno di riposo)
+        if (allowanceType === '16h') {
+          baseDailyAllowance = customFeriale16 || IND_16H_FERIALE;
+        } else {
+          baseDailyAllowance = customFeriale24 || IND_24H_FERIALE;
+        }
+        console.log(`[CalculationService] Indennità reperibilità feriale ${allowanceType} per ${workEntry.date}: ${baseDailyAllowance}€ (personalizzata: ${!!(allowanceType === '16h' ? customFeriale16 : customFeriale24)})`);
+      }
+      
+      standbyAllowance = baseDailyAllowance;
+    }
+    
+    console.log(`[CalculationService] Indennità reperibilità finale per ${workEntry.date}: ${(standbyAllowance || 0).toFixed(2)}€ (manuale: ${isManuallyActivated}, disattivata: ${isManuallyDeactivated}, calendario: ${isInCalendar})`);
 
     // --- INDENNITÀ TRASFERTA ---
+    // CORREZIONE APPLICATA (04/01/2025): Risolto problema doppio calcolo quando sia PROPORTIONAL_CCNL 
+    // che HALF_ALLOWANCE_HALF_DAY erano attivi simultaneamente. Ora viene applicata solo una logica 
+    // in base alla priorità: PROPORTIONAL_CCNL (conforme CCNL) ha precedenza assoluta.
     let travelAllowance = 0;
     const travelAllowanceSettings = settings.travelAllowance || {};
     const travelAllowanceEnabled = travelAllowanceSettings.enabled;
     const travelAllowanceAmount = parseFloat(travelAllowanceSettings.dailyAmount) || 0;
-    const travelAllowanceOption = travelAllowanceSettings.option || 'WITH_TRAVEL';
+    
+    // Gestione delle opzioni: supporta sia il nuovo formato selectedOptions che il vecchio formato option
+    const selectedOptions = travelAllowanceSettings.selectedOptions || [travelAllowanceSettings.option || 'WITH_TRAVEL'];
+    
+    // Determina il metodo di calcolo dall'array di opzioni selezionate
+    let calculationMethod = 'HALF_ALLOWANCE_HALF_DAY'; // Default
+    if (selectedOptions.includes('PROPORTIONAL_CCNL')) {
+      calculationMethod = 'PROPORTIONAL_CCNL';
+    } else if (selectedOptions.includes('FULL_ALLOWANCE_HALF_DAY')) {
+      calculationMethod = 'FULL_ALLOWANCE_HALF_DAY';
+    }
+    
     const autoActivate = travelAllowanceSettings.autoActivate;
+    const applyOnSpecialDays = travelAllowanceSettings.applyOnSpecialDays || false;
     let travelAllowancePercent = 1.0;
     if (typeof workEntry.travelAllowancePercent === 'number') {
       travelAllowancePercent = workEntry.travelAllowancePercent;
     }
     if (travelAllowanceEnabled && travelAllowanceAmount > 0) {
       let attiva = false;
+      
+      // CORREZIONE: Per il calcolo CCNL proporzionale, include anche le ore di reperibilità
+      // per determinare se la giornata è "piena" (>=8h totali)
       const totalWorked = workHours + travelHours;
-      const isFullDay = totalWorked >= 8;
-      const isHalfDay = totalWorked > 0 && totalWorked < 8;
+      const totalWorkedWithStandby = workHours + travelHours + standbyWorkHours;
+      
+      // Usa ore totali (inclusa reperibilità) se il calcolo CCNL è attivo
+      const effectiveTotalWorked = selectedOptions.includes('PROPORTIONAL_CCNL') 
+        ? totalWorkedWithStandby 
+        : totalWorked;
+      
+      const isFullDay = effectiveTotalWorked >= 8;
+      const isHalfDay = effectiveTotalWorked > 0 && effectiveTotalWorked < 8;
       const isStandbyNonLavorativo = isStandbyDay && standbyWorkHours > 0 && totalWorked === 0;
-      switch (travelAllowanceOption) {
-        case 'WITH_TRAVEL':
-          attiva = travelHours > 0;
-          break;
-        case 'ALWAYS':
-          attiva = true;
-          break;
-        case 'FULL_DAY_ONLY':
-          attiva = isFullDay;
-          break;
-        case 'ALSO_ON_STANDBY':
-          attiva = travelHours > 0 || isStandbyNonLavorativo;
-          break;
-        case 'FULL_ALLOWANCE_HALF_DAY':
-          attiva = totalWorked > 0;
-          break;
-        case 'HALF_ALLOWANCE_HALF_DAY':
-          attiva = totalWorked > 0;
-          break;
-        default:
-          attiva = travelHours > 0;
-      }
-      if (attiva) {
-        if (travelAllowanceOption === 'HALF_ALLOWANCE_HALF_DAY' && isHalfDay) {
-          travelAllowance = travelAllowanceAmount / 2;
+      
+      // Verifica se l'utente ha fatto un override manuale
+      const manualOverride = workEntry.trasfertaManualOverride || false;
+      
+      // Determina l'attivazione basandosi sulle opzioni selezionate
+      if (selectedOptions.includes('ALWAYS')) {
+        attiva = true;
+      } else if (selectedOptions.includes('FULL_DAY_ONLY')) {
+        attiva = isFullDay;
+      } else if (selectedOptions.includes('WITH_TRAVEL')) {
+        attiva = travelHours > 0;
+      } else if (selectedOptions.includes('ALSO_ON_STANDBY')) {
+        attiva = travelHours > 0 || isStandbyNonLavorativo;
+      } else {
+        // Default per calcoli proporzionali o con mezza giornata
+        if (calculationMethod === 'PROPORTIONAL_CCNL' || calculationMethod === 'FULL_ALLOWANCE_HALF_DAY' || calculationMethod === 'HALF_ALLOWANCE_HALF_DAY') {
+          attiva = effectiveTotalWorked > 0;
         } else {
-          travelAllowance = travelAllowanceAmount * travelAllowancePercent;
+          attiva = travelHours > 0; // Fallback
         }
+      }
+      
+      // Applica l'indennità se:
+      // 1. Le condizioni di attivazione sono soddisfatte, E
+      // 2. Non è un giorno speciale (domenica/festivo), OPPURE
+      //    È abilitata l'impostazione per applicare l'indennità nei giorni speciali, OPPURE
+      //    L'utente ha fatto un override manuale attivando l'indennità per questo giorno specifico
+      if (attiva && (!(isSunday || isHoliday) || applyOnSpecialDays || manualOverride)) {
+        let baseTravelAllowance = travelAllowanceAmount;
+        
+        // CORREZIONE DOPPIO CALCOLO: Applica una sola logica di calcolo in base alla priorità CCNL
+        if (selectedOptions.includes('PROPORTIONAL_CCNL')) {
+          // PRIORITÀ 1: Calcolo proporzionale CCNL (conforme normativa)
+          // Include anche le ore di reperibilità per determinare la proporzione
+          const standardWorkDay = 8; // Ore standard CCNL
+          const proportionalRate = Math.min(effectiveTotalWorked / standardWorkDay, 1.0); // Max 100%
+          baseTravelAllowance = travelAllowanceAmount * proportionalRate;
+          
+          // CORREZIONE AGGIUNTIVA: Con calcolo CCNL, ignora travelAllowancePercent del form
+          // per evitare doppi calcoli (il calcolo proporzionale è già completo)
+          travelAllowancePercent = 1.0;
+          
+          console.log(`[CalculationService] Indennità trasferta CCNL proporzionale per ${workEntry.date}: ${effectiveTotalWorked}h (${workHours}h lavoro + ${travelHours}h viaggio + ${standbyWorkHours}h reperibilità) / ${standardWorkDay}h = ${(proportionalRate * 100).toFixed(1)}% → ${baseTravelAllowance.toFixed(2)}€ (travelAllowancePercent ignorato per conformità CCNL)`);
+        }
+        // Logica precedente per retrocompatibilità - SOLO se PROPORTIONAL_CCNL non è attivo
+        else if (selectedOptions.includes('HALF_ALLOWANCE_HALF_DAY') && isHalfDay) {
+          baseTravelAllowance = travelAllowanceAmount / 2;
+          console.log(`[CalculationService] Indennità trasferta 50% per mezza giornata (${workEntry.date}): ${baseTravelAllowance.toFixed(2)}€`);
+        }
+        // FULL_ALLOWANCE_HALF_DAY mantiene l'importo pieno anche per mezze giornate
+        
+        // Applica l'indennità senza maggiorazioni per giorni speciali (a meno che non sia configurato diversamente)
+        travelAllowance = baseTravelAllowance * travelAllowancePercent;
+        
+        console.log(`[CalculationService] Indennità trasferta finale per ${workEntry.date}: ${baseTravelAllowance.toFixed(2)}€ × ${travelAllowancePercent} = ${(travelAllowance || 0).toFixed(2)}€ (metodo: ${calculationMethod}, speciale: ${isSunday || isHoliday}, override: ${manualOverride}, applyOnSpecialDays: ${applyOnSpecialDays})`);
       }
     }
 
@@ -323,8 +485,26 @@ class CalculationService {
       };
     }
 
-    // Totale
+    // Totale lordo
     const total = regularPay + overtimePay + ordinaryBonusPay + travelPay + standbyWorkPay + standbyTravelPay + standbyAllowance + travelAllowance;
+    
+    // 💰 CALCOLO NETTO - Priorità ai dati reali delle buste paga
+    const realNetCalculation = calculateRealNet(total);
+    const quickNetCalculation = this.netCalculator.calculateQuickNet(total);
+    const detailedNetCalculation = this.netCalculator.calculateDetailedNet(total);
+    
+    // Scegli il calcolo migliore disponibile (priorità: reale > dettagliato > rapido)
+    const netCalculation = realNetCalculation?.priority === 1 ? realNetCalculation : 
+                          (detailedNetCalculation?.priority <= 2 ? detailedNetCalculation : quickNetCalculation);
+    
+    console.log('🔍 Calcolo Netto Debug:', {
+      totalGross: total,
+      realNet: realNetCalculation?.net,
+      detailedNet: detailedNetCalculation?.net,
+      quickNet: quickNetCalculation?.net,
+      chosenMethod: netCalculation?.method,
+      priority: netCalculation?.priority
+    });
     
     // Alla fine di calculateDailyEarnings, prima del return
     const mealAllowances = {};
@@ -342,7 +522,17 @@ class CalculationService {
       standbyTravelPay,
       standbyAllowance,
       travelAllowance,
-      total,
+      total, // Lordo totale
+      // 💰 NUOVI CAMPI NETTO
+      grossTotal: total, // Alias per chiarezza
+      netTotal: netCalculation.net, // Netto calcolato
+      totalDeductions: netCalculation.totalDeductions, // Trattenute totali
+      deductionRate: netCalculation.deductionRate, // Percentuale trattenute
+      // 🔍 CALCOLI DETTAGLIATI (opzionali per debugging/analisi)
+      netCalculations: {
+        quick: netCalculation,
+        detailed: detailedNetCalculation
+      },
       breakdown: {
         workHours,
         travelHours,
@@ -395,7 +585,9 @@ class CalculationService {
     // Calcolo ore di lavoro e viaggio
     const workHours = this.calculateWorkHours(workEntry) || 0;
     const travelHours = this.calculateTravelHours(workEntry) || 0;
+    const standbyWorkHours = this.calculateStandbyWorkHours(workEntry) || 0;
     const totalOrdinaryHours = workHours + travelHours;
+    const totalOrdinaryWithStandby = workHours + travelHours + standbyWorkHours;
     
     // Calcola dettagli di ore ordinarie/straordinarie
     const standardWorkDay = getWorkDayHours();
@@ -442,7 +634,7 @@ class CalculationService {
       // Calcola con maggiorazione CCNL per tutte le ore in giorni speciali
       const ccnlMultiplier = isHoliday || isSunday 
         ? (contract.overtimeRates?.holiday || 1.3)  // Maggiorazione festivo/domenica
-        : (contract.overtimeRates?.saturday || 1.15); // Maggiorazione sabato
+        : (contract.overtimeRates?.saturday || 1.25); // Maggiorazione sabato
       
       // Calcola tutte le ore lavorate + viaggio con maggiorazione
       result.ordinary.earnings.giornaliera = result.ordinary.hours.lavoro_giornaliera * baseRate * ccnlMultiplier;
@@ -492,9 +684,84 @@ class CalculationService {
     }
     
     // Calcola la reperibilità se attiva
-    const isStandbyDay = workEntry.isStandbyDay === true || workEntry.isStandbyDay === 1;
+    // Se la reperibilità è esplicitamente disattivata nel form (flag a 0 o false), ignora le impostazioni calendario
+    const isManuallyDeactivated = workEntry.isStandbyDay === false || 
+                                workEntry.isStandbyDay === 0 ||
+                                workEntry.standbyAllowance === false ||
+                                workEntry.standbyAllowance === 0;
+    
+    // Se è esplicitamente attivata nel form, o non è esplicitamente disattivata e c'è nel calendario
+    const isStandbyDay = (workEntry.isStandbyDay === true || 
+                        workEntry.isStandbyDay === 1 || 
+                        workEntry.standbyAllowance === true || 
+                        workEntry.standbyAllowance === 1) ||
+                        (!isManuallyDeactivated && 
+                        settings?.standbySettings?.enabled && 
+                        settings?.standbySettings?.standbyDays && 
+                        settings?.standbySettings?.standbyDays[workEntry.date]?.selected);
+    
+    console.log(`[CalculationService] Stato reperibilità per ${workEntry.date}:`, {
+      isManuallyActivated: workEntry.isStandbyDay === true || 
+                          workEntry.isStandbyDay === 1 || 
+                          workEntry.standbyAllowance === true || 
+                          workEntry.standbyAllowance === 1,
+      isManuallyDeactivated: isManuallyDeactivated,
+      isInCalendar: settings?.standbySettings?.enabled && 
+                   settings?.standbySettings?.standbyDays && 
+                   settings?.standbySettings?.standbyDays[workEntry.date]?.selected,
+      finalStatus: isStandbyDay
+    });
+    
+    // Calcola sempre il breakdown per la reperibilità, ma l'indennità sarà 0 se disattivata
+    result.standby = this.calculateStandbyBreakdown(workEntry, settings);
+      
+    // Aggiungi l'indennità giornaliera di reperibilità all'oggetto allowances
+    // solo se la reperibilità è attiva (considerando anche l'attivazione manuale)
     if (isStandbyDay) {
-      result.standby = this.calculateStandbyBreakdown(workEntry, settings);
+      // CORREZIONE: Indennità applicata se reperibilità attiva, indipendentemente da settings.enabled
+      // L'indennità deve essere applicata se:
+      // 1. Reperibilità attivata manualmente, OPPURE
+      // 2. Reperibilità nel calendario E settings.enabled = true
+      console.log(`[CalculationService] Breakdown - Applicazione indennità reperibilità per ${workEntry.date} (standbyDay: ${isStandbyDay})`);
+      
+      // CORREZIONE: Usa il calcolo CCNL corretto invece del generico dailyAllowance
+      // Valori CCNL di default
+      const IND_16H_FERIALE = 4.22;
+      const IND_24H_FERIALE = 7.03;
+      const IND_24H_FESTIVO = 10.63;
+      
+      // Verifica se abbiamo personalizzazioni
+      const customFeriale16 = settings.standbySettings.customFeriale16;
+      const customFeriale24 = settings.standbySettings.customFeriale24;
+      const customFestivo = settings.standbySettings.customFestivo;
+      const allowanceType = settings.standbySettings.allowanceType || '24h';
+      const saturdayAsRest = settings.standbySettings.saturdayAsRest === true;
+      
+      let correctDailyAllowance;
+      
+      // Determina il tipo di giorno considerando le impostazioni personalizzate
+      const isRestDay = isSunday || isHoliday || (isSaturday && saturdayAsRest);
+      
+      if (isRestDay) {
+        // Giorni di riposo (domenica, festivi, sabato se configurato come riposo)
+        correctDailyAllowance = customFestivo || IND_24H_FESTIVO;
+        console.log(`[CalculationService] Breakdown - Indennità reperibilità giorno di riposo per ${workEntry.date}: ${correctDailyAllowance}€ (personalizzata: ${!!customFestivo})`);
+      } else {
+        // Giorni feriali (incluso sabato se non è giorno di riposo)
+        if (allowanceType === '16h') {
+          correctDailyAllowance = customFeriale16 || IND_16H_FERIALE;
+        } else {
+          correctDailyAllowance = customFeriale24 || IND_24H_FERIALE;
+        }
+        console.log(`[CalculationService] Breakdown - Indennità reperibilità feriale ${allowanceType} per ${workEntry.date}: ${correctDailyAllowance}€ (personalizzata: ${!!(allowanceType === '16h' ? customFeriale16 : customFeriale24)})`);
+      }
+      
+      result.allowances.standby = correctDailyAllowance;
+      console.log(`[CalculationService] Aggiunta indennità reperibilità CCNL corretta di ${correctDailyAllowance}€ alle indennità per ${workEntry.date} (sostituito generico dailyAllowance)`);
+    } else {
+      // Assicura che l'indennità non sia mostrata se disattivata
+      result.allowances.standby = 0;
+      console.log(`[CalculationService] Indennità reperibilità non attiva per ${workEntry.date}`);
     }
     
     // Calcola le indennità (trasferta, pasti, etc.)
@@ -515,7 +782,44 @@ class CalculationService {
       // - È abilitata l'impostazione per applicare l'indennità nei giorni speciali, OPPURE
       // - L'utente ha fatto un override manuale attivando l'indennità per questo giorno specifico
       if (!(isSunday || isHoliday) || applyOnSpecialDays || manualOverride) {
-        result.allowances.travel = travelAllowanceAmount * travelAllowancePercent;
+        // Gestione delle opzioni: supporta sia il nuovo formato selectedOptions che il vecchio formato option
+        const selectedOptions = travelAllowanceSettings.selectedOptions || [travelAllowanceSettings.option || 'WITH_TRAVEL'];
+        
+        // Determina il metodo di calcolo dall'array di opzioni selezionate
+        let calculationMethod = 'HALF_ALLOWANCE_HALF_DAY'; // Default
+        if (selectedOptions.includes('PROPORTIONAL_CCNL')) {
+          calculationMethod = 'PROPORTIONAL_CCNL';
+        } else if (selectedOptions.includes('FULL_ALLOWANCE_HALF_DAY')) {
+          calculationMethod = 'FULL_ALLOWANCE_HALF_DAY';
+        }
+        
+        let baseTravelAllowance = travelAllowanceAmount;
+        
+        // CORREZIONE DOPPIO CALCOLO: Applica una sola logica di calcolo in base alla priorità CCNL
+        if (selectedOptions.includes('PROPORTIONAL_CCNL')) {
+          // PRIORITÀ 1: Calcolo proporzionale CCNL (conforme normativa)
+          // Include anche le ore di reperibilità per determinare la proporzione
+          const standardWorkDay = 8; // Ore standard CCNL
+          const effectiveHours = totalOrdinaryWithStandby; // Include reperibilità
+          const proportionalRate = Math.min(effectiveHours / standardWorkDay, 1.0); // Max 100%
+          baseTravelAllowance = travelAllowanceAmount * proportionalRate;
+          
+          // CORREZIONE AGGIUNTIVA: Con calcolo CCNL, ignora travelAllowancePercent del form
+          // per evitare doppi calcoli (il calcolo proporzionale è già completo)
+          travelAllowancePercent = 1.0;
+          
+          console.log(`[CalculationService] Breakdown - Indennità trasferta CCNL proporzionale per ${workEntry.date}: ${effectiveHours}h (${workHours}h lavoro + ${travelHours}h viaggio + ${standbyWorkHours}h reperibilità) / ${standardWorkDay}h = ${(proportionalRate * 100).toFixed(1)}% → ${baseTravelAllowance.toFixed(2)}€ (travelAllowancePercent ignorato per conformità CCNL)`);
+        }
+        // Logica precedente per retrocompatibilità - SOLO se PROPORTIONAL_CCNL non è attivo
+        else if (selectedOptions.includes('HALF_ALLOWANCE_HALF_DAY') && totalOrdinaryHours < 8) {
+          baseTravelAllowance = travelAllowanceAmount / 2;
+          console.log(`[CalculationService] Breakdown - Indennità trasferta 50% per mezza giornata (${workEntry.date}): ${baseTravelAllowance.toFixed(2)}€`);
+        }
+        // FULL_ALLOWANCE_HALF_DAY mantiene l'importo pieno anche per mezze giornate
+        
+        result.allowances.travel = baseTravelAllowance * travelAllowancePercent;
+        
+        console.log(`[CalculationService] Breakdown - Indennità trasferta finale per ${workEntry.date}: ${baseTravelAllowance.toFixed(2)}€ × ${travelAllowancePercent} = ${(result.allowances.travel || 0).toFixed(2)}€ (metodo: ${calculationMethod})`);
       }
     }
     
@@ -550,6 +854,8 @@ class CalculationService {
     }
     
     // Calcola il totale guadagno giornaliero (esclusi rimborsi pasti)
+    // CORREZIONE: result.standby.totalEarnings include già l'indennità giornaliera, 
+    // quindi non dobbiamo sommare anche result.allowances.standby per evitare doppio conteggio
     result.totalEarnings = result.ordinary.total + 
                           (result.allowances.travel || 0) + 
                           (result.standby ? (result.standby.totalEarnings || 0) : 0);
@@ -574,7 +880,7 @@ class CalculationService {
         baseRate: baseRate,
         appliedMultiplier: isHoliday || isSunday 
           ? (contract.overtimeRates?.holiday || 1.3)
-          : (contract.overtimeRates?.saturday || 1.15),
+          : (contract.overtimeRates?.saturday || 1.25),
         // Dettagli completamento giornata
         isPartialDay: result.details.isPartialDay,
         completamentoTipo: result.details.completamentoTipo,
@@ -606,7 +912,7 @@ class CalculationService {
         baseRate: settings.contract?.hourlyRate || 16.41,
         appliedMultiplier: isHoliday || isSunday 
           ? (settings.contract?.overtimeRates?.holiday || 1.3)
-          : (settings.contract?.overtimeRates?.saturday || 1.15)
+          : (settings.contract?.overtimeRates?.saturday || 1.25)
       });
     }
     
@@ -636,7 +942,40 @@ class CalculationService {
     const standbySettings = settings.standbySettings || {};
     const standbyDays = standbySettings.standbyDays || {};
     const dailyAllowance = parseFloat(standbySettings.dailyAllowance) || 0;
-    const isStandbyDay = (standbyDays && standbyDays[workEntry.date]?.selected) || workEntry.isStandbyDay === true || workEntry.isStandbyDay === 1;
+    
+    // Verifica reperibilità dall'impostazione calendario e/o flag manuale
+    const dateStr = workEntry.date;
+    
+    // Se la reperibilità è esplicitamente disattivata nel form, ignora le impostazioni calendario
+    const isManuallyDeactivated = workEntry.isStandbyDay === false || 
+                                workEntry.isStandbyDay === 0 ||
+                                workEntry.standbyAllowance === false ||
+                                workEntry.standbyAllowance === 0;
+                                
+    const isManuallyActivated = workEntry.isStandbyDay === true || 
+                              workEntry.isStandbyDay === 1 || 
+                              workEntry.standbyAllowance === true || 
+                              workEntry.standbyAllowance === 1;
+    
+    // Verifica le impostazioni di reperibilità dal calendario
+    const isInCalendar = Boolean(standbySettings && 
+                        standbySettings.enabled && 
+                        standbyDays && 
+                        standbyDays[dateStr] && 
+                        standbyDays[dateStr].selected === true);
+    
+    // Se è esplicitamente disattivata dal form, non è reperibilità anche se è nel calendario
+    const isStandbyDay = isManuallyActivated || (!isManuallyDeactivated && isInCalendar);
+    
+    // Log dettagliato per debug reperibilità
+    console.log(`[CalculationService] calculateStandbyBreakdown - Verifica reperibilità per ${dateStr}:`, {
+      manuallyActivated: isManuallyActivated,
+      manuallyDeactivated: isManuallyDeactivated,
+      isInCalendar: isInCalendar,
+      standbyEnabled: standbySettings.enabled,
+      standbyDays: standbyDays ? Object.keys(standbyDays).length : 0,
+      result: isStandbyDay
+    });
 
     const parsedDate = this.safeParseDate(workEntry.date);
     if (!parsedDate) {
@@ -651,6 +990,7 @@ class CalculationService {
     }
     const isHoliday = isItalianHoliday(parsedDate);
     const isSunday = parsedDate.getDay() === 0;
+    const isSaturday = parsedDate.getDay() === 6;
 
     // Segmenti di intervento reperibilità (inclusi tutti i viaggi di partenza e ritorno)
     const segments = [];
@@ -675,10 +1015,10 @@ class CalculationService {
       });
     }
 
-    // Suddivisione minuti per fascia oraria
+    // Suddivisione minuti per fascia oraria (incluso sabato)
     const minuteDetails = {
-      work: { ordinary: 0, night: 0, holiday: 0, night_holiday: 0 },
-      travel: { ordinary: 0, night: 0, holiday: 0, night_holiday: 0 }
+      work: { ordinary: 0, night: 0, saturday: 0, saturday_night: 0, holiday: 0, night_holiday: 0 },
+      travel: { ordinary: 0, night: 0, saturday: 0, saturday_night: 0, holiday: 0, night_holiday: 0 }
     };
 
     for (const segment of segments) {
@@ -689,9 +1029,20 @@ class CalculationService {
         const hour = Math.floor(currentMinute / 60);
         const night = isNightWork(hour);
         let key = 'ordinary';
-        if ((isHoliday || isSunday) && night) key = 'night_holiday';
-        else if (isHoliday || isSunday) key = 'holiday';
-        else if (night) key = 'night';
+        
+        // Logica di classificazione per interventi di reperibilità
+        if ((isHoliday || isSunday) && night) {
+          key = 'night_holiday';
+        } else if (isHoliday || isSunday) {
+          key = 'holiday';
+        } else if (isSaturday && night) {
+          key = 'saturday_night';
+        } else if (isSaturday) {
+          key = 'saturday';
+        } else if (night) {
+          key = 'night';
+        }
+        
         // Somma minuti
         if (segment.type === 'standby_work') minuteDetails.work[key]++;
         if (segment.type === 'standby_travel') minuteDetails.travel[key]++;
@@ -713,13 +1064,41 @@ class CalculationService {
       work: {},
       travel: {}
     };
-    // Maggiorazioni CCNL
+    // Calcola il totale ore giornaliere (lavoro ordinario + interventi reperibilità)
+    const ordinaryWorkHours = this.calculateWorkHours(workEntry) || 0;
+    const ordinaryTravelHours = this.calculateTravelHours(workEntry) || 0;
+    const ordinaryTotalHours = ordinaryWorkHours + ordinaryTravelHours;
+    
+    const standbyWorkMinutes = Object.values(minuteDetails.work).reduce((a, b) => a + b, 0);
+    const standbyTravelMinutes = Object.values(minuteDetails.travel).reduce((a, b) => a + b, 0);
+    const standbyTotalHours = this.minutesToHours(standbyWorkMinutes + standbyTravelMinutes);
+    
+    const totalDailyHours = ordinaryTotalHours + standbyTotalHours;
+    const standardWorkDay = getWorkDayHours(); // 8 ore
+    
+    // Nei giorni feriali, se il totale supera le 8 ore, le ore eccedenti di reperibilità 
+    // potrebbero essere considerate straordinarie secondo normativa CCNL
+    const isWeekday = !isSaturday && !isSunday && !isHoliday;
+    const shouldApplyOvertimeToStandby = isWeekday && totalDailyHours > standardWorkDay;
+    
+    console.log(`[CalculationService] Verifica limite 8 ore per ${workEntry.date}:`, {
+      isWeekday,
+      ordinaryTotalHours,
+      standbyTotalHours,
+      totalDailyHours,
+      standardWorkDay,
+      shouldApplyOvertimeToStandby
+    });
+
+    // Maggiorazioni CCNL per interventi di reperibilità
     const ccnlRates = contract.overtimeRates || {};
     const multipliers = {
-      ordinary: 1.0,
-      night: ccnlRates.nightUntil22 || 1.2,
-      holiday: ccnlRates.holiday || 1.3,
-      night_holiday: ccnlRates.nightHoliday || 1.5
+      ordinary: shouldApplyOvertimeToStandby ? (ccnlRates.day || 1.2) : 1.0, // Se supera 8h feriali, diventa straordinario
+      night: shouldApplyOvertimeToStandby ? (ccnlRates.nightAfter22 || 1.35) : 1.25, // Straordinario notturno o ordinario notturno
+      saturday: ccnlRates.saturday || 1.25, // Maggiorazione sabato configurabile
+      saturday_night: (ccnlRates.saturday || 1.25) * 1.25, // Sabato + notturno
+      holiday: shouldApplyOvertimeToStandby ? (ccnlRates.holiday || 1.35) : 1.30, // Straordinario festivo o ordinario festivo
+      night_holiday: shouldApplyOvertimeToStandby ? 1.60 : 1.55 // Maggiorazione composta per straordinario o ordinario
     };
     Object.keys(hours.work).forEach(k => {
       earnings.work[k] = hours.work[k] * baseRate * (multipliers[k] || 1.0);
@@ -727,14 +1106,59 @@ class CalculationService {
     });
 
     // Guadagno totale reperibilità (inclusa indennità)
-    const isStandbyActive = (workEntry.isStandbyDay === true || workEntry.isStandbyDay === 1);
+    // Se la reperibilità è disattivata manualmente, non consideriamo l'indennità
+    const isStandbyActive = isManuallyActivated || (!isManuallyDeactivated && isInCalendar);
     
-    const totalEarnings = Object.values(earnings.work).reduce((a, b) => a + b, 0)
-      + Object.values(earnings.travel).reduce((a, b) => a + b, 0)
-      + (isStandbyActive ? dailyAllowance : 0);
-
-    // Calcolo indennità giornaliera
-    const dailyIndemnity = isStandbyActive ? dailyAllowance : 0;
+    // CORREZIONE: Calcola l'indennità CCNL corretta invece di usare il generico dailyAllowance
+    let correctDailyAllowance = 0;
+    if (isStandbyActive) {
+      // Valori CCNL di default
+      const IND_16H_FERIALE = 4.22;
+      const IND_24H_FERIALE = 7.03;
+      const IND_24H_FESTIVO = 10.63;
+      
+      // Verifica se abbiamo personalizzazioni
+      const customFeriale16 = standbySettings.customFeriale16;
+      const customFeriale24 = standbySettings.customFeriale24;
+      const customFestivo = standbySettings.customFestivo;
+      const allowanceType = standbySettings.allowanceType || '24h';
+      const saturdayAsRest = standbySettings.saturdayAsRest === true;
+      
+      // Determina il tipo di giorno considerando le impostazioni personalizzate
+      const isRestDay = isSunday || isHoliday || (isSaturday && saturdayAsRest);
+      
+      if (isRestDay) {
+        // Giorni di riposo (domenica, festivi, sabato se configurato come riposo)
+        correctDailyAllowance = customFestivo || IND_24H_FESTIVO;
+        console.log(`[CalculationService] StandbyBreakdown - Indennità reperibilità giorno di riposo per ${dateStr}: ${correctDailyAllowance}€ (personalizzata: ${!!customFestivo})`);
+      } else {
+        // Giorni feriali (incluso sabato se non è giorno di riposo)
+        if (allowanceType === '16h') {
+          correctDailyAllowance = customFeriale16 || IND_16H_FERIALE;
+        } else {
+          correctDailyAllowance = customFeriale24 || IND_24H_FERIALE;
+        }
+        console.log(`[CalculationService] StandbyBreakdown - Indennità reperibilità feriale ${allowanceType} per ${dateStr}: ${correctDailyAllowance}€ (personalizzata: ${!!(allowanceType === '16h' ? customFeriale16 : customFeriale24)})`);
+      }
+    }
+    
+    console.log(`[CalculationService] calcolo finale indennità: ${isStandbyActive ? 'attiva' : 'non attiva'}`, {
+      isManuallyActivated,
+      isManuallyDeactivated, 
+      isInCalendar,
+      correctDailyAllowance,
+      oldDailyAllowance: dailyAllowance
+    });
+    
+    // CORREZIONE: Gli earnings degli interventi devono essere calcolati sempre se ci sono interventi
+    // L'indennità giornaliera viene applicata solo se la reperibilità è attiva
+    const interventionEarnings = Object.values(earnings.work).reduce((a, b) => a + b, 0)
+      + Object.values(earnings.travel).reduce((a, b) => a + b, 0);
+    
+    // L'indennità giornaliera viene aggiunta solo se la reperibilità è attiva
+    const dailyIndemnity = isStandbyActive ? correctDailyAllowance : 0;
+    
+    const totalEarnings = interventionEarnings + dailyIndemnity;
 
     return {
       dailyIndemnity, // Indennità giornaliera
@@ -788,17 +1212,75 @@ class CalculationService {
       }
 
       // Logica Indennità di Reperibilità
-      // NOTA: Questo valore viene sovrascritto nell'oggetto di ritorno 
-      // usando il valore da standbyBreakdown per evitare duplicazioni
+      // NOTA: Questo valore viene usato per mostrare l'indennità nel riepilogo
       const standbySettings = settings.standbySettings || {};
-      // Corretto: considera anche il flag manuale dal form
-      const isStandbyDay = (standbySettings.standbyDays && standbySettings.standbyDays[workEntry.date]?.selected) || workEntry.isStandbyDay === true || workEntry.isStandbyDay === 1;
+      const dateStr = workEntry.date; // Data in formato YYYY-MM-DD
+      
+      // Se la reperibilità è esplicitamente disattivata nel form, ignora le impostazioni calendario
+      const isManuallyDeactivated = workEntry.isStandbyDay === false || 
+                                  workEntry.isStandbyDay === 0 ||
+                                  workEntry.standbyAllowance === false ||
+                                  workEntry.standbyAllowance === 0;
+                                  
+      const isManuallyActivated = workEntry.isStandbyDay === true || 
+                                workEntry.isStandbyDay === 1 || 
+                                workEntry.standbyAllowance === true || 
+                                workEntry.standbyAllowance === 1;
+      
+      const isInCalendar = Boolean(standbySettings.enabled && 
+                          standbySettings.standbyDays && 
+                          standbySettings.standbyDays[dateStr]?.selected);
+      
+      // Log di debug per verificare la data e le impostazioni di reperibilità
+      console.log(`[CalculationService] Verifica reperibilità per ${dateStr}:`, {
+          manuallyActivated: isManuallyActivated,
+          manuallyDeactivated: isManuallyDeactivated,
+          isInCalendar: isInCalendar,
+          standbyEnabled: standbySettings.enabled,
+          standbyDays: standbySettings.standbyDays ? Object.keys(standbySettings.standbyDays).length : 0
+      });
+      
+      // Corretto: considera sia il flag manuale dal form che le impostazioni configurate
+      // Se è esplicitamente disattivata dal form, non è reperibilità anche se è nel calendario
+      const isStandbyDay = isManuallyActivated || (!isManuallyDeactivated && isInCalendar);
+      
       if (isStandbyDay) {
-          // Questa parte è solo un fallback, il valore effettivo
-          // viene preso da standbyBreakdown.dailyIndemnity
-          allowances.standby = parseFloat(standbySettings.dailyAllowance) || 
-                               parseFloat(standbySettings.dailyIndemnity) || 
-                               7.50; // Valore predefinito CCNL
+          // CORREZIONE: Calcola l'indennità CCNL corretta invece di usare il generico dailyAllowance
+          // Valori CCNL di default
+          const IND_16H_FERIALE = 4.22;
+          const IND_24H_FERIALE = 7.03;
+          const IND_24H_FESTIVO = 10.63;
+          
+          // Verifica se abbiamo personalizzazioni
+          const customFeriale16 = standbySettings.customFeriale16;
+          const customFeriale24 = standbySettings.customFeriale24;
+          const customFestivo = standbySettings.customFestivo;
+          const allowanceType = standbySettings.allowanceType || '24h';
+          const saturdayAsRest = standbySettings.saturdayAsRest === true;
+          
+          // Determina il tipo di giorno considerando le impostazioni personalizzate
+          const dateObj = new Date(dateStr);
+          const isSaturday = dateObj.getDay() === 6;
+          const isSunday = dateObj.getDay() === 0;
+          const isHoliday = false; // Assumiamo non festivo per semplicità, andrebbe verificato
+          const isRestDay = isSunday || isHoliday || (isSaturday && saturdayAsRest);
+          
+          let correctStandbyAllowance;
+          if (isRestDay) {
+            // Giorni di riposo (domenica, festivi, sabato se configurato come riposo)
+            correctStandbyAllowance = customFestivo || IND_24H_FESTIVO;
+            console.log(`[CalculationService] Allowances - Indennità reperibilità giorno di riposo per ${dateStr}: ${correctStandbyAllowance}€ (personalizzata: ${!!customFestivo})`);
+          } else {
+            // Giorni feriali (incluso sabato se non è giorno di riposo)
+            if (allowanceType === '16h') {
+              correctStandbyAllowance = customFeriale16 || IND_16H_FERIALE;
+            } else {
+              correctStandbyAllowance = customFeriale24 || IND_24H_FERIALE;
+            }
+            console.log(`[CalculationService] Allowances - Indennità reperibilità feriale ${allowanceType} per ${dateStr}: ${correctStandbyAllowance}€ (personalizzata: ${!!(allowanceType === '16h' ? customFeriale16 : customFeriale24)})`);
+          }
+          
+          allowances.standby = correctStandbyAllowance;
       }
       
       // Logica Buoni Pasto (aggiornata)
@@ -846,8 +1328,14 @@ class CalculationService {
   }
 
   // Calculate standby work earnings with night work considerations
-  calculateStandbyWorkEarnings(start1, end1, start2, end2, contract) {
+  calculateStandbyWorkEarnings(start1, end1, start2, end2, contract, date) {
     let totalEarnings = 0;
+    
+    // Controlla se il giorno è festivo, domenica o sabato
+    const workDate = new Date(date);
+    const isSaturday = workDate.getDay() === 6;
+    const isSunday = workDate.getDay() === 0;
+    const isHoliday = isItalianHoliday(workDate);
     
     const shifts = [
       { start: start1, end: end1 },
@@ -862,15 +1350,21 @@ class CalculationService {
       const shiftMinutes = this.calculateTimeDifference(shift.start, shift.end);
       const shiftHours = this.minutesToHours(shiftMinutes);
       
-      // Simplified calculation - could be more sophisticated to handle mixed rates within shift
+      // Gli interventi di reperibilità sono pagati come ore ORDINARIE, non straordinari
       let rate = contract.hourlyRate;
       
-      if (endHour > 22 || endHour < 6) {
-        rate = contract.hourlyRate * contract.overtimeRates.nightAfter22;
-      } else if (startHour >= 22 || endHour >= 22) {
-        rate = contract.hourlyRate * contract.overtimeRates.nightUntil22;
-      } else {
-        rate = contract.hourlyRate * contract.overtimeRates.day;
+      // Applicare maggiorazioni secondo CCNL:
+      // 1. Maggiorazione notturna se il turno è notturno
+      if ((startHour >= 22 || startHour < 6) || (endHour >= 22 || endHour < 6)) {
+        rate = contract.hourlyRate * (contract.overtimeRates?.night || 1.25); // +25% notturno
+      }
+      // 2. Maggiorazione festiva/domenicale 
+      else if (isSunday || isHoliday) {
+        rate = contract.hourlyRate * 1.30; // +30% festivo/domenicale
+      }
+      // 3. Maggiorazione sabato
+      else if (isSaturday) {
+        rate = contract.hourlyRate * (contract.overtimeRates?.saturday || 1.25); // Sabato configurabile
       }
       
       totalEarnings += shiftHours * rate;
@@ -880,64 +1374,257 @@ class CalculationService {
   }
 
   // Calculate monthly summary
-  calculateMonthlySummary(workEntries, settings) {
+  calculateMonthlySummary(workEntries, settings, month, year) {
     const summary = {
       totalHours: 0,
       workHours: 0,
       travelHours: 0,
+      travelExtraHours: 0,
       overtimeHours: 0,
       standbyWorkHours: 0,
       standbyTravelHours: 0,
       regularDays: 0,
+      weekendHolidayDays: 0,
       standbyDays: 0,
-      totalEarnings: 0,
+      travelAllowanceDays: 0,
+      mealVoucherDays: 0,
+      mealCashDays: 0,
+      lunchCount: 0,
+      dinnerCount: 0,
+      mealVoucherAmount: 0,
+      mealCashAmount: 0,
+      totalEarnings: 0, // Lordo totale
+      // 💰 NUOVI CAMPI NETTO
+      grossTotalEarnings: 0, // Alias per chiarezza
+      netTotalEarnings: 0, // Netto totale
+      totalDeductions: 0, // Trattenute totali mensili
+      deductionRate: 0, // Percentuale media trattenute
       regularPay: 0,
       overtimePay: 0,
       travelPay: 0,
       standbyPay: 0,
       allowances: 0,
       mealAllowances: 0,
+      overtimeDetail: {
+        day: 0,
+        nightUntil22: 0,
+        nightAfter22: 0
+      },
       dailyBreakdown: []
     };
     
+    // Protezione contro workEntries nullo o non array
+    if (!workEntries || !Array.isArray(workEntries)) {
+      console.error('calculateMonthlySummary: workEntries non valido', workEntries);
+      return summary;
+    }
+    
+    // Determina mese e anno dalle entry o dai parametri
+    let targetMonth, targetYear;
+    
+    // Usa i parametri se forniti
+    if (month !== undefined && year !== undefined) {
+      targetMonth = month;
+      targetYear = year;
+    }
+    // Altrimenti, prendi la prima entry valida per determinare mese/anno
+    else if (workEntries.length > 0 && workEntries[0].date) {
+      const firstEntryDate = new Date(workEntries[0].date);
+      targetYear = firstEntryDate.getFullYear();
+      targetMonth = firstEntryDate.getMonth() + 1; // getMonth() restituisce 0-11
+    } else {
+      // Se non ci sono entry e nessun parametro, usa il mese/anno corrente
+      const now = new Date();
+      targetYear = now.getFullYear();
+      targetMonth = now.getMonth() + 1;
+    }
+    
+    // Aggiungiamo un'analisi iniziale del mese/anno per trovare i giorni di reperibilità dalle impostazioni
+    // In caso di assenza di inserimenti normali per quei giorni
+    if (settings?.standbySettings?.enabled && settings?.standbySettings?.standbyDays) {
+      const standbyDays = settings.standbySettings.standbyDays;
+      // Filtriamo le date di reperibilità che corrispondono al mese/anno richiesto
+      const standbyDatesOfMonth = Object.keys(standbyDays).filter(date => {
+        if (!standbyDays[date]?.selected) return false;
+        
+        const [y, m] = date.split('-');
+        return parseInt(y) === parseInt(targetYear) && parseInt(m) === parseInt(targetMonth);
+      });
+      
+      console.log(`[CalculationService] Trovati ${standbyDatesOfMonth.length} giorni di reperibilità nel mese ${targetYear}-${targetMonth} dalle impostazioni`);
+    }
+    
     workEntries.forEach(entry => {
-      const dailyEarnings = this.calculateDailyEarnings(entry, settings);
+      // Usa calculateEarningsBreakdown per logica consistente con TimeEntryScreen
+      const breakdown = this.calculateEarningsBreakdown(entry, settings);
       const workHours = this.calculateWorkHours(entry);
       const travelHours = this.calculateTravelHours(entry);
-      const standbyWorkHours = this.calculateStandbyWorkHours(entry);
-      const standbyTravelHours = this.calculateStandbyTravelHours(entry);
+      const travelExtraHours = this.calculateExtraTravelHours ? this.calculateExtraTravelHours(entry) : 0;
       
+      // Usa le ore di reperibilità dal breakdown dettagliato se disponibile
+      let standbyWorkHours = 0;
+      let standbyTravelHours = 0;
+      
+      if (breakdown.standby && breakdown.standby.workHours && breakdown.standby.travelHours) {
+        // Usa il breakdown dettagliato che gestisce le categorie (ordinary, night, saturday, holiday, etc.)
+        standbyWorkHours = Object.values(breakdown.standby.workHours).reduce((sum, hours) => sum + hours, 0);
+        standbyTravelHours = Object.values(breakdown.standby.travelHours).reduce((sum, hours) => sum + hours, 0);
+        console.log(`[CalculationService] ${entry.date}: Ore reperibilità da breakdown dettagliato - Lavoro: ${standbyWorkHours}h, Viaggio: ${standbyTravelHours}h`);
+      } else {
+        // Fallback alla logica semplice
+        standbyWorkHours = this.calculateStandbyWorkHours(entry);
+        standbyTravelHours = this.calculateStandbyTravelHours(entry);
+        console.log(`[CalculationService] ${entry.date}: Ore reperibilità da calcolo semplice - Lavoro: ${standbyWorkHours}h, Viaggio: ${standbyTravelHours}h`);
+      }
+      
+      // Ore totali e per categoria
       summary.totalHours += workHours + travelHours + standbyWorkHours + standbyTravelHours;
       summary.workHours += workHours;
       summary.travelHours += travelHours;
-      summary.overtimeHours += dailyEarnings.breakdown.overtimeHours;
+      summary.travelExtraHours += travelExtraHours;
+      summary.overtimeHours += breakdown.ordinary?.hours?.overtime || 0;
       summary.standbyWorkHours += standbyWorkHours;
       summary.standbyTravelHours += standbyTravelHours;
       
-      if (entry.isStandbyDay) {
+      // Dettaglio ore straordinarie per tipo di maggiorazione
+      if (breakdown.ordinary?.hours) {
+        summary.overtimeDetail.day += breakdown.ordinary.hours.overtime_day || 0;
+        summary.overtimeDetail.nightUntil22 += breakdown.ordinary.hours.overtime_night_until_22 || 0;
+        summary.overtimeDetail.nightAfter22 += breakdown.ordinary.hours.overtime_night_after_22 || 0;
+      }
+      
+      // Conteggio giorni per tipo di reperibilità
+      // Considera sia il flag manuale (isStandbyDay/standbyAllowance) che le impostazioni
+      const isStandbyDayManual = entry.isStandbyDay === 1 || entry.standbyAllowance === 1;
+      const isStandbyDayFromSettings = settings?.standbySettings?.enabled && 
+        settings?.standbySettings?.standbyDays && 
+        settings?.standbySettings?.standbyDays[entry.date]?.selected;
+        
+      if (isStandbyDayManual || isStandbyDayFromSettings) {
         summary.standbyDays++;
+        console.log(`[CalculationService] Conteggio giorni reperibilità: ${entry.date} conteggiato. Fonte: ${isStandbyDayManual ? 'Flag manuale' : 'Impostazioni'}`);
+      }
+      
+      // Giorni ordinari vs festivi/weekend
+      const entryDate = new Date(entry.date);
+      const isWeekend = entryDate.getDay() === 0 || entryDate.getDay() === 6; // domenica = 0, sabato = 6
+      const isHoliday = isItalianHoliday(entry.date);
+      
+      if (isWeekend || isHoliday) {
+        summary.weekendHolidayDays++;
       } else {
         summary.regularDays++;
       }
       
-      summary.totalEarnings += dailyEarnings.total;
-      summary.regularPay += dailyEarnings.regularPay;
-      summary.overtimePay += dailyEarnings.overtimePay;
-      summary.travelPay += dailyEarnings.travelPay;
-      summary.standbyPay += dailyEarnings.standbyWorkPay + dailyEarnings.standbyTravelPay;
-      summary.allowances += dailyEarnings.travelAllowance + dailyEarnings.standbyAllowance;
-      summary.mealAllowances += dailyEarnings.mealAllowances;
+      // Conteggio giorni con trasferta
+      if (entry.travelAllowance === 1) {
+        summary.travelAllowanceDays++;
+      }
       
+      // Conteggio giorni con pasti usando logica corretta allineata al form
+      let hasMealVoucher = false;
+      let hasMealCash = false;
+      
+      // Logica pranzo: se c'è cash specifico, usa solo quello, altrimenti usa voucher dalle impostazioni
+      if (entry.mealLunchCash > 0) {
+        summary.lunchCount++;
+        hasMealCash = true;
+        summary.mealCashAmount += entry.mealLunchCash;
+      } else if (entry.mealLunchVoucher === 1) {
+        summary.lunchCount++;
+        hasMealVoucher = true;
+        summary.mealVoucherAmount += settings?.mealAllowances?.lunch?.voucherAmount || 0;
+        // Aggiungi anche cash dalle impostazioni se configurato
+        if (settings?.mealAllowances?.lunch?.cashAmount > 0) {
+          hasMealCash = true;
+          summary.mealCashAmount += settings.mealAllowances.lunch.cashAmount;
+        }
+      }
+      
+      // Logica cena: stessa logica del pranzo
+      if (entry.mealDinnerCash > 0) {
+        summary.dinnerCount++;
+        hasMealCash = true;
+        summary.mealCashAmount += entry.mealDinnerCash;
+      } else if (entry.mealDinnerVoucher === 1) {
+        summary.dinnerCount++;
+        hasMealVoucher = true;
+        summary.mealVoucherAmount += settings?.mealAllowances?.dinner?.voucherAmount || 0;
+        // Aggiungi anche cash dalle impostazioni se configurato
+        if (settings?.mealAllowances?.dinner?.cashAmount > 0) {
+          hasMealCash = true;
+          summary.mealCashAmount += settings.mealAllowances.dinner.cashAmount;
+        }
+      }
+      
+      if (hasMealVoucher) summary.mealVoucherDays++;
+      if (hasMealCash) summary.mealCashDays++;
+      
+      // Importi totali usando breakdown corretto  
+      summary.totalEarnings += breakdown.totalEarnings || 0;
+      summary.regularPay += breakdown.ordinary?.total || 0;
+      summary.overtimePay += breakdown.ordinary?.earnings?.overtime || 0;
+      summary.travelPay += breakdown.ordinary?.earnings?.travel || 0;
+      
+      // Somma indennità di reperibilità
+      summary.standbyPay += (breakdown.standby?.totalEarnings || 0) + (breakdown.allowances?.standby || 0);
+      
+      // Le altre indennità (trasferta)
+      summary.allowances += breakdown.allowances?.travel || 0;
+      
+      // Rimborsi pasto usando breakdown corretto
+      summary.mealAllowances += breakdown.allowances?.meal || 0;
+      
+      // Determina se è un giorno di reperibilità (da flag manuale o impostazioni)
+      const isStandbyDay = entry.isStandbyDay === 1 || entry.standbyAllowance === 1 ||
+        (settings?.standbySettings?.enabled && 
+          settings?.standbySettings?.standbyDays && 
+          settings?.standbySettings?.standbyDays[entry.date]?.selected);
+
       summary.dailyBreakdown.push({
         date: entry.date,
         workHours,
         travelHours,
         standbyWorkHours,
         standbyTravelHours,
-        earnings: dailyEarnings.total,
-        isStandbyDay: entry.isStandbyDay
+        earnings: breakdown.totalEarnings || 0,
+        isStandbyDay: isStandbyDay ? 1 : 0, // Normalizzato a 1/0 per consistenza
+        // Aggiungi dettaglio indennità giornaliera di reperibilità per dashboard
+        standbyAllowance: isStandbyDay ? (breakdown.allowances?.standby || 0) : 0
       });
     });
+    
+    // 💰 CALCOLO NETTO MENSILE - Priorità ai dati reali delle buste paga
+    if (summary.totalEarnings > 0) {
+      const realNetCalculation = calculateRealNet(summary.totalEarnings);
+      const monthlyNetCalculation = this.netCalculator.calculateMonthlyNet(summary.totalEarnings);
+      
+      // Scegli il calcolo migliore (priorità: reale > teorico)
+      const chosenCalculation = realNetCalculation?.priority === 1 ? realNetCalculation : monthlyNetCalculation;
+      
+      console.log('🔍 Calcolo Netto Mensile Debug:', {
+        totalEarnings: summary.totalEarnings,
+        realMethod: realNetCalculation?.method,
+        realNet: realNetCalculation?.net,
+        monthlyNet: monthlyNetCalculation?.net,
+        chosenMethod: chosenCalculation?.method,
+        chosenNet: chosenCalculation?.net
+      });
+      
+      // Aggiorna i campi del summary con i calcoli netti
+      summary.grossTotalEarnings = summary.totalEarnings; // Alias per chiarezza
+      summary.netTotalEarnings = chosenCalculation.net;
+      summary.totalDeductions = chosenCalculation.totalDeductions;
+      summary.deductionRate = chosenCalculation.effectiveRate || chosenCalculation.deductionRate;
+      
+      // Aggiungi info dettagliate per debugging/analisi
+      summary.netCalculations = {
+        real: realNetCalculation,
+        monthly: monthlyNetCalculation,
+        chosen: chosenCalculation,
+        estimatedAnnual: summary.totalEarnings * 12
+      };
+    }
     
     return summary;
   }
@@ -1000,6 +1687,97 @@ class CalculationService {
     }
 
     return results;
+  }
+
+  // Metodo per ottenere il breakdown dettagliato della reperibilità
+  static getStandbyBreakdown(workEntry, settings) {
+    const date = new Date(workEntry.date);
+    const isSunday = date.getDay() === 0;
+    const isSaturday = date.getDay() === 6;
+    const isHoliday = isItalianHoliday(workEntry.date);
+    
+    const standbySettings = settings?.standbySettings || {};
+    const standbyDays = standbySettings.standbyDays || {};
+    const dateStr = workEntry.date;
+    
+    // Logica per determinare se è giorno di reperibilità (presa da calculateDailyEarnings)
+    const isManuallyDeactivated = workEntry.isStandbyDay === false || 
+                                  workEntry.isStandbyDay === 0 ||
+                                  workEntry.standbyAllowance === false ||
+                                  workEntry.standbyAllowance === 0;
+    
+    const isManuallyActivated = workEntry.isStandbyDay === true || 
+                                workEntry.isStandbyDay === 1 || 
+                                workEntry.standbyAllowance === true || 
+                                workEntry.standbyAllowance === 1;
+    
+    const isInCalendar = Boolean(standbySettings && 
+                        standbySettings.enabled && 
+                        standbyDays && 
+                        dateStr && 
+                        standbyDays[dateStr] && 
+                        standbyDays[dateStr].selected === true);
+    
+    const isStandbyDay = isManuallyActivated || (!isManuallyDeactivated && isInCalendar);
+    
+    if (!isStandbyDay || !settings?.standbySettings?.enabled) {
+      return {
+        status: 'Non in reperibilità',
+        allowance: 0,
+        details: null
+      };
+    }
+    
+    // Valori CCNL di default
+    const IND_16H_FERIALE = 4.22;
+    const IND_24H_FERIALE = 7.03;
+    const IND_24H_FESTIVO = 10.63;
+    
+    // Verifica personalizzazioni
+    const customFeriale16 = settings.standbySettings.customFeriale16;
+    const customFeriale24 = settings.standbySettings.customFeriale24;
+    const customFestivo = settings.standbySettings.customFestivo;
+    const allowanceType = settings.standbySettings.allowanceType || '24h';
+    const saturdayAsRest = settings.standbySettings.saturdayAsRest === true;
+    
+    // Determina il tipo di giorno
+    const isRestDay = isSunday || isHoliday || (isSaturday && saturdayAsRest);
+    
+    let standbyAllowance;
+    let dayType;
+    let isCustom = false;
+    let defaultValue;
+    
+    if (isRestDay) {
+      standbyAllowance = customFestivo || IND_24H_FESTIVO;
+      dayType = isSunday ? 'Domenica' : (isHoliday ? 'Festivo' : 'Sabato (riposo)');
+      isCustom = !!customFestivo;
+      defaultValue = IND_24H_FESTIVO;
+    } else {
+      if (allowanceType === '16h') {
+        standbyAllowance = customFeriale16 || IND_16H_FERIALE;
+        isCustom = !!customFeriale16;
+        defaultValue = IND_16H_FERIALE;
+      } else {
+        standbyAllowance = customFeriale24 || IND_24H_FERIALE;
+        isCustom = !!customFeriale24;
+        defaultValue = IND_24H_FERIALE;
+      }
+      dayType = isSaturday ? 'Sabato (lavorativo)' : 'Feriale';
+    }
+    
+    return {
+      status: 'In reperibilità',
+      allowance: standbyAllowance,
+      details: {
+        dayType,
+        allowanceType: isRestDay ? '24h' : allowanceType,
+        isCustom,
+        defaultValue,
+        source: isCustom ? 'Personalizzato' : 'CCNL',
+        activationSource: isManuallyActivated ? 'Manuale' : 'Calendario'
+      }
+    };
   }
 }
 

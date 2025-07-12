@@ -47,6 +47,13 @@ const StandbySettingsScreen = ({ navigation }) => {
     includeWeekends: true,
     includeHolidays: true,
     travelWithBonus: false, // Nuova opzione: viaggio reperibilità con maggiorazione
+    // Personalizzazioni indennità CCNL
+    customFeriale16: '',
+    customFeriale24: '',
+    customFestivo: '',
+    // Impostazioni aggiuntive
+    allowanceType: '24h', // '16h' o '24h'
+    saturdayAsRest: false, // se sabato è considerato giorno di riposo
   });
   const [standbyDays, setStandbyDays] = useState(settings.standbySettings?.standbyDays || {});
   const [currentMonth, setCurrentMonth] = useState(() => {
@@ -99,8 +106,18 @@ const StandbySettingsScreen = ({ navigation }) => {
         includeWeekends: settings.standbySettings.includeWeekends !== false,
         includeHolidays: settings.standbySettings.includeHolidays !== false,
         travelWithBonus: settings.standbySettings.travelWithBonus === true, // default false
+        // Personalizzazioni indennità CCNL
+        customFeriale16: settings.standbySettings.customFeriale16?.toString() || '',
+        customFeriale24: settings.standbySettings.customFeriale24?.toString() || '',
+        customFestivo: settings.standbySettings.customFestivo?.toString() || '',
+        // Impostazioni aggiuntive
+        allowanceType: settings.standbySettings.allowanceType || '24h',
+        saturdayAsRest: settings.standbySettings.saturdayAsRest === true,
       });
       setStandbyDays(settings.standbySettings.standbyDays || {});
+      // Aggiorna anche i toggle locali
+      setTariffa24h(settings.standbySettings.allowanceType !== '16h');
+      setSaturdayAsRest(settings.standbySettings.saturdayAsRest === true);
     }
   }, [settings]);
 
@@ -233,7 +250,14 @@ const StandbySettingsScreen = ({ navigation }) => {
         includeWeekends: formData.includeWeekends,
         includeHolidays: formData.includeHolidays,
         travelWithBonus: formData.travelWithBonus === true, // salva la nuova opzione
-        standbyDays // aggiungo i giorni selezionati
+        standbyDays, // aggiungo i giorni selezionati
+        // Personalizzazioni indennità CCNL
+        customFeriale16: parseFloat(formData.customFeriale16) || null,
+        customFeriale24: parseFloat(formData.customFeriale24) || null,
+        customFestivo: parseFloat(formData.customFestivo) || null,
+        // Impostazioni aggiuntive
+        allowanceType: tariffa24h ? '24h' : '16h',
+        saturdayAsRest: saturdayAsRest,
       };
 
       await updatePartialSettings({
@@ -351,22 +375,49 @@ const StandbySettingsScreen = ({ navigation }) => {
                 </View>
 
                 <View style={styles.optionRow}>
+                  <Text style={styles.optionLabel}>Tipo indennità CCNL</Text>
+                  <View style={{flexDirection: 'row', alignItems: 'center'}}>
+                    <TouchableOpacity 
+                      style={[styles.toggleButton, !tariffa24h && styles.toggleButtonActive]}
+                      onPress={() => {
+                        setTariffa24h(false);
+                        setFormData(prev => ({ ...prev, allowanceType: '16h' }));
+                      }}
+                    >
+                      <Text style={[styles.toggleButtonText, !tariffa24h && styles.toggleButtonTextActive]}>16h</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity 
+                      style={[styles.toggleButton, tariffa24h && styles.toggleButtonActive]}
+                      onPress={() => {
+                        setTariffa24h(true);
+                        setFormData(prev => ({ ...prev, allowanceType: '24h' }));
+                      }}
+                    >
+                      <Text style={[styles.toggleButtonText, tariffa24h && styles.toggleButtonTextActive]}>24h</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+                <View style={styles.optionRow}>
+                  <Text style={styles.optionLabel}>Sabato come giorno di riposo</Text>
+                  <Switch
+                    value={saturdayAsRest}
+                    onValueChange={(value) => {
+                      setSaturdayAsRest(value);
+                      setFormData(prev => ({ ...prev, saturdayAsRest: value }));
+                    }}
+                    trackColor={{ false: '#ccc', true: '#2196F3' }}
+                    thumbColor={saturdayAsRest ? '#fff' : '#f4f3f4'}
+                  />
+                </View>
+                
+                <View style={styles.optionRow}>
                   <Text style={styles.optionLabel}>Maggiorazione CCNL anche sul viaggio in reperibilità</Text>
                   <Switch
                     value={formData.travelWithBonus}
                     onValueChange={(value) => setFormData(prev => ({ ...prev, travelWithBonus: value }))}
                     trackColor={{ false: '#ccc', true: '#1976d2' }}
                     thumbColor={formData.travelWithBonus ? '#fff' : '#f4f3f4'}
-                  />
-                </View>
-
-                <View style={styles.optionRow}>
-                  <Text style={styles.optionLabel}>Considera il sabato come giorno di riposo</Text>
-                  <Switch
-                    value={saturdayAsRest}
-                    onValueChange={setSaturdayAsRest}
-                    trackColor={{ false: '#ccc', true: '#1976d2' }}
-                    thumbColor={saturdayAsRest ? '#fff' : '#f4f3f4'}
                   />
                 </View>
               </View>
@@ -665,6 +716,27 @@ const styles = StyleSheet.create({
   optionLabel: {
     fontSize: 16,
     color: '#333',
+    flex: 1,
+  },
+  toggleButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#2196F3',
+    marginHorizontal: 4,
+    backgroundColor: 'transparent',
+  },
+  toggleButtonActive: {
+    backgroundColor: '#2196F3',
+  },
+  toggleButtonText: {
+    fontSize: 14,
+    color: '#2196F3',
+    fontWeight: '500',
+  },
+  toggleButtonTextActive: {
+    color: 'white',
   },
   infoContainer: {
     backgroundColor: '#f8f9fa',

@@ -1,5 +1,6 @@
 import * as SQLite from 'expo-sqlite';
 import { DATABASE_TABLES } from '../constants';
+import { executeDbOperation, withLockHandling } from './DatabaseLockManager';
 
 class DatabaseService {
   constructor() {
@@ -178,6 +179,20 @@ class DatabaseService {
         console.log("Migrazione 'travel_allowance_percent' completata.");
       }
 
+      // Migrazione robusta: aggiungi colonna vehiclePlate se manca
+      if (!await columnExists(DATABASE_TABLES.WORK_ENTRIES, 'vehiclePlate')) {
+        console.log(`Migrazione: la colonna 'vehiclePlate' non esiste nella tabella ${DATABASE_TABLES.WORK_ENTRIES}. Aggiungo...`);
+        await db.execAsync(`ALTER TABLE ${DATABASE_TABLES.WORK_ENTRIES} ADD COLUMN vehiclePlate TEXT DEFAULT ''`);
+        console.log("Migrazione 'vehiclePlate' completata.");
+      }
+
+      // Migrazione robusta: aggiungi colonna targa_veicolo se manca
+      if (!await columnExists(DATABASE_TABLES.WORK_ENTRIES, 'targa_veicolo')) {
+        console.log(`Migrazione: la colonna 'targa_veicolo' non esiste nella tabella ${DATABASE_TABLES.WORK_ENTRIES}. Aggiungo...`);
+        await db.execAsync(`ALTER TABLE ${DATABASE_TABLES.WORK_ENTRIES} ADD COLUMN targa_veicolo TEXT DEFAULT ''`);
+        console.log("Migrazione 'targa_veicolo' completata.");
+      }
+
       // Migrazione robusta: aggiungi colonna trasferta_manual_override se manca
       if (!await columnExists(DATABASE_TABLES.WORK_ENTRIES, 'trasferta_manual_override')) {
         console.log(`Migrazione: la colonna 'trasferta_manual_override' non esiste nella tabella ${DATABASE_TABLES.WORK_ENTRIES}. Aggiungo...`);
@@ -250,27 +265,38 @@ class DatabaseService {
           error.message.includes('sqlite') || 
           error.message.includes('null') || 
           error.message.includes('closed') ||
+          error.message.includes('database is locked') || // 🔒 Lock specifico
+          error.message.includes('finalizeAsync has been rejected') || // 🔒 Lock Expo SQLite
           (error.cause && typeof error.cause.message === 'string' && error.cause.message.includes('code 14')); // SQLITE_CANTOPEN
 
         if (isCriticalDbError) {
-          console.log(`Errore critico del database rilevato. Tentativo di recupero n. ${attempts}.`);
+          console.log(`🔒 Errore database/lock rilevato. Tentativo di recupero n. ${attempts}.`);
           
-          // NON chiudere esplicitamente la connessione qui (es. con closeAsync).
-          // Se la connessione è in uno stato non valido, tentare di chiuderla può causare
-          // ulteriori errori. È più sicuro scartare il riferimento e reinizializzare.
-          this.isInitialized = false;
-          this.db = null;
-          this.initializationPromise = null; // RESETTA IL PROMISE per permettere una nuova inizializzazione completa.
+          // Per errori di lock, attendiamo più a lungo prima del retry
+          const isLockError = error.message.includes('locked') || 
+                             error.message.includes('finalizeAsync has been rejected');
+          
+          if (isLockError) {
+            console.log(`🔄 Database lock rilevato, attesa prolungata...`);
+            // Attesa più lunga per i lock (fino a 5 secondi)
+            const lockDelay = 1000 + (attempts * 1500);
+            await new Promise(resolve => setTimeout(resolve, lockDelay));
+          } else {
+            // NON chiudere esplicitamente la connessione qui per altri errori critici
+            this.isInitialized = false;
+            this.db = null;
+            this.initializationPromise = null;
+            
+            const delay = 1000 * Math.pow(2, attempts - 1);
+            console.log(`In attesa di ${delay}ms prima del prossimo tentativo...`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+          }
 
           if (attempts >= maxAttempts) {
             const finalErrorMsg = `${operationName} fallito definitivamente dopo ${maxAttempts} tentativi. Ultimo errore: ${error.message}`;
             console.error(finalErrorMsg);
             throw new Error(finalErrorMsg);
           }
-
-          const delay = 1000 * Math.pow(2, attempts - 1);
-          console.log(`In attesa di ${delay}ms prima del prossimo tentativo...`);
-          await new Promise(resolve => setTimeout(resolve, delay));
           
         } else {
           // Not a critical DB error, propagate immediately.
@@ -289,7 +315,9 @@ class DatabaseService {
         interventi, // Nuovo campo array
         mealLunchVoucher, mealLunchCash, mealDinnerVoucher, mealDinnerCash,
         travelAllowance, travelAllowancePercent, trasfertaManualOverride, // Aggiunto flag manual override
-        standbyAllowance, isStandbyDay, totalEarnings, notes, dayType
+        standbyAllowance, isStandbyDay, totalEarnings, notes, dayType,
+        targaVeicolo, // nuovo campo
+        isFixedDay, fixedEarnings // nuovi campi per giorni fissi
       } = workEntry;
 
       // Verifica l'esistenza delle nuove colonne
@@ -307,18 +335,25 @@ class DatabaseService {
         "meal_lunch_voucher", "meal_lunch_cash", "meal_dinner_voucher", "meal_dinner_cash",
         "travel_allowance", "standby_allowance", "is_standby_day", "total_earnings", "notes", "day_type"
       ];
-      
       let placeholders = new Array(columns.length).fill('?');
-      
       let values = [
         date, siteName || '', vehicleDriven || '', departureCompany || '', arrivalSite || '',
         workStart1 || '', workEnd1 || '', workStart2 || '', workEnd2 || '',
         departureReturn || '', arrivalCompany || '',
-        JSON.stringify(interventi || []), // Serializza l'array di interventi
+        JSON.stringify(interventi || []),
         mealLunchVoucher || 0, mealLunchCash || 0, mealDinnerVoucher || 0, mealDinnerCash || 0,
-        travelAllowance || 0, standbyAllowance || 0, isStandbyDay || 0, totalEarnings || 0, 
+        travelAllowance || 0, standbyAllowance || 0, isStandbyDay || 0, totalEarnings || 0,
         notes || '', dayType || 'lavorativa'
       ];
+
+      // Aggiungi la colonna targa_veicolo solo se esiste
+      const hasTargaVeicolo = await columnExists(DATABASE_TABLES.WORK_ENTRIES, 'targa_veicolo');
+      if (hasTargaVeicolo) {
+        columns.push("targa_veicolo");
+        placeholders.push("?");
+        values.push(targaVeicolo || '');
+        console.log("Utilizzo colonna targa_veicolo nell'inserimento");
+      }
 
       // Aggiungi le colonne nuove solo se esistono
       const hasTravelAllowancePercent = await columnExists(DATABASE_TABLES.WORK_ENTRIES, 'travel_allowance_percent');
@@ -337,6 +372,23 @@ class DatabaseService {
         console.log("Utilizzo colonna trasferta_manual_override nell'inserimento");
       }
 
+      // Aggiungi le colonne per giorni fissi se esistono
+      const hasIsFixedDay = await columnExists(DATABASE_TABLES.WORK_ENTRIES, 'is_fixed_day');
+      if (hasIsFixedDay) {
+        columns.push("is_fixed_day");
+        placeholders.push('?');
+        values.push(isFixedDay ? 1 : 0);
+        console.log("Utilizzo colonna is_fixed_day nell'inserimento");
+      }
+
+      const hasFixedEarnings = await columnExists(DATABASE_TABLES.WORK_ENTRIES, 'fixed_earnings');
+      if (hasFixedEarnings) {
+        columns.push("fixed_earnings");
+        placeholders.push('?');
+        values.push(fixedEarnings || 0);
+        console.log("Utilizzo colonna fixed_earnings nell'inserimento");
+      }
+
       // Crea la query dinamica
       const query = `
         INSERT INTO ${DATABASE_TABLES.WORK_ENTRIES} (
@@ -353,8 +405,15 @@ class DatabaseService {
     await this.ensureInitialized();
     
     try {
-      const startDate = new Date(year, month - 1, 1).toISOString().split('T')[0];
-      const endDate = new Date(year, month, 0).toISOString().split('T')[0];
+      // FIX: Calcolo corretto delle date evitando problemi di timezone
+      const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
+      const daysInMonth = new Date(year, month, 0).getDate(); // Ottiene il numero di giorni nel mese
+      const endDate = `${year}-${String(month).padStart(2, '0')}-${String(daysInMonth).padStart(2, '0')}`;
+      
+      // DEBUG: Log per debugging del bug giorni lavorati
+      console.log(`🔍 DatabaseService.getWorkEntries - year: ${year}, month: ${month}`);
+      console.log(`🔍 DatabaseService.getWorkEntries - startDate: ${startDate}, endDate: ${endDate}`);
+      console.log(`🔍 DatabaseService.getWorkEntries - FIXED: Calcolo diretto senza timezone issues`);
       
       const query = 
         `SELECT * FROM work_entries 
@@ -362,6 +421,15 @@ class DatabaseService {
          ORDER BY date DESC`;
       
       const result = await this.db.getAllAsync(query, [startDate, endDate]);
+      
+      console.log(`🔍 DatabaseService.getWorkEntries - result: ${result ? result.length : 0} entries`);
+      if (result && result.length > 0) {
+        console.log('🔍 DatabaseService.getWorkEntries - Dates trovate:');
+        result.forEach((entry, idx) => {
+          console.log(`   ${idx + 1}. ${entry.date} (ID: ${entry.id})`);
+        });
+      }
+      
       return result || [];
     } catch (error) {
       console.error('Error getting work entries:', error);
@@ -381,6 +449,28 @@ class DatabaseService {
       return result || [];
     } catch (error) {
       console.error('Error getting all work entries:', error);
+      throw error;
+    }
+  }
+
+  async getWorkEntriesByDateRange(startDate, endDate) {
+    await this.ensureInitialized();
+    
+    try {
+      console.log(`🔍 DatabaseService.getWorkEntriesByDateRange - startDate: ${startDate}, endDate: ${endDate}`);
+      
+      const query = 
+        `SELECT * FROM work_entries 
+         WHERE date >= ? AND date <= ? 
+         ORDER BY date DESC`;
+      
+      const result = await this.db.getAllAsync(query, [startDate, endDate]);
+      
+      console.log(`🔍 DatabaseService.getWorkEntriesByDateRange - result: ${result ? result.length : 0} entries`);
+      
+      return result || [];
+    } catch (error) {
+      console.error('Error getting work entries by date range:', error);
       throw error;
     }
   }
@@ -466,7 +556,9 @@ class DatabaseService {
         interventi,
         mealLunchVoucher, mealLunchCash, mealDinnerVoucher, mealDinnerCash,
         travelAllowance, travelAllowancePercent, trasfertaManualOverride,
-        standbyAllowance, isStandbyDay, totalEarnings, notes, dayType
+        standbyAllowance, isStandbyDay, totalEarnings, notes, dayType,
+        targaVeicolo,
+        isFixedDay, fixedEarnings // nuovi campi per giorni fissi
       } = workEntry;
 
       // Verifica prima l'esistenza delle nuove colonne
@@ -526,6 +618,14 @@ class DatabaseService {
         dayType || 'lavorativa'
       ];
 
+      // Aggiungi la colonna targa_veicolo solo se esiste
+      const hasTargaVeicolo = await columnExists(DATABASE_TABLES.WORK_ENTRIES, 'targa_veicolo');
+      if (hasTargaVeicolo) {
+        updateColumns.push("targa_veicolo = ?");
+        updateParams.push(targaVeicolo || '');
+        console.log("Utilizzo colonna targa_veicolo nell'aggiornamento");
+      }
+
       // Aggiungi le colonne nuove solo se esistono
       const hasTravelAllowancePercent = await columnExists(DATABASE_TABLES.WORK_ENTRIES, 'travel_allowance_percent');
       if (hasTravelAllowancePercent) {
@@ -539,6 +639,21 @@ class DatabaseService {
         updateColumns.push("trasferta_manual_override = ?");
         updateParams.push(trasfertaManualOverride ? 1 : 0);
         console.log("Utilizzo colonna trasferta_manual_override nell'aggiornamento");
+      }
+
+      // Aggiungi le colonne per giorni fissi se esistono
+      const hasIsFixedDay = await columnExists(DATABASE_TABLES.WORK_ENTRIES, 'is_fixed_day');
+      if (hasIsFixedDay) {
+        updateColumns.push("is_fixed_day = ?");
+        updateParams.push(isFixedDay ? 1 : 0);
+        console.log("Utilizzo colonna is_fixed_day nell'aggiornamento");
+      }
+
+      const hasFixedEarnings = await columnExists(DATABASE_TABLES.WORK_ENTRIES, 'fixed_earnings');
+      if (hasFixedEarnings) {
+        updateColumns.push("fixed_earnings = ?");
+        updateParams.push(fixedEarnings || 0);
+        console.log("Utilizzo colonna fixed_earnings nell'aggiornamento");
       }
 
       // Aggiungi l'ID alla fine dei parametri
@@ -586,21 +701,28 @@ class DatabaseService {
 
   // Settings methods
   async setSetting(key, value) {
-    return await this.safeExecute(async () => {
-      await this.db.runAsync(`
-        INSERT OR REPLACE INTO ${DATABASE_TABLES.SETTINGS} (key, value, updated_at)
-        VALUES (?, ?, CURRENT_TIMESTAMP)
-      `, [key, JSON.stringify(value)]);
-    }, 'Set setting');
+    return await executeDbOperation(async () => {
+      return await this.safeExecute(async () => {
+        // Usa una transazione per evitare lock
+        await this.db.withTransactionAsync(async () => {
+          await this.db.runAsync(`
+            INSERT OR REPLACE INTO ${DATABASE_TABLES.SETTINGS} (key, value, updated_at)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+          `, [key, JSON.stringify(value)]);
+        });
+      }, 'Set setting');
+    });
   }
 
   async getSetting(key, defaultValue = null) {
-    return await this.safeExecute(async () => {
-      const result = await this.db.getFirstAsync(`
-        SELECT value FROM ${DATABASE_TABLES.SETTINGS} WHERE key = ?
-      `, [key]);
-      return result ? JSON.parse(result.value) : defaultValue;
-    }, 'Get setting');
+    return await executeDbOperation(async () => {
+      return await this.safeExecute(async () => {
+        const result = await this.db.getFirstAsync(`
+          SELECT value FROM ${DATABASE_TABLES.SETTINGS} WHERE key = ?
+        `, [key]);
+        return result ? JSON.parse(result.value) : defaultValue;
+      }, 'Get setting');
+    });
   }  // Backup methods
   async getAllData() {
     return await this.safeExecute(async () => {
@@ -660,6 +782,21 @@ class DatabaseService {
     }, 'Record backup');
   }
 
+  // Ottieni tutti i backup registrati nel database
+  async getAllBackupsFromDb() {
+    await this.ensureInitialized();
+    const rows = await this.db.getAllAsync(`SELECT * FROM ${DATABASE_TABLES.BACKUPS} ORDER BY backup_date DESC`);
+    return rows.map(row => ({
+      id: row.id,
+      fileName: row.backup_name,
+      filePath: row.file_path,
+      backupType: row.backup_type,
+      status: row.status,
+      notes: row.notes,
+      created: row.backup_date,
+    }));
+  }
+
   // Health monitoring methods
   async isDatabaseHealthy() {
     try {
@@ -701,6 +838,7 @@ class DatabaseService {
 
   // Helper function to normalize entry fields from DB to camelCase
   normalizeEntry(entry) {
+    if (entry.targa_veicolo !== undefined) entry.targaVeicolo = entry.targa_veicolo;
     // Parse interventi JSON if exists
     try {
       entry.interventi = entry.interventi ? JSON.parse(entry.interventi) : [];
@@ -742,6 +880,7 @@ class DatabaseService {
   
   // Helper per normalizzare i campi di una entry dal formato DB al formato app
   normalizeWorkEntry(entry) {
+      entry.targaVeicolo = entry.targa_veicolo;
     if (!entry) return null;
     
     try {
@@ -796,6 +935,111 @@ class DatabaseService {
   async getAllWorkEntriesWithNormalized() {
     const entries = await this.getAllWorkEntries();
     return entries.map(entry => this.normalizeEntry(entry));
+  }
+
+  // Sincronizza le impostazioni di reperibilità da AsyncStorage al database SQLite
+  async syncStandbySettingsToDatabase() {
+    try {
+      await this.ensureInitialized();
+      
+      // Importa AsyncStorage qui per evitare problemi di dipendenze circolari
+      const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+      
+      console.log('📞 SYNC: Inizio sincronizzazione settings reperibilità...');
+      
+      // Leggi le settings da AsyncStorage
+      const settingsStr = await AsyncStorage.getItem('settings');
+      if (!settingsStr) {
+        console.log('📞 SYNC: Nessuna settings trovata in AsyncStorage');
+        return;
+      }
+      
+      const settings = JSON.parse(settingsStr);
+      const standbyDays = settings?.standbySettings?.standbyDays || {};
+      const activeDates = Object.keys(standbyDays).filter(dateStr => {
+        const dayData = standbyDays[dateStr];
+        return dayData?.selected === true;
+      });
+      
+      console.log(`📞 SYNC: Trovate ${activeDates.length} date attive nelle settings`);
+      
+      if (activeDates.length === 0) {
+        console.log('📞 SYNC: Nessuna data attiva da sincronizzare');
+        return;
+      }
+      
+      // Per ogni data attiva, assicurati che sia presente nel database
+      let syncCount = 0;
+      for (const dateStr of activeDates) {
+        try {
+          const date = new Date(dateStr);
+          const year = date.getFullYear();
+          const month = date.getMonth() + 1;
+          const day = date.getDate();
+          
+          // Controlla se la data esiste già nel database
+          const existing = await executeDbOperation(async () => {
+            return await this.db.getFirstAsync(
+              `SELECT * FROM ${DATABASE_TABLES.STANDBY_CALENDAR} WHERE year = ? AND month = ? AND day = ?`,
+              [year, month, day]
+            );
+          });
+          
+          if (!existing) {
+            // Inserisci la data nel database
+            await executeDbOperation(async () => {
+              await this.db.runAsync(
+                `INSERT INTO ${DATABASE_TABLES.STANDBY_CALENDAR} (year, month, day, date, is_standby) VALUES (?, ?, ?, ?, ?)`,
+                [year, month, day, dateStr, 1]
+              );
+            });
+            
+            syncCount++;
+            console.log(`📞 SYNC: Aggiunta data ${dateStr} al database`);
+          }
+        } catch (dateError) {
+          console.warn(`📞 SYNC: Errore sincronizzazione data ${dateStr}:`, dateError);
+        }
+      }
+      
+      console.log(`📞 SYNC: Sincronizzazione completata. ${syncCount} nuove date aggiunte al database`);
+      console.log(`📞 SYNC: ${syncCount} date sincronizzate dal settings al database`);
+      
+      return syncCount;
+      
+    } catch (error) {
+      console.error('❌ Errore sincronizzazione settings reperibilità:', error);
+      return 0;
+    }
+  }
+
+  // Funzione helper per forzare la sincronizzazione e aggiornare le notifiche
+  async forceSyncStandbyAndUpdateNotifications() {
+    try {
+      console.log('🔄 FORCE SYNC: Avvio sincronizzazione forzata...');
+      
+      // Sincronizza le settings al database
+      const syncCount = await this.syncStandbySettingsToDatabase();
+      
+      // Se sono state sincronizzate nuove date, aggiorna le notifiche
+      if (syncCount > 0) {
+        console.log('📞 FORCE SYNC: Aggiornamento notifiche dopo sincronizzazione...');
+        
+        // Importa NotificationService dinamicamente per evitare dipendenze circolari
+        const { default: NotificationService } = await import('./NotificationService');
+        await NotificationService.updateStandbyNotifications();
+        
+        console.log('✅ FORCE SYNC: Sincronizzazione e aggiornamento notifiche completati');
+      } else {
+        console.log('📞 FORCE SYNC: Nessuna nuova data da sincronizzare');
+      }
+      
+      return syncCount;
+      
+    } catch (error) {
+      console.error('❌ Errore sincronizzazione forzata:', error);
+      return 0;
+    }
   }
 }
 

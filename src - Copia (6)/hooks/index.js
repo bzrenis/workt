@@ -1,10 +1,12 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import DatabaseService from '../services/DatabaseService';
 import DatabaseHealthService from '../services/DatabaseHealthService';
 import { useCalculationService } from './useCalculationService';
+import { useVacationAutoCompile } from './useVacationAutoCompile';
 import { DEFAULT_SETTINGS } from '../constants';
 
-export { useCalculationService };
+export { useCalculationService, useVacationAutoCompile };
 
 export const useDatabase = () => {
   const [isInitialized, setIsInitialized] = useState(false);
@@ -20,10 +22,57 @@ export const useDatabase = () => {
       setIsLoading(true);
       await DatabaseService.ensureInitialized();
       
-      // Initialize default settings if not exists
+      // Initialize default settings if not exists OR migrate old structure
       const existingSettings = await DatabaseService.getSetting('appSettings');
       if (!existingSettings) {
+        console.log('🆕 Primo avvio - impostazioni default');
         await DatabaseService.setSetting('appSettings', DEFAULT_SETTINGS);
+      } else {
+        // Verifica integrità del contratto
+        const contractValid = existingSettings.contract && 
+                             typeof existingSettings.contract === 'object' &&
+                             existingSettings.contract.monthlySalary &&
+                             existingSettings.contract.overtimeRates;
+        
+        if (!contractValid) {
+          console.log('🚨 Contratto corrotto - reset completo');
+          await DatabaseService.setSetting('appSettings', DEFAULT_SETTINGS);
+        } else {
+          // Migrazione: aggiungi netCalculation se non esiste o ha struttura vecchia
+          let needsUpdate = false;
+          const updatedSettings = { ...existingSettings };
+        
+        if (!existingSettings.netCalculation) {
+          updatedSettings.netCalculation = {
+            method: existingSettings.netCalculationMethod || 'irpef',
+            customDeductionRate: existingSettings.customNetPercentage || 32,
+            useActualAmount: false // Default: usa stima annuale
+          };
+          needsUpdate = true;
+        } else if (existingSettings.netCalculation.useActualAmount === undefined) {
+          // Migrazione: aggiungi useActualAmount se manca
+          updatedSettings.netCalculation = {
+            ...existingSettings.netCalculation,
+            useActualAmount: false
+          };
+          needsUpdate = true;
+        }
+        
+        // Pulisci le vecchie proprietà se esistono
+        if (existingSettings.netCalculationMethod !== undefined) {
+          delete updatedSettings.netCalculationMethod;
+          needsUpdate = true;
+        }
+        if (existingSettings.customNetPercentage !== undefined) {
+          delete updatedSettings.customNetPercentage;
+          needsUpdate = true;
+        }
+        
+          if (needsUpdate) {
+            console.log('🔄 Migrazione impostazioni...');
+            await DatabaseService.setSetting('appSettings', updatedSettings);
+          }
+        }
       }
       
       setIsInitialized(true);
@@ -152,16 +201,6 @@ export const useWorkEntries = (year, month, showAllEntries = false) => {
     }
   };
 
-  return {
-    entries,
-    isLoading,
-    error,
-    addEntry,
-    updateEntry,
-    deleteEntry,
-    refreshEntries: () => loadEntries(true),    canRetry: retryCount < maxRetries,
-    retryCount
-  };
   const deleteEntry = async (id) => {
     try {
       await DatabaseService.deleteWorkEntry(id);
@@ -170,7 +209,9 @@ export const useWorkEntries = (year, month, showAllEntries = false) => {
       console.error('Error deleting work entry:', err);
       throw err;
     }
-  };  return {
+  };
+
+  return {
     entries,
     isLoading,
     error,
@@ -198,11 +239,33 @@ export const useSettings = () => {
 
     try {
       setIsLoading(true);
+      console.log('🔍 HOOK - loadSettings: Caricamento da database...');
+      
       const appSettings = await DatabaseService.getSetting('appSettings', DEFAULT_SETTINGS);
+      
+      // Sincronizza anche AsyncStorage per le notifiche
+      await AsyncStorage.setItem('settings', JSON.stringify(appSettings));
+      console.log('🔄 HOOK - Settings sincronizzate in AsyncStorage');
+      
+      console.log('🔍 HOOK - loadSettings: Dati caricati dal database');
+      if (appSettings?.netCalculation) {
+        console.log('- NetCalculation trovato:', JSON.stringify(appSettings.netCalculation, null, 2));
+      } else {
+        console.log('- NetCalculation NON trovato, usando default');
+      }
+      
+      // Log delle impostazioni di viaggio
+      console.log('🚗 HOOK - Travel Settings:', {
+        travelHoursSetting: appSettings.travelHoursSetting,
+        travelCompensationRate: appSettings.travelCompensationRate,
+        hasFullSettings: !!appSettings
+      });
+      
       setSettings(appSettings);
       setError(null);
-      setRetryCount(0);    } catch (err) {
-      console.error('Error loading settings:', err);
+      setRetryCount(0);
+    } catch (err) {
+      console.error('❌ HOOK - Error loading settings:', err);
       await DatabaseHealthService.logDatabaseError('loadSettings', err);
       setRetryCount(prev => prev + 1);
       
@@ -220,11 +283,23 @@ export const useSettings = () => {
 
   const updateSettings = async (newSettings) => {
     try {
+      console.log('🔧 HOOK - updateSettings chiamato');
+      console.log('- Nuove impostazioni da salvare:', JSON.stringify(newSettings.netCalculation, null, 2));
+      
+      // Salva nel database SQLite
       await DatabaseService.setSetting('appSettings', newSettings);
+      
+      // Salva anche in AsyncStorage per le notifiche
+      await AsyncStorage.setItem('settings', JSON.stringify(newSettings));
+      console.log('✅ HOOK - Settings salvate anche in AsyncStorage per notifiche');
+      
       setSettings(newSettings);
       setRetryCount(0);
+      
+      console.log('✅ HOOK - updateSettings completato');
+      console.log('- Settings state aggiornato:', JSON.stringify(newSettings.netCalculation, null, 2));
     } catch (err) {
-      console.error('Error updating settings:', err);
+      console.error('❌ HOOK - Error updating settings:', err);
       throw err;
     }
   };
@@ -245,7 +320,10 @@ export const useSettings = () => {
     error,
     updateSettings,
     updatePartialSettings,
-    refreshSettings: () => loadSettings(true),
+    refreshSettings: () => {
+      console.log('🔄 HOOK - refreshSettings chiamato, ricaricando da database...');
+      return loadSettings(true);
+    },
     canRetry: retryCount < maxRetries
   };
 };
@@ -283,6 +361,11 @@ export const useStandbyCalendar = (year, month) => {
       
       await DatabaseService.setStandbyDay(date, newStandbyStatus);
       await loadStandbyDays(); // Reload standby days
+      
+      // Aggiorna le notifiche di reperibilità quando il calendario cambia
+      const NotificationService = (await import('../services/NotificationService')).default;
+      await NotificationService.updateStandbyNotifications();
+      
     } catch (err) {
       console.error('Error toggling standby day:', err);
       throw err;
@@ -336,12 +419,14 @@ export const useMonthlySummary = (year, month) => {
   useEffect(() => {
     const calculateSummary = async () => {
       try {
-        if (!entries || !settings || !Array.isArray(entries)) {
-          console.log('Skip calculation: missing data or invalid entries array', { 
+        if (!entries || !settings || !Array.isArray(entries) || !year || !month) {
+          console.log('Skip calculation: missing data or invalid parameters', { 
             hasEntries: Boolean(entries), 
             isArray: Array.isArray(entries), 
             entriesLength: entries ? entries.length : 0,
-            hasSettings: Boolean(settings)
+            hasSettings: Boolean(settings),
+            year: year,
+            month: month
           });
           return;
         }

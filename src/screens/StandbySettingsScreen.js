@@ -20,6 +20,7 @@ import { CCNL_CONTRACTS } from '../constants';
 import { Picker } from '@react-native-picker/picker';
 import * as Notifications from 'expo-notifications';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import NotificationService from '../services/NotificationService';
 
 // Configurazione locale italiana per il calendario
 LocaleConfig.locales['it'] = {
@@ -427,16 +428,34 @@ const StandbySettingsScreen = ({ navigation }) => {
                 <Text style={styles.sectionTitle}>Calendario Giorni Reperibilità</Text>
                 <Calendar
                   markedDates={getMarkedDates()}
-                  onDayPress={day => {
-                    setStandbyDays(prev => {
-                      const copy = { ...prev };
-                      if (copy[day.dateString]) {
-                        delete copy[day.dateString];
-                      } else {
-                        copy[day.dateString] = { selected: true, selectedColor: '#1976d2' };
-                      }
-                      return copy;
-                    });
+                  onDayPress={async (day) => {
+                    const newStandbyDays = { ...standbyDays };
+                    if (newStandbyDays[day.dateString]) {
+                      delete newStandbyDays[day.dateString];
+                    } else {
+                      newStandbyDays[day.dateString] = { selected: true, selectedColor: '#1976d2' };
+                    }
+                    
+                    // Aggiorna stato locale
+                    setStandbyDays(newStandbyDays);
+                    
+                    // Salva immediatamente in settings
+                    try {
+                      const updatedStandbySettings = {
+                        ...settings.standbySettings,
+                        standbyDays: newStandbyDays
+                      };
+                      
+                      await updatePartialSettings({
+                        standbySettings: updatedStandbySettings
+                      });
+                      
+                      // Aggiorna notifiche
+                      await NotificationService.updateStandbyNotifications();
+                      console.log('✅ Calendario reperibilità aggiornato e notifiche sincronizzate');
+                    } catch (error) {
+                      console.error('❌ Errore salvando calendario reperibilità:', error);
+                    }
                   }}
                   onMonthChange={m => {
                     setCurrentMonth(`${m.year}-${m.month.toString().padStart(2,'0')}`);

@@ -16,7 +16,14 @@ export const useCalculationService = () => {
       calculateIntegratedBreakdown: (entry, settings) =>
         service.calculateIntegratedBreakdown(entry, settings),
       calculateStandbyAllowanceForDate: (date, settings) =>
-        service.calculateStandbyAllowanceForDate(date, settings)
+        service.calculateStandbyAllowanceForDate(date, settings),
+      // Aggiunta dei metodi mancanti per TimeEntryScreen
+      calculateWorkHours: (entry) => service.calculateWorkHours(entry),
+      calculateTravelHours: (entry) => service.calculateTravelHours(entry),
+      calculateStandbyWorkHours: (entry) => service.calculateStandbyWorkHours(entry),
+      // Aggiunta dei metodi per calcolo durata
+      calculateTimeDifference: (startTime, endTime) => service.calculateTimeDifference(startTime, endTime),
+      minutesToHours: (minutes) => service.minutesToHours(minutes)
     };
   }, []);
 };

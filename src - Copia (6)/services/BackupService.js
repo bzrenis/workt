@@ -139,23 +139,59 @@ class BackupService {
     }
   }
 
+  // Import backup da percorso locale (senza picker)
+  async importBackupFromPath(filePath) {
+    try {
+      // Read file content
+      const fileContent = await FileSystem.readAsStringAsync(filePath);
+      const backupData = JSON.parse(fileContent);
+      // Validate backup format
+      if (!this.validateBackupFormat(backupData)) {
+        throw new Error('Formato backup non valido');
+      }
+      // Restore data to database
+      await DatabaseService.restoreData(backupData);
+      // Record import in backup history
+      await DatabaseService.recordBackup({
+        backup_name: backupData.backupInfo?.name || 'manual-restore',
+        backup_type: 'import',
+        status: 'completed',
+        notes: `Ripristinato da file locale: ${filePath}`
+      });
+      return {
+        success: true,
+        fileName: backupData.backupInfo?.name || 'manual-restore',
+        recordsCount: {
+          workEntries: backupData.workEntries?.length || 0,
+          standbyDays: backupData.standbyDays?.length || 0,
+          settings: backupData.settings?.length || 0
+        }
+      };
+    } catch (error) {
+      console.error('Error importing backup from path:', error);
+      return { success: false, message: error.message };
+    }
+  }
+
   // List local backups
   async listLocalBackups() {
+    return this.listAllBackups();
+  }
+
+  // Lista tutti i backup (locali e personalizzati)
+  async listAllBackups() {
     try {
       await this.ensureBackupDirectory();
-      
+      // Leggi i file fisici nella cartella locale
       const backupFiles = await FileSystem.readDirectoryAsync(this.backupDirectory);
       const backupList = [];
-      
       for (const fileName of backupFiles) {
         if (fileName.endsWith('.json')) {
           const filePath = `${this.backupDirectory}${fileName}`;
           const fileInfo = await FileSystem.getInfoAsync(filePath);
-          
           try {
             const fileContent = await FileSystem.readAsStringAsync(filePath);
             const backupData = JSON.parse(fileContent);
-            
             backupList.push({
               fileName,
               filePath,
@@ -166,20 +202,40 @@ class BackupService {
                 workEntries: backupData.workEntries?.length || 0,
                 standbyDays: backupData.standbyDays?.length || 0,
                 settings: backupData.settings?.length || 0
-              }
+              },
+              backupType: backupData.backupInfo?.type || 'local',
+              location: 'App'
             });
           } catch (parseError) {
             console.warn('Could not parse backup file:', fileName, parseError);
           }
         }
       }
-      
-      // Sort by creation date (newest first)
+      // Leggi anche i backup registrati nel database (inclusi quelli personalizzati)
+      const dbBackups = await DatabaseService.getAllBackupsFromDb();
+      // Unisci, evitando duplicati (stesso nome e tipo)
+      dbBackups.forEach(dbB => {
+        const already = backupList.find(b => b.fileName === dbB.fileName && b.backupType === dbB.backupType);
+        if (!already) {
+          backupList.push({
+            fileName: dbB.fileName,
+            filePath: dbB.filePath,
+            size: null,
+            created: dbB.created,
+            backupDate: dbB.created,
+            recordsCount: {},
+            backupType: dbB.backupType,
+            location: dbB.backupType === 'custom' ? 'Personalizzato' : (dbB.backupType === 'download' ? 'Downloads' : 'App'),
+            status: dbB.status,
+            notes: dbB.notes
+          });
+        }
+      });
+      // Ordina per data
       backupList.sort((a, b) => new Date(b.created) - new Date(a.created));
-      
       return backupList;
     } catch (error) {
-      console.error('Error listing local backups:', error);
+      console.error('Error listing all backups:', error);
       throw error;
     }
   }
@@ -223,14 +279,14 @@ class BackupService {
   // Get backup statistics
   async getBackupStats() {
     try {
-      const localBackups = await this.listLocalBackups();
-      const totalSize = localBackups.reduce((sum, backup) => sum + backup.size, 0);
+      const allBackups = await this.listAllBackups();
+      const totalSize = allBackups.reduce((sum, backup) => sum + (backup.size || 0), 0);
       
       return {
-        totalBackups: localBackups.length,
+        totalBackups: allBackups.length,
         totalSize,
-        latestBackup: localBackups[0]?.created || null,
-        oldestBackup: localBackups[localBackups.length - 1]?.created || null
+        latestBackup: allBackups[0]?.created || null,
+        oldestBackup: allBackups[allBackups.length - 1]?.created || null
       };
     } catch (error) {
       console.error('Error getting backup stats:', error);
@@ -279,6 +335,125 @@ class BackupService {
       }
     } catch (error) {
       console.error('Error cleaning up old backups:', error);
+    }
+  }
+
+  // Create local backup with custom name and location
+  async createCustomLocalBackup(customName, saveToDownloads = false) {
+    try {
+      await this.ensureBackupDirectory();
+      
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const fileName = customName.endsWith('.json') ? customName : `${customName}.json`;
+      
+      // Determine save location
+      let filePath;
+      if (saveToDownloads) {
+        // Save to Downloads folder (requires permission on Android)
+        filePath = `${FileSystem.documentDirectory}../Downloads/${fileName}`;
+      } else {
+        // Save to app's backup directory
+        filePath = `${this.backupDirectory}${fileName}`;
+      }
+      
+      // Get all data from database
+      const data = await DatabaseService.getAllData();
+      
+      // Add backup metadata
+      const backupData = {
+        ...data,
+        backupInfo: {
+          name: fileName,
+          created: new Date().toISOString(),
+          type: saveToDownloads ? 'download' : 'local',
+          version: '1.0',
+          app: 'WorkTracker'
+        }
+      };
+      
+      // Write to file
+      await FileSystem.writeAsStringAsync(filePath, JSON.stringify(backupData, null, 2));
+      
+      // Record backup in database
+      await DatabaseService.recordBackup({
+        backup_name: fileName,
+        backup_type: saveToDownloads ? 'download' : 'local',
+        file_path: filePath,
+        status: 'completed'
+      });
+      
+      console.log('Custom backup created:', filePath);
+      return {
+        success: true,
+        filePath,
+        fileName,
+        size: (await FileSystem.getInfoAsync(filePath)).size,
+        location: saveToDownloads ? 'Downloads' : 'App Directory'
+      };
+    } catch (error) {
+      console.error('Error creating custom backup:', error);
+      throw error;
+    }
+  }
+
+  // Create backup with folder picker
+  async createBackupWithFolderPicker(customName) {
+    try {
+      // Get all data from database
+      const data = await DatabaseService.getAllData();
+      
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const fileName = customName.endsWith('.json') ? customName : `${customName}.json`;
+      
+      // Add backup metadata
+      const backupData = {
+        ...data,
+        backupInfo: {
+          name: fileName,
+          created: new Date().toISOString(),
+          type: 'custom',
+          version: '1.0',
+          app: 'WorkTracker'
+        }
+      };
+
+      // Convert data to string
+      const jsonContent = JSON.stringify(backupData, null, 2);
+      
+      // Create temporary file
+      const tempPath = `${FileSystem.cacheDirectory}${fileName}`;
+      await FileSystem.writeAsStringAsync(tempPath, jsonContent);
+      
+      // Use sharing to let user choose where to save
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(tempPath, {
+          mimeType: 'application/json',
+          dialogTitle: `Salva ${fileName}`
+        });
+        
+        // Record backup in database
+        await DatabaseService.recordBackup({
+          backup_name: fileName,
+          backup_type: 'custom',
+          file_path: 'user_selected',
+          status: 'completed'
+        });
+        
+        // Clean up temp file
+        await FileSystem.deleteAsync(tempPath, { idempotent: true });
+        
+        return {
+          success: true,
+          fileName,
+          location: 'Posizione scelta dall\'utente',
+          size: jsonContent.length
+        };
+      } else {
+        throw new Error('Sharing non disponibile su questo dispositivo');
+      }
+    } catch (error) {
+      console.error('Error creating backup with folder picker:', error);
+      throw error;
     }
   }
 }

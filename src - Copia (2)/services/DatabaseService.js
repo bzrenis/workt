@@ -1,5 +1,6 @@
 import * as SQLite from 'expo-sqlite';
 import { DATABASE_TABLES } from '../constants';
+import { executeDbOperation, withLockHandling } from './DatabaseLockManager';
 
 class DatabaseService {
   constructor() {
@@ -171,6 +172,34 @@ class DatabaseService {
         console.log("Migrazione 'interventi' completata.");
       }
 
+      // Migrazione robusta: aggiungi colonna travel_allowance_percent se manca
+      if (!await columnExists(DATABASE_TABLES.WORK_ENTRIES, 'travel_allowance_percent')) {
+        console.log(`Migrazione: la colonna 'travel_allowance_percent' non esiste nella tabella ${DATABASE_TABLES.WORK_ENTRIES}. Aggiungo...`);
+        await db.execAsync(`ALTER TABLE ${DATABASE_TABLES.WORK_ENTRIES} ADD COLUMN travel_allowance_percent REAL DEFAULT 1.0`);
+        console.log("Migrazione 'travel_allowance_percent' completata.");
+      }
+
+      // Migrazione robusta: aggiungi colonna vehiclePlate se manca
+      if (!await columnExists(DATABASE_TABLES.WORK_ENTRIES, 'vehiclePlate')) {
+        console.log(`Migrazione: la colonna 'vehiclePlate' non esiste nella tabella ${DATABASE_TABLES.WORK_ENTRIES}. Aggiungo...`);
+        await db.execAsync(`ALTER TABLE ${DATABASE_TABLES.WORK_ENTRIES} ADD COLUMN vehiclePlate TEXT DEFAULT ''`);
+        console.log("Migrazione 'vehiclePlate' completata.");
+      }
+
+      // Migrazione robusta: aggiungi colonna targa_veicolo se manca
+      if (!await columnExists(DATABASE_TABLES.WORK_ENTRIES, 'targa_veicolo')) {
+        console.log(`Migrazione: la colonna 'targa_veicolo' non esiste nella tabella ${DATABASE_TABLES.WORK_ENTRIES}. Aggiungo...`);
+        await db.execAsync(`ALTER TABLE ${DATABASE_TABLES.WORK_ENTRIES} ADD COLUMN targa_veicolo TEXT DEFAULT ''`);
+        console.log("Migrazione 'targa_veicolo' completata.");
+      }
+
+      // Migrazione robusta: aggiungi colonna trasferta_manual_override se manca
+      if (!await columnExists(DATABASE_TABLES.WORK_ENTRIES, 'trasferta_manual_override')) {
+        console.log(`Migrazione: la colonna 'trasferta_manual_override' non esiste nella tabella ${DATABASE_TABLES.WORK_ENTRIES}. Aggiungo...`);
+        await db.execAsync(`ALTER TABLE ${DATABASE_TABLES.WORK_ENTRIES} ADD COLUMN trasferta_manual_override INTEGER DEFAULT 0`);
+        console.log("Migrazione 'trasferta_manual_override' completata.");
+      }
+
       // NOTA: Le vecchie colonne standby_* non vengono rimosse per retrocompatibilità,
       // ma non verranno più popolate dalle nuove versioni dell'app.
 
@@ -236,27 +265,38 @@ class DatabaseService {
           error.message.includes('sqlite') || 
           error.message.includes('null') || 
           error.message.includes('closed') ||
+          error.message.includes('database is locked') || // 🔒 Lock specifico
+          error.message.includes('finalizeAsync has been rejected') || // 🔒 Lock Expo SQLite
           (error.cause && typeof error.cause.message === 'string' && error.cause.message.includes('code 14')); // SQLITE_CANTOPEN
 
         if (isCriticalDbError) {
-          console.log(`Errore critico del database rilevato. Tentativo di recupero n. ${attempts}.`);
+          console.log(`🔒 Errore database/lock rilevato. Tentativo di recupero n. ${attempts}.`);
           
-          // NON chiudere esplicitamente la connessione qui (es. con closeAsync).
-          // Se la connessione è in uno stato non valido, tentare di chiuderla può causare
-          // ulteriori errori. È più sicuro scartare il riferimento e reinizializzare.
-          this.isInitialized = false;
-          this.db = null;
-          this.initializationPromise = null; // RESETTA IL PROMISE per permettere una nuova inizializzazione completa.
+          // Per errori di lock, attendiamo più a lungo prima del retry
+          const isLockError = error.message.includes('locked') || 
+                             error.message.includes('finalizeAsync has been rejected');
+          
+          if (isLockError) {
+            console.log(`🔄 Database lock rilevato, attesa prolungata...`);
+            // Attesa più lunga per i lock (fino a 5 secondi)
+            const lockDelay = 1000 + (attempts * 1500);
+            await new Promise(resolve => setTimeout(resolve, lockDelay));
+          } else {
+            // NON chiudere esplicitamente la connessione qui per altri errori critici
+            this.isInitialized = false;
+            this.db = null;
+            this.initializationPromise = null;
+            
+            const delay = 1000 * Math.pow(2, attempts - 1);
+            console.log(`In attesa di ${delay}ms prima del prossimo tentativo...`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+          }
 
           if (attempts >= maxAttempts) {
             const finalErrorMsg = `${operationName} fallito definitivamente dopo ${maxAttempts} tentativi. Ultimo errore: ${error.message}`;
             console.error(finalErrorMsg);
             throw new Error(finalErrorMsg);
           }
-
-          const delay = 1000 * Math.pow(2, attempts - 1);
-          console.log(`In attesa di ${delay}ms prima del prossimo tentativo...`);
-          await new Promise(resolve => setTimeout(resolve, delay));
           
         } else {
           // Not a critical DB error, propagate immediately.
@@ -274,27 +314,72 @@ class DatabaseService {
         workStart1, workEnd1, workStart2, workEnd2, departureReturn, arrivalCompany,
         interventi, // Nuovo campo array
         mealLunchVoucher, mealLunchCash, mealDinnerVoucher, mealDinnerCash,
-        travelAllowance, standbyAllowance, isStandbyDay, totalEarnings, notes, dayType
+        travelAllowance, travelAllowancePercent, trasfertaManualOverride, // Aggiunto flag manual override
+        standbyAllowance, isStandbyDay, totalEarnings, notes, dayType,
+        targaVeicolo // nuovo campo
       } = workEntry;
 
-      await this.db.runAsync(`
-        INSERT INTO ${DATABASE_TABLES.WORK_ENTRIES} (
-          date, site_name, vehicle_driven, departure_company, arrival_site,
-          work_start_1, work_end_1, work_start_2, work_end_2,
-          departure_return, arrival_company,
-          interventi,
-          meal_lunch_voucher, meal_lunch_cash, meal_dinner_voucher, meal_dinner_cash,
-          travel_allowance, standby_allowance, is_standby_day, total_earnings, notes, day_type
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `, [
+      // Verifica l'esistenza delle nuove colonne
+      const columnExists = async (tableName, columnName) => {
+        const columns = await this.db.getAllAsync(`PRAGMA table_info(${tableName})`);
+        return columns.some(col => col.name === columnName);
+      };
+
+      // Crea un array di colonne e valori base
+      let columns = [
+        "date", "site_name", "vehicle_driven", "departure_company", "arrival_site",
+        "work_start_1", "work_end_1", "work_start_2", "work_end_2",
+        "departure_return", "arrival_company",
+        "interventi",
+        "meal_lunch_voucher", "meal_lunch_cash", "meal_dinner_voucher", "meal_dinner_cash",
+        "travel_allowance", "standby_allowance", "is_standby_day", "total_earnings", "notes", "day_type"
+      ];
+      let placeholders = new Array(columns.length).fill('?');
+      let values = [
         date, siteName || '', vehicleDriven || '', departureCompany || '', arrivalSite || '',
         workStart1 || '', workEnd1 || '', workStart2 || '', workEnd2 || '',
         departureReturn || '', arrivalCompany || '',
-        JSON.stringify(interventi || []), // Serializza l'array di interventi
+        JSON.stringify(interventi || []),
         mealLunchVoucher || 0, mealLunchCash || 0, mealDinnerVoucher || 0, mealDinnerCash || 0,
-        travelAllowance || 0, standbyAllowance || 0, isStandbyDay || 0, totalEarnings || 0, notes || '',
-        dayType || 'lavorativa'
-      ]);
+        travelAllowance || 0, standbyAllowance || 0, isStandbyDay || 0, totalEarnings || 0,
+        notes || '', dayType || 'lavorativa'
+      ];
+
+      // Aggiungi la colonna targa_veicolo solo se esiste
+      const hasTargaVeicolo = await columnExists(DATABASE_TABLES.WORK_ENTRIES, 'targa_veicolo');
+      if (hasTargaVeicolo) {
+        columns.push("targa_veicolo");
+        placeholders.push("?");
+        values.push(targaVeicolo || '');
+        console.log("Utilizzo colonna targa_veicolo nell'inserimento");
+      }
+
+      // Aggiungi le colonne nuove solo se esistono
+      const hasTravelAllowancePercent = await columnExists(DATABASE_TABLES.WORK_ENTRIES, 'travel_allowance_percent');
+      if (hasTravelAllowancePercent) {
+        columns.push("travel_allowance_percent");
+        placeholders.push('?');
+        values.push(travelAllowancePercent || 1.0);
+        console.log("Utilizzo colonna travel_allowance_percent nell'inserimento");
+      }
+
+      const hasTrasfertaManualOverride = await columnExists(DATABASE_TABLES.WORK_ENTRIES, 'trasferta_manual_override');
+      if (hasTrasfertaManualOverride) {
+        columns.push("trasferta_manual_override");
+        placeholders.push('?');
+        values.push(trasfertaManualOverride ? 1 : 0);
+        console.log("Utilizzo colonna trasferta_manual_override nell'inserimento");
+      }
+
+      // Crea la query dinamica
+      const query = `
+        INSERT INTO ${DATABASE_TABLES.WORK_ENTRIES} (
+          ${columns.join(', ')}
+        ) VALUES (${placeholders.join(', ')})
+      `;
+
+      console.log(`Query di inserimento dinamica con ${columns.length} colonne`);
+      await this.db.runAsync(query, values);
     }, 'Insert work entry');
   }
 
@@ -302,8 +387,15 @@ class DatabaseService {
     await this.ensureInitialized();
     
     try {
-      const startDate = new Date(year, month - 1, 1).toISOString().split('T')[0];
-      const endDate = new Date(year, month, 0).toISOString().split('T')[0];
+      // FIX: Calcolo corretto delle date evitando problemi di timezone
+      const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
+      const daysInMonth = new Date(year, month, 0).getDate(); // Ottiene il numero di giorni nel mese
+      const endDate = `${year}-${String(month).padStart(2, '0')}-${String(daysInMonth).padStart(2, '0')}`;
+      
+      // DEBUG: Log per debugging del bug giorni lavorati
+      console.log(`🔍 DatabaseService.getWorkEntries - year: ${year}, month: ${month}`);
+      console.log(`🔍 DatabaseService.getWorkEntries - startDate: ${startDate}, endDate: ${endDate}`);
+      console.log(`🔍 DatabaseService.getWorkEntries - FIXED: Calcolo diretto senza timezone issues`);
       
       const query = 
         `SELECT * FROM work_entries 
@@ -311,6 +403,15 @@ class DatabaseService {
          ORDER BY date DESC`;
       
       const result = await this.db.getAllAsync(query, [startDate, endDate]);
+      
+      console.log(`🔍 DatabaseService.getWorkEntries - result: ${result ? result.length : 0} entries`);
+      if (result && result.length > 0) {
+        console.log('🔍 DatabaseService.getWorkEntries - Dates trovate:');
+        result.forEach((entry, idx) => {
+          console.log(`   ${idx + 1}. ${entry.date} (ID: ${entry.id})`);
+        });
+      }
+      
       return result || [];
     } catch (error) {
       console.error('Error getting work entries:', error);
@@ -357,17 +458,9 @@ class DatabaseService {
         ORDER BY date DESC
       `, [currentYearMonth, prevYearMonth]);
 
-      // Parsa il campo `interventi` per ogni entry
+      // Normalizza tutte le entry
       if (result && result.length > 0) {
-        return result.map(entry => {
-          try {
-            entry.interventi = entry.interventi ? JSON.parse(entry.interventi) : [];
-          } catch (e) {
-            console.warn(`Impossibile parsare JSON per interventi per l'entry id ${entry.id}:`, entry.interventi);
-            entry.interventi = [];
-          }
-          return entry;
-        });
+        return result.map(entry => this.normalizeWorkEntry(entry));
       }
       
       return result || [];
@@ -382,17 +475,9 @@ class DatabaseService {
         ORDER BY date DESC
       `);
 
-      // Parsa il campo `interventi` per ogni entry
+      // Normalizza tutte le entry
       if (result && result.length > 0) {
-        return result.map(entry => {
-          try {
-            entry.interventi = entry.interventi ? JSON.parse(entry.interventi) : [];
-          } catch (e) {
-            console.warn(`Impossibile parsare JSON per interventi per l'entry id ${entry.id}:`, entry.interventi);
-            entry.interventi = [];
-          }
-          return entry;
-        });
+        return result.map(entry => this.normalizeWorkEntry(entry));
       }
       
       return result || [];
@@ -407,13 +492,16 @@ class DatabaseService {
       `, [id]);
       
       if (result) {
-        try {
-          // Prova a parsare `interventi`. Se è null, vuoto o invalido, usa un array vuoto.
-          result.interventi = result.interventi ? JSON.parse(result.interventi) : [];
-        } catch (e) {
-          console.warn(`Impossibile parsare JSON per interventi per l'entry id ${id}:`, result.interventi);
-          result.interventi = []; // Fallback a array vuoto
-        }
+        // Usa il metodo di normalizzazione
+        const normalizedEntry = this.normalizeWorkEntry(result);
+        
+        // Aggiungi log per debug
+        console.log("Normalizzazione entry ID " + id + ":", {
+          trasfertaManualOverride: normalizedEntry.trasfertaManualOverride,
+          travelAllowancePercent: normalizedEntry.travelAllowancePercent
+        });
+        
+        return normalizedEntry;
       }
       
       return result;
@@ -427,29 +515,104 @@ class DatabaseService {
         workStart1, workEnd1, workStart2, workEnd2, departureReturn, arrivalCompany,
         interventi,
         mealLunchVoucher, mealLunchCash, mealDinnerVoucher, mealDinnerCash,
-        travelAllowance, standbyAllowance, isStandbyDay, totalEarnings, notes, dayType
+        travelAllowance, travelAllowancePercent, trasfertaManualOverride,
+        standbyAllowance, isStandbyDay, totalEarnings, notes, dayType,
+        targaVeicolo
       } = workEntry;
 
-      await this.db.runAsync(`
-        UPDATE ${DATABASE_TABLES.WORK_ENTRIES}
-        SET date = ?, site_name = ?, vehicle_driven = ?, departure_company = ?, arrival_site = ?,
-            work_start_1 = ?, work_end_1 = ?, work_start_2 = ?, work_end_2 = ?,
-            departure_return = ?, arrival_company = ?,
-            interventi = ?,
-            meal_lunch_voucher = ?, meal_lunch_cash = ?, meal_dinner_voucher = ?, meal_dinner_cash = ?,
-            travel_allowance = ?, standby_allowance = ?, is_standby_day = ?, total_earnings = ?, notes = ?,
-            day_type = ?, updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-      `, [
-        date, siteName || '', vehicleDriven || '', departureCompany || '', arrivalSite || '',
-        workStart1 || '', workEnd1 || '', workStart2 || '', workEnd2 || '',
-        departureReturn || '', arrivalCompany || '',
+      // Verifica prima l'esistenza delle nuove colonne
+      const columnExists = async (tableName, columnName) => {
+        const columns = await this.db.getAllAsync(`PRAGMA table_info(${tableName})`);
+        return columns.some(col => col.name === columnName);
+      };
+
+      // Verifica l'esistenza delle nuove colonne e crea una query dinamica
+      let updateColumns = [
+        "date = ?",
+        "site_name = ?",
+        "vehicle_driven = ?",
+        "departure_company = ?",
+        "arrival_site = ?",
+        "work_start_1 = ?",
+        "work_end_1 = ?",
+        "work_start_2 = ?",
+        "work_end_2 = ?",
+        "departure_return = ?",
+        "arrival_company = ?",
+        "interventi = ?",
+        "meal_lunch_voucher = ?",
+        "meal_lunch_cash = ?",
+        "meal_dinner_voucher = ?",
+        "meal_dinner_cash = ?",
+        "travel_allowance = ?",
+        "standby_allowance = ?",
+        "is_standby_day = ?",
+        "total_earnings = ?",
+        "notes = ?",
+        "day_type = ?"
+      ];
+
+      let updateParams = [
+        date, 
+        siteName || '', 
+        vehicleDriven || '', 
+        departureCompany || '', 
+        arrivalSite || '',
+        workStart1 || '', 
+        workEnd1 || '', 
+        workStart2 || '', 
+        workEnd2 || '',
+        departureReturn || '', 
+        arrivalCompany || '',
         JSON.stringify(interventi || []),
-        mealLunchVoucher || 0, mealLunchCash || 0, mealDinnerVoucher || 0, mealDinnerCash || 0,
-        travelAllowance || 0, standbyAllowance || 0, isStandbyDay || 0, totalEarnings || 0, notes || '',
-        dayType || 'lavorativa',
-        id
-      ]);
+        mealLunchVoucher || 0, 
+        mealLunchCash || 0, 
+        mealDinnerVoucher || 0, 
+        mealDinnerCash || 0,
+        travelAllowance || 0,
+        standbyAllowance || 0, 
+        isStandbyDay || 0, 
+        totalEarnings || 0, 
+        notes || '',
+        dayType || 'lavorativa'
+      ];
+
+      // Aggiungi la colonna targa_veicolo solo se esiste
+      const hasTargaVeicolo = await columnExists(DATABASE_TABLES.WORK_ENTRIES, 'targa_veicolo');
+      if (hasTargaVeicolo) {
+        updateColumns.push("targa_veicolo = ?");
+        updateParams.push(targaVeicolo || '');
+        console.log("Utilizzo colonna targa_veicolo nell'aggiornamento");
+      }
+
+      // Aggiungi le colonne nuove solo se esistono
+      const hasTravelAllowancePercent = await columnExists(DATABASE_TABLES.WORK_ENTRIES, 'travel_allowance_percent');
+      if (hasTravelAllowancePercent) {
+        updateColumns.push("travel_allowance_percent = ?");
+        updateParams.push(travelAllowancePercent || 1.0);
+        console.log("Utilizzo colonna travel_allowance_percent nell'aggiornamento");
+      }
+
+      const hasTrasfertaManualOverride = await columnExists(DATABASE_TABLES.WORK_ENTRIES, 'trasferta_manual_override');
+      if (hasTrasfertaManualOverride) {
+        updateColumns.push("trasferta_manual_override = ?");
+        updateParams.push(trasfertaManualOverride ? 1 : 0);
+        console.log("Utilizzo colonna trasferta_manual_override nell'aggiornamento");
+      }
+
+      // Aggiungi l'ID alla fine dei parametri
+      updateParams.push(id);
+
+      // Crea la query dinamica
+      const query = `
+        UPDATE ${DATABASE_TABLES.WORK_ENTRIES} SET
+          ${updateColumns.join(', ')}
+        WHERE id = ?
+      `;
+
+      console.log(`Query di aggiornamento dinamica con ${updateColumns.length} colonne`);
+      await this.db.runAsync(query, updateParams);
+      return id;
     }, 'Update work entry');
   }
 
@@ -482,21 +645,28 @@ class DatabaseService {
 
   // Settings methods
   async setSetting(key, value) {
-    return await this.safeExecute(async () => {
-      await this.db.runAsync(`
-        INSERT OR REPLACE INTO ${DATABASE_TABLES.SETTINGS} (key, value, updated_at)
-        VALUES (?, ?, CURRENT_TIMESTAMP)
-      `, [key, JSON.stringify(value)]);
-    }, 'Set setting');
+    return await executeDbOperation(async () => {
+      return await this.safeExecute(async () => {
+        // Usa una transazione per evitare lock
+        await this.db.withTransactionAsync(async () => {
+          await this.db.runAsync(`
+            INSERT OR REPLACE INTO ${DATABASE_TABLES.SETTINGS} (key, value, updated_at)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+          `, [key, JSON.stringify(value)]);
+        });
+      }, 'Set setting');
+    });
   }
 
   async getSetting(key, defaultValue = null) {
-    return await this.safeExecute(async () => {
-      const result = await this.db.getFirstAsync(`
-        SELECT value FROM ${DATABASE_TABLES.SETTINGS} WHERE key = ?
-      `, [key]);
-      return result ? JSON.parse(result.value) : defaultValue;
-    }, 'Get setting');
+    return await executeDbOperation(async () => {
+      return await this.safeExecute(async () => {
+        const result = await this.db.getFirstAsync(`
+          SELECT value FROM ${DATABASE_TABLES.SETTINGS} WHERE key = ?
+        `, [key]);
+        return result ? JSON.parse(result.value) : defaultValue;
+      }, 'Get setting');
+    });
   }  // Backup methods
   async getAllData() {
     return await this.safeExecute(async () => {
@@ -556,6 +726,21 @@ class DatabaseService {
     }, 'Record backup');
   }
 
+  // Ottieni tutti i backup registrati nel database
+  async getAllBackupsFromDb() {
+    await this.ensureInitialized();
+    const rows = await this.db.getAllAsync(`SELECT * FROM ${DATABASE_TABLES.BACKUPS} ORDER BY backup_date DESC`);
+    return rows.map(row => ({
+      id: row.id,
+      fileName: row.backup_name,
+      filePath: row.file_path,
+      backupType: row.backup_type,
+      status: row.status,
+      notes: row.notes,
+      created: row.backup_date,
+    }));
+  }
+
   // Health monitoring methods
   async isDatabaseHealthy() {
     try {
@@ -593,6 +778,107 @@ class DatabaseService {
       isInitialized: this.isInitialized,
       hasError: false
     };
+  }
+
+  // Helper function to normalize entry fields from DB to camelCase
+  normalizeEntry(entry) {
+    if (entry.targa_veicolo !== undefined) entry.targaVeicolo = entry.targa_veicolo;
+    // Parse interventi JSON if exists
+    try {
+      entry.interventi = entry.interventi ? JSON.parse(entry.interventi) : [];
+    } catch (e) {
+      console.warn(`Impossibile parsare JSON per interventi per l'entry id ${entry.id}:`, entry.interventi);
+      entry.interventi = [];
+    }
+    
+    // Normalize snake_case to camelCase for React
+    if (entry.site_name) entry.siteName = entry.site_name;
+    if (entry.vehicle_driven) entry.vehicleDriven = entry.vehicle_driven;
+    if (entry.departure_company) entry.departureCompany = entry.departure_company;
+    if (entry.arrival_site) entry.arrivalSite = entry.arrival_site;
+    if (entry.work_start_1) entry.workStart1 = entry.work_start_1;
+    if (entry.work_end_1) entry.workEnd1 = entry.work_end_1;
+    if (entry.work_start_2) entry.workStart2 = entry.work_start_2;
+    if (entry.work_end_2) entry.workEnd2 = entry.work_end_2;
+    if (entry.departure_return) entry.departureReturn = entry.departure_return;
+    if (entry.arrival_company) entry.arrivalCompany = entry.arrival_company;
+    if (entry.meal_lunch_voucher) entry.mealLunchVoucher = entry.meal_lunch_voucher;
+    if (entry.meal_lunch_cash) entry.mealLunchCash = entry.meal_lunch_cash;
+    if (entry.meal_dinner_voucher) entry.mealDinnerVoucher = entry.meal_dinner_voucher;
+    if (entry.meal_dinner_cash) entry.mealDinnerCash = entry.meal_dinner_cash;
+    if (entry.travel_allowance) entry.travelAllowance = entry.travel_allowance;
+    if (entry.travel_allowance_percent) entry.travelAllowancePercent = entry.travel_allowance_percent;
+    if (entry.standby_allowance) entry.standbyAllowance = entry.standby_allowance;
+    if (entry.is_standby_day) entry.isStandbyDay = entry.is_standby_day;
+    if (entry.total_earnings) entry.totalEarnings = entry.total_earnings;
+    if (entry.day_type) entry.dayType = entry.day_type;
+    
+    // Handle trasferta_manual_override field - normalize to boolean
+    if (entry.trasferta_manual_override !== undefined) {
+      entry.trasfertaManualOverride = entry.trasferta_manual_override === 1 || 
+                                     entry.trasferta_manual_override === true;
+    }
+    
+    return entry;
+  }
+  
+  // Helper per normalizzare i campi di una entry dal formato DB al formato app
+  normalizeWorkEntry(entry) {
+      entry.targaVeicolo = entry.targa_veicolo;
+    if (!entry) return null;
+    
+    try {
+      // Converte interventi in array se presente
+      if (entry.interventi) {
+        try {
+          entry.interventi = typeof entry.interventi === 'string' ? JSON.parse(entry.interventi) : entry.interventi;
+        } catch (e) {
+          console.warn(`Impossibile parsare JSON per interventi per l'entry id ${entry.id}:`, entry.interventi);
+          entry.interventi = [];
+        }
+      } else {
+        entry.interventi = [];
+      }
+      
+      // Normalizzazione per i nomi di campo in camelCase
+      entry.travelAllowance = entry.travel_allowance;
+      entry.travelAllowancePercent = entry.travel_allowance_percent !== undefined ? entry.travel_allowance_percent : 1.0;
+      entry.trasfertaManualOverride = entry.trasferta_manual_override === 1;
+      entry.mealLunchVoucher = entry.meal_lunch_voucher;
+      entry.mealLunchCash = entry.meal_lunch_cash;
+      entry.mealDinnerVoucher = entry.meal_dinner_voucher;
+      entry.mealDinnerCash = entry.meal_dinner_cash;
+      entry.isStandbyDay = entry.is_standby_day;
+      entry.standbyAllowance = entry.standby_allowance;
+      entry.siteName = entry.site_name;
+      entry.vehicleDriven = entry.vehicle_driven;
+      entry.departureCompany = entry.departure_company;
+      entry.arrivalSite = entry.arrival_site;
+      entry.workStart1 = entry.work_start_1;
+      entry.workEnd1 = entry.work_end_1;
+      entry.workStart2 = entry.work_start_2;
+      entry.workEnd2 = entry.work_end_2;
+      entry.departureReturn = entry.departure_return;
+      entry.arrivalCompany = entry.arrival_company;
+      entry.dayType = entry.day_type;
+      
+      return entry;
+    } catch (error) {
+      console.error('Errore durante la normalizzazione della entry:', error);
+      return entry; // Ritorna l'entry originale in caso di errore
+    }
+  }
+
+  // Get work entries with normalized fields
+  async getWorkEntriesWithNormalized(year, month) {
+    const entries = await this.getWorkEntries(year, month);
+    return entries.map(entry => this.normalizeEntry(entry));
+  }
+  
+  // Get all work entries with normalized fields
+  async getAllWorkEntriesWithNormalized() {
+    const entries = await this.getAllWorkEntries();
+    return entries.map(entry => this.normalizeEntry(entry));
   }
 }
 

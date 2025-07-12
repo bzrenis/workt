@@ -1,10 +1,12 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import DatabaseService from '../services/DatabaseService';
 import DatabaseHealthService from '../services/DatabaseHealthService';
 import { useCalculationService } from './useCalculationService';
+import { useVacationAutoCompile } from './useVacationAutoCompile';
 import { DEFAULT_SETTINGS } from '../constants';
 
-export { useCalculationService };
+export { useCalculationService, useVacationAutoCompile };
 
 export const useDatabase = () => {
   const [isInitialized, setIsInitialized] = useState(false);
@@ -241,12 +243,23 @@ export const useSettings = () => {
       
       const appSettings = await DatabaseService.getSetting('appSettings', DEFAULT_SETTINGS);
       
+      // Sincronizza anche AsyncStorage per le notifiche
+      await AsyncStorage.setItem('settings', JSON.stringify(appSettings));
+      console.log('🔄 HOOK - Settings sincronizzate in AsyncStorage');
+      
       console.log('🔍 HOOK - loadSettings: Dati caricati dal database');
       if (appSettings?.netCalculation) {
         console.log('- NetCalculation trovato:', JSON.stringify(appSettings.netCalculation, null, 2));
       } else {
         console.log('- NetCalculation NON trovato, usando default');
       }
+      
+      // Log delle impostazioni di viaggio
+      console.log('🚗 HOOK - Travel Settings:', {
+        travelHoursSetting: appSettings.travelHoursSetting,
+        travelCompensationRate: appSettings.travelCompensationRate,
+        hasFullSettings: !!appSettings
+      });
       
       setSettings(appSettings);
       setError(null);
@@ -273,7 +286,13 @@ export const useSettings = () => {
       console.log('🔧 HOOK - updateSettings chiamato');
       console.log('- Nuove impostazioni da salvare:', JSON.stringify(newSettings.netCalculation, null, 2));
       
+      // Salva nel database SQLite
       await DatabaseService.setSetting('appSettings', newSettings);
+      
+      // Salva anche in AsyncStorage per le notifiche
+      await AsyncStorage.setItem('settings', JSON.stringify(newSettings));
+      console.log('✅ HOOK - Settings salvate anche in AsyncStorage per notifiche');
+      
       setSettings(newSettings);
       setRetryCount(0);
       
@@ -342,6 +361,11 @@ export const useStandbyCalendar = (year, month) => {
       
       await DatabaseService.setStandbyDay(date, newStandbyStatus);
       await loadStandbyDays(); // Reload standby days
+      
+      // Aggiorna le notifiche di reperibilità quando il calendario cambia
+      const NotificationService = (await import('../services/NotificationService')).default;
+      await NotificationService.updateStandbyNotifications();
+      
     } catch (err) {
       console.error('Error toggling standby day:', err);
       throw err;
