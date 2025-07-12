@@ -7,11 +7,13 @@ import {
 } from '../constants';
 import { isItalianHoliday } from '../constants/holidays';
 import { NetEarningsCalculator, calculateQuickNet, calculateDetailedNet, calculateRealNet } from './NetEarningsCalculator';
+import { TimeCalculator } from './TimeCalculator';
 
 class CalculationService {
   constructor() {
     this.defaultContract = CCNL_CONTRACTS.METALMECCANICO_PMI_L5;
     this.netCalculator = new NetEarningsCalculator(this.defaultContract);
+    this.timeCalculator = new TimeCalculator();
   }
 
   // Parse time string to minutes from midnight
@@ -43,36 +45,17 @@ class CalculationService {
 
   // Calculate work hours from work entry
   calculateWorkHours(workEntry) {
-    let totalWorkMinutes = 0;
-    
-    // First work shift
-    if (workEntry.workStart1 && workEntry.workEnd1) {
-      totalWorkMinutes += this.calculateTimeDifference(workEntry.workStart1, workEntry.workEnd1);
-    }
-    
-    // Second work shift
-    if (workEntry.workStart2 && workEntry.workEnd2) {
-      totalWorkMinutes += this.calculateTimeDifference(workEntry.workStart2, workEntry.workEnd2);
-    }
-    
-    return this.minutesToHours(totalWorkMinutes);
+    return this.timeCalculator.calculateWorkHours(workEntry);
   }
 
   // Calculate travel hours
   calculateTravelHours(workEntry) {
-    let totalTravelMinutes = 0;
-    
-    // Outbound travel
-    if (workEntry.departureCompany && workEntry.arrivalSite) {
-      totalTravelMinutes += this.calculateTimeDifference(workEntry.departureCompany, workEntry.arrivalSite);
-    }
-    
-    // Return travel
-    if (workEntry.departureReturn && workEntry.arrivalCompany) {
-      totalTravelMinutes += this.calculateTimeDifference(workEntry.departureReturn, workEntry.arrivalCompany);
-    }
-    
-    return this.minutesToHours(totalTravelMinutes);
+    return this.timeCalculator.calculateTravelHours(workEntry);
+  }
+
+  // Calculate breaks between shifts for meal allowance
+  calculateBreaksBetweenShifts(workEntry) {
+    return this.timeCalculator.calculateBreaksBetweenShifts(workEntry);
   }
 
   // Calculate standby work hours
@@ -903,7 +886,6 @@ class CalculationService {
       // Se c'è un valore specifico nel form, usa solo quello
       result.allowances.meal += workEntry.mealLunchCash;
     } else if (workEntry.mealLunchVoucher === 1) {
-      // Altrimenti usa i valori standard dalle impostazioni (sia buono che contanti)
       result.allowances.meal += settings.mealAllowances?.lunch?.voucherAmount || 0;
       result.allowances.meal += settings.mealAllowances?.lunch?.cashAmount || 0;
     }
@@ -913,7 +895,6 @@ class CalculationService {
       // Se c'è un valore specifico nel form, usa solo quello
       result.allowances.meal += workEntry.mealDinnerCash;
     } else if (workEntry.mealDinnerVoucher === 1) {
-      // Altrimenti usa i valori standard dalle impostazioni (sia buono che contanti)
       result.allowances.meal += settings.mealAllowances?.dinner?.voucherAmount || 0;
       result.allowances.meal += settings.mealAllowances?.dinner?.cashAmount || 0;
     }
@@ -1035,6 +1016,7 @@ class CalculationService {
     const isInCalendar = Boolean(standbySettings && 
                         standbySettings.enabled && 
                         standbyDays && 
+                        dateStr && 
                         standbyDays[dateStr] && 
                         standbyDays[dateStr].selected === true);
     
@@ -1170,7 +1152,7 @@ class CalculationService {
     const standardWorkDay = getWorkDayHours(); // 8 ore
     
     // Nei giorni feriali, se le ORE ORDINARIE superano le 8 ore, le ore eccedenti di reperibilità 
-    // potrebbero essere considerate straordinarie secondo normativa CCNL
+    // potrebbero essere considerate straordinari secondo normativa CCNL
     // CORREZIONE: il controllo deve essere SOLO sulle ore ordinarie, non sul totale
     const isWeekday = !isSaturday && !isSunday && !isHoliday;
     const shouldApplyOvertimeToStandby = isWeekday && ordinaryTotalHours >= standardWorkDay;
@@ -1304,8 +1286,11 @@ class CalculationService {
           meal: 0,
       };
 
-      // Logica Indennità di Trasferta
+      // Dichiarazioni delle impostazioni
       const travelSettings = settings.travelAllowance || {};
+      const standbySettings = settings.standbySettings || {};
+
+      // Logica Indennità di Trasferta
       if (travelSettings.enabled) {
           // Verifica se ci sono ore di viaggio
           const travelHours = (hoursBreakdown.viaggio_giornaliera || 0) + (hoursBreakdown.viaggio_extra || 0);
@@ -1322,7 +1307,6 @@ class CalculationService {
 
       // Logica Indennità di Reperibilità
       // NOTA: Questo valore viene usato per mostrare l'indennità nel riepilogo
-      const standbySettings = settings.standbySettings || {};
       const dateStr = workEntry.date; // Data in formato YYYY-MM-DD
       
       // Se la reperibilità è esplicitamente disattivata nel form, ignora le impostazioni calendario

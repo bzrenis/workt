@@ -429,9 +429,9 @@ const DashboardScreen = ({ navigation, route }) => {
 
         // Conta ore notturne (approssimazione basata sui breakdown)
         if (breakdown.standby?.workHours?.night || breakdown.standby?.workHours?.saturday_night || breakdown.standby?.workHours?.night_holiday) {
-          aggregated.analytics.nightWorkHours += (breakdown.standby.workHours.night || 0) + 
-                                                 (breakdown.standby.workHours.saturday_night || 0) + 
-                                                 (breakdown.standby.workHours.night_holiday || 0);
+          aggregated.analytics.nightWorkHours += (breakdown.standby?.workHours?.night || 0) + 
+                                                 (breakdown.standby?.workHours?.saturday_night || 0) + 
+                                                 (breakdown.standby?.workHours?.night_holiday || 0);
         }
 
         // Conta ore di viaggio totali
@@ -486,7 +486,7 @@ const DashboardScreen = ({ navigation, route }) => {
           }
           
           // Ore lavoro reperibilità
-          if (breakdown.standby.workHours) {
+          if (breakdown.standby?.workHours) {
             Object.keys(breakdown.standby.workHours).forEach(key => {
               if (aggregated.standby.workHours[key] !== undefined) {
                 aggregated.standby.workHours[key] += breakdown.standby.workHours[key] || 0;
@@ -495,7 +495,7 @@ const DashboardScreen = ({ navigation, route }) => {
           }
 
           // Ore viaggio reperibilità
-          if (breakdown.standby.travelHours) {
+          if (breakdown.standby?.travelHours) {
             Object.keys(breakdown.standby.travelHours).forEach(key => {
               if (aggregated.standby.travelHours[key] !== undefined) {
                 aggregated.standby.travelHours[key] += breakdown.standby.travelHours[key] || 0;
@@ -504,7 +504,7 @@ const DashboardScreen = ({ navigation, route }) => {
           }
 
           // Guadagni lavoro reperibilità
-          if (breakdown.standby.workEarnings) {
+          if (breakdown.standby?.workEarnings) {
             Object.keys(breakdown.standby.workEarnings).forEach(key => {
               if (aggregated.standby.workEarnings[key] !== undefined) {
                 aggregated.standby.workEarnings[key] += breakdown.standby.workEarnings[key] || 0;

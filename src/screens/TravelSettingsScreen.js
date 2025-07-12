@@ -15,10 +15,14 @@ import { useSettings } from '../hooks';
 const TravelSettingsScreen = ({ navigation }) => {
   const { settings, updatePartialSettings, isLoading } = useSettings();
   const [selectedOption, setSelectedOption] = useState('TRAVEL_SEPARATE');
+  const [internalTravelOption, setInternalTravelOption] = useState('AS_WORK');
 
   useEffect(() => {
     if (settings.travelHoursSetting) {
       setSelectedOption(settings.travelHoursSetting);
+    }
+    if (settings.internalTravelSetting) {
+      setInternalTravelOption(settings.internalTravelSetting);
     }
   }, [settings]);
 
@@ -52,7 +56,8 @@ const TravelSettingsScreen = ({ navigation }) => {
   const handleSave = async () => {
     try {
       await updatePartialSettings({
-        travelHoursSetting: selectedOption
+        travelHoursSetting: selectedOption,
+        internalTravelSetting: internalTravelOption
       });
 
       Alert.alert('Successo', 'Impostazioni ore di viaggio salvate correttamente', [
