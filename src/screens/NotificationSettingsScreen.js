@@ -201,6 +201,64 @@ const NotificationSettingsScreen = ({ navigation }) => {
               <Text style={styles.permissionButtonText}>Richiedi Permessi</Text>
             </TouchableOpacity>
           )}
+          
+          {/* Banner informativo per notifiche in test */}
+          {settings.enabled && (
+            <View style={styles.testBanner}>
+              <MaterialCommunityIcons name="flask" size={20} color="#FF9800" />
+              <View style={styles.testBannerContent}>
+                <Text style={styles.testBannerTitle}>🧪 Notifiche in Test - Versione Migliorata</Text>
+                <Text style={styles.testBannerText}>
+                  Sistema recentemente aggiornato per risolvere il problema delle notifiche multiple. 
+                  Ora utilizza programmazione basata su date assolute invece di trigger settimanali.
+                </Text>
+                <View style={styles.testBannerButtons}>
+                  <TouchableOpacity 
+                    style={styles.testBannerButton}
+                    onPress={() => {
+                      Alert.alert(
+                        '🔧 Correzioni Implementate',
+                        '✅ Risolto: Notifiche multiple immediate\n' +
+                        '✅ Nuovo: Trigger basati su date specifiche\n' +
+                        '✅ Auto-rinnovamento ogni 3 settimane\n' +
+                        '✅ Throttling migliorato (30 min)\n' +
+                        '✅ Logging dettagliato per debug\n\n' +
+                        'Le notifiche dovrebbero ora arrivare agli orari corretti invece che tutte insieme.',
+                        [{ text: 'Capito', style: 'default' }]
+                      );
+                    }}
+                  >
+                    <Text style={styles.testBannerButtonText}>Dettagli Correzioni</Text>
+                    <MaterialCommunityIcons name="information-outline" size={14} color="#F57C00" />
+                  </TouchableOpacity>
+                  
+                  <TouchableOpacity 
+                    style={[styles.testBannerButton, { backgroundColor: '#E8F5E9' }]}
+                    onPress={async () => {
+                      try {
+                        // Test rapido: invia una notifica tra 10 secondi
+                        await NotificationService.scheduleTestNotification(
+                          '🧪 Test Sistema Corretto',
+                          'Se ricevi questa notifica tra 10 secondi, il sistema funziona correttamente!',
+                          10
+                        );
+                        Alert.alert(
+                          '🧪 Test Avviato',
+                          'Notifica di test programmata tra 10 secondi. Se la ricevi, il sistema è funzionante!',
+                          [{ text: 'OK' }]
+                        );
+                      } catch (error) {
+                        Alert.alert('Errore', 'Impossibile avviare il test: ' + error.message);
+                      }
+                    }}
+                  >
+                    <Text style={[styles.testBannerButtonText, { color: '#2E7D32' }]}>Test Rapido</Text>
+                    <MaterialCommunityIcons name="play-circle-outline" size={14} color="#2E7D32" />
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+          )}
         </View>
 
         {settings.enabled && (
@@ -649,6 +707,52 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#666',
     lineHeight: 20,
+  },
+  testBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: '#FFF3E0',
+    borderLeftWidth: 4,
+    borderLeftColor: '#FF9800',
+    borderRadius: 8,
+    padding: 12,
+    marginTop: 12,
+  },
+  testBannerContent: {
+    flex: 1,
+    marginLeft: 8,
+  },
+  testBannerTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#E65100',
+    marginBottom: 4,
+  },
+  testBannerText: {
+    fontSize: 12,
+    color: '#BF360C',
+    lineHeight: 16,
+    marginBottom: 8,
+  },
+  testBannerButtons: {
+    flexDirection: 'row',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+  testBannerButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFE0B2',
+    borderRadius: 6,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+  },
+  testBannerButtonText: {
+    fontSize: 11,
+    color: '#F57C00',
+    fontWeight: '600',
+    marginRight: 4,
   },
 });
 

@@ -1082,6 +1082,37 @@ class NotificationService {
       }
     }
   }
+
+  // Funzione per test rapido delle notifiche corrette
+  async scheduleTestNotification(title, body, delaySeconds = 10) {
+    try {
+      const triggerDate = new Date();
+      triggerDate.setSeconds(triggerDate.getSeconds() + delaySeconds);
+
+      await Notifications.scheduleNotificationAsync({
+        content: {
+          title: title,
+          body: body,
+          sound: true,
+          data: { 
+            type: 'test_notification',
+            testTime: triggerDate.toISOString(),
+            version: 'corrected_system'
+          }
+        },
+        trigger: {
+          date: triggerDate,
+        },
+      });
+
+      console.log(`🧪 Notifica di test programmata per ${triggerDate.toLocaleTimeString('it-IT')}`);
+      return true;
+    } catch (error) {
+      console.error('❌ Errore programmazione notifica di test:', error);
+      throw error;
+    }
+  }
+
 }
 
 // Esporta un'istanza singleton
