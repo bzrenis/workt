@@ -114,77 +114,110 @@ class NotificationService {
   // Programma tutte le notifiche
   async scheduleNotifications(settings = null) {
     try {
-      // Throttling per evitare chiamate multiple simultanee
+      // THROTTLING MIGLIORATO - 30 minuti per evitare riprogrammazioni eccessive
       const now = Date.now();
       if (this.schedulingInProgress) {
         console.log('📱 Programmazione notifiche già in corso, saltando...');
         return;
       }
       
-      if (now - this.lastScheduleTime < 5000) { // 5 secondi di cooldown
-        console.log('📱 Programmazione notifiche troppo recente, saltando...');
+      // Aumentato a 30 minuti (1800000ms) per evitare riprogrammazioni continue
+      if (now - this.lastScheduleTime < 1800000) { 
+        const remainingTime = Math.round((1800000 - (now - this.lastScheduleTime)) / 60000);
+        console.log(`📱 Notifiche programmate di recente, prossima programmazione tra ${remainingTime} minuti`);
         return;
       }
 
       this.schedulingInProgress = true;
       this.lastScheduleTime = now;
 
-      console.log('📱 INIZIO programmazione notifiche...');
+      console.log('📱 🚀 INIZIO programmazione notifiche (con controllo duplicati)...');
 
       if (!settings) {
         settings = await this.getSettings();
       }
 
-      // Cancella tutte le notifiche esistenti
-      await Notifications.cancelAllScheduledNotificationsAsync();
-      console.log('🗑️ Notifiche esistenti cancellate');
+      // VERIFICA se ci sono già notifiche programmate
+      const existingNotifications = await Notifications.getAllScheduledNotificationsAsync();
+      console.log(`🔍 Trovate ${existingNotifications.length} notifiche già programmate`);
+
+      // Cancella SOLO se necessario (evita cancellazioni inutili)
+      if (existingNotifications.length > 0) {
+        console.log('🗑️ Cancellazione notifiche esistenti...');
+        await Notifications.cancelAllScheduledNotificationsAsync();
+      }
 
       if (!settings.enabled) {
-        console.log('📱 Notifiche disabilitate');
+        console.log('📱 ❌ Notifiche disabilitate nelle impostazioni');
         return;
       }
 
-      // Programma i vari tipi di notifiche
-      console.log('📱 Programmando promemoria lavoro...');
-      await this.scheduleWorkReminders(settings.workReminders);
+      // PROGRAMMAZIONE SELETTIVA - Solo se abilitato
+      let totalScheduled = 0;
       
-      console.log('📱 Programmando promemoria inserimento orari...');
-      await this.scheduleTimeEntryReminders(settings.timeEntryReminders);
+      if (settings.workReminders?.enabled) {
+        console.log('📱 ⏰ Programmando promemoria lavoro...');
+        const workCount = await this.scheduleWorkReminders(settings.workReminders);
+        totalScheduled += workCount;
+      }
       
-      console.log('📱 Programmando riepilogo giornaliero...');
-      await this.scheduleDailySummary(settings.dailySummary);
+      if (settings.timeEntryReminders?.enabled) {
+        console.log('📱 ✍️ Programmando promemoria inserimento orari...');
+        const entryCount = await this.scheduleTimeEntryReminders(settings.timeEntryReminders);
+        totalScheduled += entryCount;
+      }
       
-      console.log('📱 Configurando avvisi straordinario...');
-      await this.scheduleOvertimeAlerts(settings.overtimeAlerts);
+      if (settings.dailySummary?.enabled) {
+        console.log('📱 📊 Programmando riepilogo giornaliero...');
+        await this.scheduleDailySummary(settings.dailySummary);
+        totalScheduled += 1;
+      }
       
-      // Programma i promemoria di reperibilità
+      // NOTA: Gli avvisi straordinario sono gestiti dinamicamente (non qui)
+      
+      // Programma i promemoria di reperibilità SOLO se abilitati
       if (settings.standbyReminders?.enabled) {
-        console.log('📱 Programmando promemoria reperibilità...');
+        console.log('📱 📞 Programmando promemoria reperibilità...');
         
-        // Forza la sincronizzazione delle settings al database prima di cercare le date
-        const DatabaseService = (await import('./DatabaseService')).default;
-        const syncCount = await DatabaseService.syncStandbySettingsToDatabase();
-        console.log(`📞 SYNC: ${syncCount} date sincronizzate dal settings al database`);
-        
-        const endDate = new Date();
-        endDate.setMonth(endDate.getMonth() + 2); // Programma per i prossimi 2 mesi
-        const standbyDates = await this.getStandbyDatesFromSettings(new Date(), endDate);
-        if (standbyDates.length > 0) {
-          await this.scheduleStandbyReminders(standbyDates, settings);
-        } else {
-          console.log('📞 Nessuna data di reperibilità trovata per programmare notifiche');
-          console.log('📞 SUGGERIMENTO: Controlla che le date di reperibilità siano state impostate nel calendario');
+        try {
+          // Forza la sincronizzazione delle settings al database
+          const DatabaseService = (await import('./DatabaseService')).default;
+          const syncCount = await DatabaseService.syncStandbySettingsToDatabase();
+          console.log(`📞 SYNC: ${syncCount} date sincronizzate dal settings al database`);
+          
+          const endDate = new Date();
+          endDate.setMonth(endDate.getMonth() + 1); // Ridotto a 1 mese per evitare spam
+          const standbyDates = await this.getStandbyDatesFromSettings(new Date(), endDate);
+          
+          if (standbyDates.length > 0) {
+            const standbyCount = await this.scheduleStandbyReminders(standbyDates, settings);
+            totalScheduled += standbyCount;
+          } else {
+            console.log('📞 ⚠️ Nessuna data di reperibilità trovata per programmare notifiche');
+          }
+        } catch (standbyError) {
+          console.error('📞 ❌ Errore programmazione reperibilità:', standbyError);
         }
       }
 
-      // Verifica quante notifiche sono state programmate in totale
-      const totalScheduled = await Notifications.getAllScheduledNotificationsAsync();
-      console.log(`✅ Programmazione notifiche completata. Totale programmate: ${totalScheduled.length}`);
+      // VERIFICA FINALE - Controlla le notifiche effettivamente programmate
+      const finalScheduled = await Notifications.getAllScheduledNotificationsAsync();
+      console.log(`✅ 🎯 Programmazione completata! Notifiche attive: ${finalScheduled.length}`);
       
-      // Log dettagliato delle notifiche programmate
-      totalScheduled.forEach((notif, index) => {
-        console.log(`  ${index + 1}. ${notif.content.title} - Tipo: ${notif.content.data?.type || 'unknown'}`);
-      });
+      // PROGRAMMAZIONE AUTO-RINNOVAMENTO
+      console.log('📱 🔄 Programmando auto-rinnovamento...');
+      await this.setupAutoRenewal();
+      
+      // Log dettagliato SOLO se ci sono notifiche
+      if (finalScheduled.length > 0) {
+        console.log('📋 LISTA NOTIFICHE PROGRAMMATE:');
+        finalScheduled.forEach((notif, index) => {
+          const triggerInfo = this.describeTrigger(notif.trigger);
+          console.log(`  ${index + 1}. ${notif.content.title} - ${triggerInfo}`);
+        });
+      } else {
+        console.log('⚠️ ATTENZIONE: Nessuna notifica è stata effettivamente programmata!');
+      }
 
     } catch (error) {
       console.error('❌ Errore nella programmazione notifiche:', error);
@@ -193,109 +226,284 @@ class NotificationService {
     }
   }
 
+  // Helper per descrivere il trigger di una notifica
+  describeTrigger(trigger) {
+    if (trigger.weekday && trigger.hour !== undefined) {
+      const days = ['Dom', 'Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab'];
+      const dayName = days[trigger.weekday - 1] || 'Sconosciuto';
+      return `${dayName} alle ${trigger.hour.toString().padStart(2, '0')}:${(trigger.minute || 0).toString().padStart(2, '0')}`;
+    }
+    if (trigger.hour !== undefined) {
+      return `Ogni giorno alle ${trigger.hour.toString().padStart(2, '0')}:${(trigger.minute || 0).toString().padStart(2, '0')}`;
+    }
+    if (trigger.seconds) {
+      return `Tra ${trigger.seconds} secondi`;
+    }
+    if (trigger.date) {
+      const date = new Date(trigger.date);
+      return `${date.toLocaleDateString('it-IT')} alle ${date.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}`;
+    }
+    return 'Trigger sconosciuto';
+  }
+
   // Programma promemoria inizio lavoro
   async scheduleWorkReminders(settings) {
-    if (!settings.enabled) return;
+    if (!settings.enabled) return 0;
 
     const [hours, minutes] = settings.morningTime.split(':');
-    const daysToSchedule = settings.weekendsEnabled ? [1, 2, 3, 4, 5, 6, 7] : [1, 2, 3, 4, 5];
+    const daysToSchedule = settings.weekendsEnabled ? [0, 1, 2, 3, 4, 5, 6] : [1, 2, 3, 4, 5]; // 0=domenica, 1=lunedì...
+    let scheduledCount = 0;
 
-    for (const day of daysToSchedule) {
-      const isWeekend = day === 6 || day === 7;
-      const content = {
-        title: isWeekend ? '🌅 Weekend' : '🌅 Buongiorno!',
-        body: isWeekend 
-          ? 'Se lavori oggi, ricordati di registrare gli orari.'
-          : 'Ricordati di registrare gli orari di lavoro di oggi.',
-        sound: true,
-        data: { type: 'work_reminder', day: day }
-      };
+    // NUOVO APPROCCIO: Programma per le prossime 4 settimane invece di ripetizioni settimanali
+    const now = new Date();
+    const weeksToSchedule = 4; // Programma per le prossime 4 settimane
+    
+    for (let week = 0; week < weeksToSchedule; week++) {
+      for (const dayOfWeek of daysToSchedule) {
+        // Calcola la data specifica
+        const targetDate = new Date(now);
+        const daysUntilTarget = ((dayOfWeek - now.getDay() + 7) % 7) + (week * 7);
+        
+        // Se è oggi e l'ora è già passata, salta alla settimana successiva
+        if (daysUntilTarget === 0) {
+          const nowHour = now.getHours();
+          const nowMinute = now.getMinutes();
+          const targetHour = parseInt(hours);
+          const targetMinute = parseInt(minutes);
+          
+          if (nowHour > targetHour || (nowHour === targetHour && nowMinute >= targetMinute)) {
+            continue; // Salta, l'ora è già passata oggi
+          }
+        }
+        
+        targetDate.setDate(now.getDate() + daysUntilTarget);
+        targetDate.setHours(parseInt(hours), parseInt(minutes), 0, 0);
+        
+        // Verifica che la data sia nel futuro
+        if (targetDate <= now) continue;
 
-      await Notifications.scheduleNotificationAsync({
-        content,
-        trigger: {
-          weekday: day,
-          hour: parseInt(hours),
-          minute: parseInt(minutes),
-          repeats: true,
-        },
-      });
+        const isWeekend = dayOfWeek === 0 || dayOfWeek === 6; // domenica o sabato
+        const dayNames = ['Dom', 'Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab'];
+        
+        const content = {
+          title: isWeekend ? '🌅 Weekend' : '🌅 Buongiorno!',
+          body: isWeekend 
+            ? 'Se lavori oggi, ricordati di registrare gli orari.'
+            : 'Ricordati di registrare gli orari di lavoro di oggi.',
+          sound: true,
+          data: { 
+            type: 'work_reminder', 
+            day: dayOfWeek,
+            scheduledDate: targetDate.toISOString(),
+            week: week
+          }
+        };
+
+        try {
+          await Notifications.scheduleNotificationAsync({
+            content,
+            trigger: {
+              date: targetDate,
+            },
+          });
+          scheduledCount++;
+          console.log(`  ✅ Promemoria lavoro programmato per ${dayNames[dayOfWeek]} ${targetDate.toLocaleDateString('it-IT')} alle ${hours}:${minutes}`);
+        } catch (error) {
+          console.error(`  ❌ Errore programmazione promemoria lavoro per ${dayNames[dayOfWeek]} ${targetDate.toLocaleDateString('it-IT')}:`, error);
+        }
+      }
     }
+    
+    return scheduledCount;
   }
 
   // Programma promemoria inserimento orari
   async scheduleTimeEntryReminders(settings) {
-    if (!settings.enabled) return;
+    if (!settings.enabled) return 0;
 
     const [hours, minutes] = settings.time.split(':');
-    const daysToSchedule = settings.weekendsEnabled ? [1, 2, 3, 4, 5, 6, 7] : [1, 2, 3, 4, 5];
+    const daysToSchedule = settings.weekendsEnabled ? [0, 1, 2, 3, 4, 5, 6] : [1, 2, 3, 4, 5]; // 0=domenica, 1=lunedì...
+    let scheduledCount = 0;
 
-    for (const day of daysToSchedule) {
-      const isWeekend = day === 6 || day === 7;
-      const content = {
-        title: isWeekend ? '📝 Inserimento Orari Weekend' : '📝 Inserimento Orari',
-        body: isWeekend 
-          ? 'Se hai lavorato oggi, ricordati di inserire gli orari.'
-          : 'Hai inserito gli orari di lavoro di oggi?',
-        sound: true,
-        data: { type: 'time_entry_reminder', day: day }
-      };
+    // NUOVO APPROCCIO: Programma per le prossime 4 settimane invece di ripetizioni settimanali
+    const now = new Date();
+    const weeksToSchedule = 4; // Programma per le prossime 4 settimane
+    
+    for (let week = 0; week < weeksToSchedule; week++) {
+      for (const dayOfWeek of daysToSchedule) {
+        // Calcola la data specifica
+        const targetDate = new Date(now);
+        const daysUntilTarget = ((dayOfWeek - now.getDay() + 7) % 7) + (week * 7);
+        
+        // Se è oggi e l'ora è già passata, salta alla settimana successiva
+        if (daysUntilTarget === 0) {
+          const nowHour = now.getHours();
+          const nowMinute = now.getMinutes();
+          const targetHour = parseInt(hours);
+          const targetMinute = parseInt(minutes);
+          
+          if (nowHour > targetHour || (nowHour === targetHour && nowMinute >= targetMinute)) {
+            continue; // Salta, l'ora è già passata oggi
+          }
+        }
+        
+        targetDate.setDate(now.getDate() + daysUntilTarget);
+        targetDate.setHours(parseInt(hours), parseInt(minutes), 0, 0);
+        
+        // Verifica che la data sia nel futuro
+        if (targetDate <= now) continue;
 
-      await Notifications.scheduleNotificationAsync({
-        content,
-        trigger: {
-          weekday: day,
-          hour: parseInt(hours),
-          minute: parseInt(minutes),
-          repeats: true,
-        },
-      });
+        const isWeekend = dayOfWeek === 0 || dayOfWeek === 6; // domenica o sabato
+        const dayNames = ['Dom', 'Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab'];
+        
+        const content = {
+          title: isWeekend ? '📝 Inserimento Orari Weekend' : '📝 Inserimento Orari',
+          body: isWeekend 
+            ? 'Se hai lavorato oggi, ricordati di inserire gli orari.'
+            : 'Hai inserito gli orari di lavoro di oggi?',
+          sound: true,
+          data: { 
+            type: 'time_entry_reminder', 
+            day: dayOfWeek,
+            scheduledDate: targetDate.toISOString(),
+            week: week
+          }
+        };
+
+        try {
+          await Notifications.scheduleNotificationAsync({
+            content,
+            trigger: {
+              date: targetDate,
+            },
+          });
+          scheduledCount++;
+          console.log(`  ✅ Promemoria inserimento programmato per ${dayNames[dayOfWeek]} ${targetDate.toLocaleDateString('it-IT')} alle ${hours}:${minutes}`);
+        } catch (error) {
+          console.error(`  ❌ Errore programmazione promemoria inserimento per ${dayNames[dayOfWeek]} ${targetDate.toLocaleDateString('it-IT')}:`, error);
+        }
+      }
     }
+    
+    return scheduledCount;
   }
 
   // Programma riepilogo giornaliero
   async scheduleDailySummary(settings) {
-    if (!settings.enabled) return;
+    if (!settings.enabled) return 0;
 
     const [hours, minutes] = settings.time.split(':');
 
-    await Notifications.scheduleNotificationAsync({
-      content: {
-        title: '📊 Riepilogo Giornaliero',
-        body: 'Controlla il tuo riepilogo guadagni di oggi.',
-        sound: true,
-        data: { type: 'daily_summary' }
-      },
-      trigger: {
-        hour: parseInt(hours),
-        minute: parseInt(minutes),
-        repeats: true,
-      },
-    });
+    // NUOVO APPROCCIO: Programma per i prossimi 30 giorni invece di ripetizioni giornaliere
+    const now = new Date();
+    const daysToSchedule = 30; // Programma per i prossimi 30 giorni
+    let scheduledCount = 0;
+    
+    for (let day = 0; day < daysToSchedule; day++) {
+      const targetDate = new Date(now);
+      targetDate.setDate(now.getDate() + day);
+      targetDate.setHours(parseInt(hours), parseInt(minutes), 0, 0);
+      
+      // Se è oggi e l'ora è già passata, salta al giorno successivo
+      if (day === 0) {
+        const nowHour = now.getHours();
+        const nowMinute = now.getMinutes();
+        const targetHour = parseInt(hours);
+        const targetMinute = parseInt(minutes);
+        
+        if (nowHour > targetHour || (nowHour === targetHour && nowMinute >= targetMinute)) {
+          continue; // Salta, l'ora è già passata oggi
+        }
+      }
+      
+      // Verifica che la data sia nel futuro
+      if (targetDate <= now) continue;
+
+      try {
+        await Notifications.scheduleNotificationAsync({
+          content: {
+            title: '📊 Riepilogo Giornaliero',
+            body: 'Controlla il tuo riepilogo guadagni di oggi.',
+            sound: true,
+            data: { 
+              type: 'daily_summary',
+              scheduledDate: targetDate.toISOString(),
+              day: day
+            }
+          },
+          trigger: {
+            date: targetDate,
+          },
+        });
+        scheduledCount++;
+        console.log(`  ✅ Riepilogo giornaliero programmato per ${targetDate.toLocaleDateString('it-IT')} alle ${hours}:${minutes}`);
+      } catch (error) {
+        console.error(`  ❌ Errore programmazione riepilogo per ${targetDate.toLocaleDateString('it-IT')}:`, error);
+      }
+    }
+    
+    return scheduledCount;
   }
 
-  // Programma avvisi straordinario (chiamato dinamicamente quando si inseriscono orari)
+  // CONTROLLO STRAORDINARIO - Chiamato dinamicamente (NON nella programmazione automatica)
   async checkOvertimeAlert(workHours, settings = null) {
-    if (!settings) {
-      settings = await this.getSettings();
-    }
+    try {
+      if (!settings) {
+        settings = await this.getSettings();
+      }
 
-    if (!settings.enabled || !settings.overtimeAlerts.enabled) return;
+      // Verifica se le notifiche sono abilitate
+      if (!settings.enabled || !settings.overtimeAlerts?.enabled) {
+        console.log('⚠️ Controllo straordinario: notifiche disabilitate');
+        return;
+      }
 
-    if (workHours > settings.overtimeAlerts.hoursThreshold) {
+      // Verifica la soglia
+      const threshold = settings.overtimeAlerts.hoursThreshold || 8.5;
+      if (workHours <= threshold) {
+        console.log(`⚠️ Controllo straordinario: ${workHours.toFixed(1)}h <= ${threshold}h (soglia non superata)`);
+        return;
+      }
+
+      // THROTTLING per evitare spam di notifiche straordinario
+      const lastOvertimeKey = 'last_overtime_notification';
+      const lastOvertimeStr = await AsyncStorage.getItem(lastOvertimeKey);
+      const now = Date.now();
+      
+      if (lastOvertimeStr) {
+        const lastOvertime = parseInt(lastOvertimeStr);
+        const timeDiff = now - lastOvertime;
+        const minInterval = 3600000; // 1 ora di intervallo minimo
+        
+        if (timeDiff < minInterval) {
+          const remainingMinutes = Math.round((minInterval - timeDiff) / 60000);
+          console.log(`⚠️ Notifica straordinario già inviata di recente, prossima tra ${remainingMinutes} minuti`);
+          return;
+        }
+      }
+
+      // Programma notifica straordinario IMMEDIATA
       await Notifications.scheduleNotificationAsync({
         content: {
           title: '⚠️ Straordinario Rilevato',
-          body: `Hai superato le ${settings.overtimeAlerts.hoursThreshold} ore giornaliere (${workHours.toFixed(1)}h totali).`,
+          body: `Hai superato le ${threshold} ore giornaliere (${workHours.toFixed(1)}h totali). Ottimo lavoro!`,
           sound: true,
           data: { 
             type: 'overtime_alert', 
             hours: workHours,
-            threshold: settings.overtimeAlerts.hoursThreshold
+            threshold: threshold,
+            timestamp: now
           }
         },
-        trigger: { seconds: 5 },
+        trigger: { seconds: 3 }, // 3 secondi di delay
       });
+
+      // Salva timestamp per throttling
+      await AsyncStorage.setItem(lastOvertimeKey, now.toString());
+      console.log(`✅ Notifica straordinario programmata: ${workHours.toFixed(1)}h > ${threshold}h`);
+      
+    } catch (error) {
+      console.error('❌ Errore nel controllo notifica straordinario:', error);
     }
   }
 
@@ -583,6 +791,13 @@ class NotificationService {
     // Listener per notifiche ricevute mentre l'app è aperta
     Notifications.addNotificationReceivedListener(notification => {
       console.log('📬 Notifica ricevuta:', notification);
+      
+      // Gestione auto-rinnovamento
+      const data = notification.request.content.data;
+      if (data?.type === 'auto_renewal') {
+        console.log('🔄 Triggered auto-renewal');
+        this.handleAutoRenewal();
+      }
     });
 
     // Listener per click su notifiche
@@ -607,6 +822,10 @@ class NotificationService {
         case 'standby_reminder':
           // Naviga alle impostazioni reperibilità
           // NavigationService.navigate('StandbySettings');
+          break;
+        case 'auto_renewal':
+          // Auto-rinnovamento già gestito nel listener di ricezione
+          console.log('🔄 Auto-rinnovamento completato tramite click');
           break;
       }
     });
@@ -707,6 +926,160 @@ class NotificationService {
 
     } catch (error) {
       console.error('❌ Errore nell\'aggiornamento notifiche reperibilità:', error);
+    }
+  }
+
+  // Programma automaticamente il rinnovamento delle notifiche
+  async setupAutoRenewal() {
+    try {
+      // Cancella eventuali auto-rinnovamenti precedenti
+      const allScheduled = await Notifications.getAllScheduledNotificationsAsync();
+      const autoRenewalNotifications = allScheduled.filter(notification => 
+        notification.content?.data?.type === 'auto_renewal'
+      );
+      
+      for (const notification of autoRenewalNotifications) {
+        await Notifications.cancelScheduledNotificationAsync(notification.identifier);
+      }
+
+      // Programma il rinnovo tra 3 settimane (21 giorni)
+      const renewalDate = new Date();
+      renewalDate.setDate(renewalDate.getDate() + 21);
+      renewalDate.setHours(2, 0, 0, 0); // 2:00 di notte per non disturbare
+
+      await Notifications.scheduleNotificationAsync({
+        content: {
+          title: '🔄 Sistema Notifiche',
+          body: 'Rinnovamento automatico delle notifiche in corso...',
+          sound: false,
+          data: { 
+            type: 'auto_renewal',
+            scheduledDate: renewalDate.toISOString()
+          }
+        },
+        trigger: {
+          date: renewalDate,
+        },
+      });
+
+      console.log(`  ✅ Auto-rinnovamento programmato per ${renewalDate.toLocaleDateString('it-IT')} alle 02:00`);
+    } catch (error) {
+      console.error('  ❌ Errore programmazione auto-rinnovamento:', error);
+    }
+  }
+
+  // Handler per il rinnovamento automatico
+  async handleAutoRenewal() {
+    try {
+      console.log('🔄 Avvio rinnovamento automatico notifiche...');
+      
+      // Ottieni le impostazioni correnti
+      const settings = await this.getSettings();
+      
+      if (settings.enabled) {
+        // Riprogramma tutte le notifiche
+        await this.scheduleNotifications(settings);
+        console.log('✅ Rinnovamento automatico completato');
+      } else {
+        console.log('⚠️ Notifiche disabilitate, rinnovamento saltato');
+      }
+    } catch (error) {
+      console.error('❌ Errore durante rinnovamento automatico:', error);
+    }
+  }
+
+  // 🔧 DEBUG: Funzione per diagnosticare problemi notifiche
+  async debugNotifications() {
+    try {
+      console.log('🔧 === DEBUG NOTIFICHE ===');
+      
+      // 1. Controlla permessi
+      const permissions = await Notifications.getPermissionsAsync();
+      console.log(`🔧 Permessi: ${permissions.status}`);
+      
+      // 2. Controlla notifiche programmate
+      const scheduled = await Notifications.getAllScheduledNotificationsAsync();
+      console.log(`🔧 Notifiche programmate: ${scheduled.length}`);
+      
+      if (scheduled.length > 0) {
+        console.log('🔧 LISTA DETTAGLIATA:');
+        scheduled.forEach((notif, index) => {
+          console.log(`  ${index + 1}. ID: ${notif.identifier}`);
+          console.log(`     Titolo: ${notif.content.title}`);
+          console.log(`     Trigger: ${JSON.stringify(notif.trigger)}`);
+          console.log(`     Data: ${notif.content.data ? JSON.stringify(notif.content.data) : 'Nessuna'}`);
+        });
+      }
+      
+      // 3. Controlla settings
+      const settings = await this.getSettings();
+      console.log(`🔧 Notifiche abilitate: ${settings.enabled}`);
+      console.log(`🔧 Work reminders: ${settings.workReminders?.enabled}`);
+      console.log(`🔧 Time entry reminders: ${settings.timeEntryReminders?.enabled}`);
+      console.log(`🔧 Daily summary: ${settings.dailySummary?.enabled}`);
+      console.log(`🔧 Standby reminders: ${settings.standbyReminders?.enabled}`);
+      console.log(`🔧 Overtime alerts: ${settings.overtimeAlerts?.enabled}`);
+      
+      // 4. Controlla timestamp ultima programmazione
+      const lastSchedule = new Date(this.lastScheduleTime);
+      console.log(`🔧 Ultima programmazione: ${lastSchedule.toLocaleString('it-IT')}`);
+      console.log(`🔧 Programmazione in corso: ${this.schedulingInProgress}`);
+      
+      return {
+        permissions: permissions.status,
+        scheduledCount: scheduled.length,
+        settings: settings,
+        lastSchedule: lastSchedule,
+        inProgress: this.schedulingInProgress
+      };
+      
+    } catch (error) {
+      console.error('🔧 ❌ Errore nel debug notifiche:', error);
+      return null;
+    }
+  }
+
+  // 🧹 PULIZIA: Cancella tutte le notifiche e reset
+  async cleanupAllNotifications() {
+    try {
+      console.log('🧹 Pulizia completa notifiche...');
+      
+      // Cancella tutte le notifiche programmate
+      await Notifications.cancelAllScheduledNotificationsAsync();
+      
+      // Reset stato interno
+      this.schedulingInProgress = false;
+      this.lastScheduleTime = 0;
+      
+      // Verifica cancellazione
+      const remaining = await Notifications.getAllScheduledNotificationsAsync();
+      console.log(`🧹 Pulizia completata. Notifiche rimanenti: ${remaining.length}`);
+      
+      return remaining.length === 0;
+      
+    } catch (error) {
+      console.error('🧹 ❌ Errore nella pulizia notifiche:', error);
+      return false;
+    }
+  }
+
+  // 🎯 PROGRAMMAZIONE FORZATA: Ignora throttling
+  async forceScheduleNotifications() {
+    console.log('🎯 PROGRAMMAZIONE FORZATA (ignoro throttling)...');
+    
+    // Reset throttling temporaneamente
+    const originalLastScheduleTime = this.lastScheduleTime;
+    this.lastScheduleTime = 0;
+    this.schedulingInProgress = false;
+    
+    try {
+      await this.scheduleNotifications();
+      console.log('🎯 Programmazione forzata completata');
+    } finally {
+      // Ripristina il timestamp originale se necessario
+      if (this.lastScheduleTime === 0) {
+        this.lastScheduleTime = Date.now();
+      }
     }
   }
 }
