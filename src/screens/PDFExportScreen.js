@@ -25,12 +25,28 @@ const PDFExportScreen = ({ navigation }) => {
   const [loading, setLoading] = useState(false);
   const [workEntries, setWorkEntries] = useState([]);
   const [monthlyStats, setMonthlyStats] = useState({});
+  const [settings, setSettings] = useState(null);
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
 
   useEffect(() => {
-    loadWorkData();
-  }, [selectedMonth, selectedYear]);
+    loadSettings();
+  }, []);
+
+  useEffect(() => {
+    if (settings) {
+      loadWorkData();
+    }
+  }, [selectedMonth, selectedYear, settings]);
+
+  const loadSettings = async () => {
+    try {
+      const savedSettings = await DatabaseService.getSettings();
+      setSettings(savedSettings);
+    } catch (error) {
+      console.error('Errore caricamento settings:', error);
+    }
+  };
 
   const loadWorkData = async () => {
     try {
@@ -56,6 +72,13 @@ const PDFExportScreen = ({ navigation }) => {
   };
 
   const calculateMonthlyStats = (entries) => {
+    if (!settings || !calculationService) {
+      console.log('🚫 PDF Export: Settings o calculationService non disponibili');
+      return {};
+    }
+
+    console.log('📊 PDF Export: Calcolo statistiche per', entries.length, 'entries');
+
     let totalHours = 0;
     let regularHours = 0;
     let overtimeHours = 0;
@@ -69,27 +92,41 @@ const PDFExportScreen = ({ navigation }) => {
     let workDays = entries.length;
     let standbyDays = 0;
 
-    entries.forEach(entry => {
-      if (calculationService && calculationService.calculateEarnings) {
-        const calculation = calculationService.calculateEarnings(entry);
+    entries.forEach((entry, index) => {
+      try {
+        console.log(`📝 PDF Export: Processando entry ${index + 1}/${entries.length} - ${entry.date}`);
         
-        totalHours += calculation.totalHours || 0;
-        regularHours += calculation.regularHours || 0;
-        overtimeHours += calculation.overtimeHours || 0;
-        travelHours += calculation.travelHours || 0;
+        const breakdown = calculationService.calculateEarningsBreakdown(entry, settings);
+        const workHours = calculationService.calculateWorkHours(entry) || 0;
+        const travelHoursEntry = calculationService.calculateTravelHours(entry) || 0;
         
-        totalEarnings += calculation.totalEarnings || 0;
-        regularEarnings += calculation.regularEarnings || 0;
-        overtimeEarnings += calculation.overtimeEarnings || 0;
-        travelEarnings += calculation.travelEarnings || 0;
+        console.log(`💼 PDF Export: Entry ${entry.date} - Work: ${workHours}h, Travel: ${travelHoursEntry}h, Earnings: €${breakdown?.totalEarnings || 0}`);
         
-        if (entry.standby) standbyDays++;
-        standbyEarnings += calculation.standbyEarnings || 0;
-        allowances += calculation.allowances || 0;
+        if (breakdown) {
+          // Calcolo ore
+          totalHours += workHours + travelHoursEntry;
+          regularHours += Math.min(workHours, 8); // Assumiamo max 8 ore regolari
+          overtimeHours += Math.max(0, workHours - 8); // Ore eccedenti le 8
+          travelHours += travelHoursEntry;
+          
+          // Calcolo guadagni
+          if (breakdown.totalEarnings) totalEarnings += breakdown.totalEarnings;
+          if (breakdown.regularEarnings) regularEarnings += breakdown.regularEarnings;
+          if (breakdown.overtimeEarnings) overtimeEarnings += breakdown.overtimeEarnings;
+          if (breakdown.travelEarnings) travelEarnings += breakdown.travelEarnings;
+          if (breakdown.standbyEarnings) standbyEarnings += breakdown.standbyEarnings;
+          if (breakdown.allowances) allowances += breakdown.allowances;
+          
+          if (entry.is_standby_day || entry.isStandbyDay) standbyDays++;
+        } else {
+          console.log(`⚠️ PDF Export: Breakdown nullo per entry ${entry.date}`);
+        }
+      } catch (error) {
+        console.error('❌ PDF Export: Errore calcolo statistiche per entry:', entry.id, error);
       }
     });
 
-    return {
+    const stats = {
       totalHours,
       regularHours,
       overtimeHours,
@@ -103,6 +140,9 @@ const PDFExportScreen = ({ navigation }) => {
       workDays,
       standbyDays
     };
+    
+    console.log('📊 PDF Export: Statistiche finali:', stats);
+    return stats;
   };
 
   const formatHours = (hours) => {
@@ -141,36 +181,38 @@ const PDFExportScreen = ({ navigation }) => {
               try {
                 // Trasforma i dati delle work entries per il PDF
                 const formattedEntries = workEntries.map(entry => {
-                  if (calculationService && calculationService.calculateEarnings) {
-                    const calculation = calculationService.calculateEarnings(entry);
+                  if (calculationService && settings) {
+                    const breakdown = calculationService.calculateEarningsBreakdown(entry, settings);
+                    const workHours = calculationService.calculateWorkHours(entry) || 0;
+                    const travelHoursEntry = calculationService.calculateTravelHours(entry) || 0;
                     
                     return {
                       date: entry.date,
-                      type: entry.dayType === 'festivo' ? 'vacation' : 'regular',
-                      startTime: entry.workStart1 || entry.departure_company || '-',
-                      endTime: entry.workEnd2 || entry.workEnd1 || entry.arrival_company || '-',
-                      totalHours: calculation.totalHours || 0,
-                      regularHours: calculation.regularHours || 0,
-                      overtimeHours: calculation.overtimeHours || 0,
-                      travelHours: calculation.travelHours || 0,
-                      location: entry.siteName || entry.site_name || 'Non specificato',
-                      workSite: entry.siteName || entry.site_name || 'Non specificato',
-                      totalEarnings: calculation.totalEarnings || 0
+                      type: entry.day_type === 'festivo' || entry.dayType === 'festivo' ? 'vacation' : 'regular',
+                      startTime: entry.work_start_1 || entry.workStart1 || entry.departure_company || entry.departureCompany || '-',
+                      endTime: entry.work_end_2 || entry.workEnd2 || entry.work_end_1 || entry.workEnd1 || entry.arrival_company || entry.arrivalCompany || '-',
+                      totalHours: workHours + travelHoursEntry,
+                      regularHours: Math.min(workHours, 8),
+                      overtimeHours: Math.max(0, workHours - 8),
+                      travelHours: travelHoursEntry,
+                      location: entry.site_name || entry.siteName || 'Non specificato',
+                      workSite: entry.site_name || entry.siteName || 'Non specificato',
+                      totalEarnings: breakdown?.totalEarnings || entry.total_earnings || 0
                     };
                   }
                   
                   // Fallback se calculationService non è disponibile
                   return {
                     date: entry.date,
-                    type: entry.dayType === 'festivo' ? 'vacation' : 'regular',
-                    startTime: entry.workStart1 || entry.departure_company || '-',
-                    endTime: entry.workEnd2 || entry.workEnd1 || entry.arrival_company || '-',
+                    type: entry.day_type === 'festivo' || entry.dayType === 'festivo' ? 'vacation' : 'regular',
+                    startTime: entry.work_start_1 || entry.workStart1 || entry.departure_company || entry.departureCompany || '-',
+                    endTime: entry.work_end_2 || entry.workEnd2 || entry.work_end_1 || entry.workEnd1 || entry.arrival_company || entry.arrivalCompany || '-',
                     totalHours: 0,
                     regularHours: 0,
                     overtimeHours: 0,
                     travelHours: 0,
-                    location: entry.siteName || entry.site_name || 'Non specificato',
-                    workSite: entry.siteName || entry.site_name || 'Non specificato',
+                    location: entry.site_name || entry.siteName || 'Non specificato',
+                    workSite: entry.site_name || entry.siteName || 'Non specificato',
                     totalEarnings: entry.total_earnings || 0
                   };
                 });
