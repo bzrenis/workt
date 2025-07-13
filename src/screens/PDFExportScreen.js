@@ -16,6 +16,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import DatabaseService from '../services/DatabaseService';
 import PDFExportService from '../services/PDFExportService';
 import { useCalculationService } from '../hooks';
+import { DEFAULT_SETTINGS } from '../constants';
 
 const { width } = Dimensions.get('window');
 
@@ -23,6 +24,7 @@ const PDFExportScreen = ({ navigation }) => {
   const { theme } = useTheme();
   const calculationService = useCalculationService();
   const [loading, setLoading] = useState(false);
+  const [settingsLoading, setSettingsLoading] = useState(true);
   const [workEntries, setWorkEntries] = useState([]);
   const [monthlyStats, setMonthlyStats] = useState({});
   const [settings, setSettings] = useState(null);
@@ -41,10 +43,15 @@ const PDFExportScreen = ({ navigation }) => {
 
   const loadSettings = async () => {
     try {
-      const savedSettings = await DatabaseService.getSettings();
-      setSettings(savedSettings);
+      setSettingsLoading(true);
+      const savedSettings = await DatabaseService.getSetting('appSettings', DEFAULT_SETTINGS);
+      setSettings(savedSettings || DEFAULT_SETTINGS);
     } catch (error) {
-      console.error('Errore caricamento settings:', error);
+      console.error('❌ PDF Export: Errore caricamento settings:', error);
+      // Fallback ai settings di default
+      setSettings(DEFAULT_SETTINGS);
+    } finally {
+      setSettingsLoading(false);
     }
   };
 
@@ -72,12 +79,13 @@ const PDFExportScreen = ({ navigation }) => {
   };
 
   const calculateMonthlyStats = (entries) => {
-    if (!settings || !calculationService) {
+    if (!settings || !calculationService || settingsLoading) {
       console.log('🚫 PDF Export: Settings o calculationService non disponibili');
       return {};
     }
 
     console.log('📊 PDF Export: Calcolo statistiche per', entries.length, 'entries');
+    console.log('⚙️ PDF Export: Settings loaded:', !!settings);
 
     let totalHours = 0;
     let regularHours = 0;
@@ -400,17 +408,25 @@ const PDFExportScreen = ({ navigation }) => {
         backgroundColor={theme.colors.statusBarBackground}
       />
       
-      <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
-        {/* Header */}
-        <View style={[styles.headerCard, { backgroundColor: theme.colors.card }]}>
-          <MaterialCommunityIcons name="file-pdf-box" size={32} color={theme.colors.error} />
-          <Text style={[styles.headerTitle, { color: theme.colors.text }]}>
-            Export PDF Report
-          </Text>
-          <Text style={[styles.headerSubtitle, { color: theme.colors.textSecondary }]}>
-            Genera report PDF professionale dei tuoi orari di lavoro
+      {settingsLoading ? (
+        <View style={[styles.loadingContainer, { backgroundColor: theme.colors.background }]}>
+          <ActivityIndicator size="large" color={theme.colors.primary} />
+          <Text style={[styles.loadingText, { color: theme.colors.text }]}>
+            Caricamento impostazioni...
           </Text>
         </View>
+      ) : (
+        <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+          {/* Header */}
+          <View style={[styles.headerCard, { backgroundColor: theme.colors.card }]}>
+            <MaterialCommunityIcons name="file-pdf-box" size={32} color={theme.colors.error} />
+            <Text style={[styles.headerTitle, { color: theme.colors.text }]}>
+              Export PDF Report
+            </Text>
+            <Text style={[styles.headerSubtitle, { color: theme.colors.textSecondary }]}>
+              Genera report PDF professionale dei tuoi orari di lavoro
+            </Text>
+          </View>
 
         {/* Selettore mese/anno */}
         <MonthSelector />
@@ -463,7 +479,8 @@ const PDFExportScreen = ({ navigation }) => {
             </Text>
           </View>
         </View>
-      </ScrollView>
+        </ScrollView>
+      )}
     </SafeAreaView>
   );
 };
@@ -471,6 +488,17 @@ const PDFExportScreen = ({ navigation }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  loadingText: {
+    marginTop: 16,
+    fontSize: 16,
+    textAlign: 'center',
   },
   scrollView: {
     flex: 1,
