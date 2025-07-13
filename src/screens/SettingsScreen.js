@@ -115,6 +115,13 @@ const SettingsScreen = ({ navigation }) => {
       color: '#673AB7'
     },
     {
+      title: 'Export PDF',
+      subtitle: 'Genera report PDF dei tuoi orari di lavoro',
+      icon: 'file-pdf-box',
+      screen: 'PDFExport',
+      color: '#D32F2F'
+    },
+    {
       title: 'Backup e Ripristino',
       subtitle: 'Salvataggio e ripristino dati',
       icon: 'cloud-sync',

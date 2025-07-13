@@ -20,6 +20,7 @@ import NetCalculationSettingsScreen from './src/screens/NetCalculationSettingsSc
 import VacationManagementScreen from './src/screens/VacationManagementScreen';
 import VacationRequestForm from './src/screens/VacationRequestForm';
 import VacationSettingsScreen from './src/screens/VacationSettingsScreen';
+import PDFExportScreen from './src/screens/PDFExportScreen';
 
 import { useDatabase } from './src/hooks';
 import DatabaseHealthService from './src/services/DatabaseHealthService';
@@ -97,6 +98,11 @@ function SettingsStack() {
         name="ThemeSettings" 
         component={require('./src/screens/ThemeSettingsScreen').default} 
         options={{ title: 'Tema e Aspetto' }}
+      />
+      <Stack.Screen 
+        name="PDFExport" 
+        component={PDFExportScreen} 
+        options={{ title: 'Export PDF Report' }}
       />
       <Stack.Screen 
         name="DebugSettings" 
