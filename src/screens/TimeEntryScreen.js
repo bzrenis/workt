@@ -20,6 +20,7 @@ import { formatDate, formatTime, formatCurrency, getDayName, formatSafeHours } f
 import { createWorkEntryFromData } from '../utils/earningsHelper';
 import { useNavigation } from '@react-navigation/native';
 import DatabaseService from '../services/DatabaseService';
+import DataUpdateService from '../services/DataUpdateService';
 import { PressableAnimated, FadeInCard, CardSkeleton, EnhancedTimeSlot, QuickStat } from '../components/AnimatedComponents';
 
 const { width } = Dimensions.get('window');
@@ -511,6 +512,28 @@ const TimeEntryScreen = () => {
     });
   }, [entries, standbyAllowances, selectedYear, selectedMonth, isLoading]);
 
+  // 🔄 Listener per aggiornamenti automatici dei dati dal database
+  useEffect(() => {
+    const handleWorkEntriesUpdate = (action, data) => {
+      console.log('🔄 TIMEENTRY - Ricevuto aggiornamento:', action, data);
+      
+      // Ricarica i dati solo se l'aggiornamento riguarda il mese corrente
+      const entryYear = data?.year;
+      const entryMonth = data?.month;
+      
+      if (entryYear === selectedYear && entryMonth === selectedMonth) {
+        console.log('🔄 TIMEENTRY - Aggiornamento per mese corrente, ricarico dati...');
+        refreshEntries();
+      }
+    };
+
+    DataUpdateService.onWorkEntriesUpdated(handleWorkEntriesUpdate);
+
+    return () => {
+      DataUpdateService.removeAllListeners('workEntriesUpdated');
+    };
+  }, [selectedYear, selectedMonth, refreshEntries]);
+
   // Array dei mesi in italiano
   const mesiItaliani = [
     'Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno',
@@ -624,7 +647,7 @@ const TimeEntryScreen = () => {
         >
           {workEntry.workStart1 && workEntry.workEnd1 && (
             <DetailRow 
-              label="1° Turno" 
+              label="Turno 1" 
               value={`${workEntry.workStart1} - ${workEntry.workEnd1}`}
               duration={(() => {
                 if (!calculationService.calculateWorkHours) return null;
@@ -637,7 +660,7 @@ const TimeEntryScreen = () => {
           )}
           {workEntry.workStart2 && workEntry.workEnd2 && (
             <DetailRow 
-              label="2° Turno" 
+              label="Turno 2" 
               value={`${workEntry.workStart2} - ${workEntry.workEnd2}`}
               duration={(() => {
                 const start2 = new Date(`2000-01-01T${workEntry.workStart2}`);
@@ -647,6 +670,38 @@ const TimeEntryScreen = () => {
               })()}
             />
           )}
+          {/* 🚀 MULTI-TURNO: Mostra turni aggiuntivi */}
+          {workEntry.viaggi && Array.isArray(workEntry.viaggi) && (() => {
+            let turnoNumber = 3; // Inizia dal turno 3
+            return workEntry.viaggi.map((viaggio, index) => (
+              <React.Fragment key={`viaggio-${index}`}>
+                {viaggio.work_start_1 && viaggio.work_end_1 && (
+                  <DetailRow 
+                    label={`Turno ${turnoNumber++}`} 
+                    value={`${viaggio.work_start_1} - ${viaggio.work_end_1}`}
+                    duration={(() => {
+                      const start = new Date(`2000-01-01T${viaggio.work_start_1}`);
+                      const end = new Date(`2000-01-01T${viaggio.work_end_1}`);
+                      const duration = (end - start) / (1000 * 60 * 60);
+                      return formatSafeHours(duration);
+                    })()}
+                  />
+                )}
+                {viaggio.work_start_2 && viaggio.work_end_2 && (
+                  <DetailRow 
+                    label={`Turno ${turnoNumber++}`} 
+                    value={`${viaggio.work_start_2} - ${viaggio.work_end_2}`}
+                    duration={(() => {
+                      const start = new Date(`2000-01-01T${viaggio.work_start_2}`);
+                      const end = new Date(`2000-01-01T${viaggio.work_end_2}`);
+                      const duration = (end - start) / (1000 * 60 * 60);
+                      return formatSafeHours(duration);
+                    })()}
+                  />
+                )}
+              </React.Fragment>
+            ));
+          })()}
           {calculationService.calculateWorkHours && (
             <DetailRow 
               label="Totale Ore Lavoro" 
@@ -657,7 +712,7 @@ const TimeEntryScreen = () => {
         </DetailSection>
 
         {/* Sezione Viaggi */}
-        {(workEntry.departureCompany || workEntry.departureReturn) && (
+        {(workEntry.departureCompany || workEntry.departureReturn || (workEntry.viaggi && Array.isArray(workEntry.viaggi) && workEntry.viaggi.length > 0)) && (
           <DetailSection
             title="Viaggi"
             icon="car"
@@ -693,6 +748,39 @@ const TimeEntryScreen = () => {
                 })()}
               />
             )}
+            {/* 🚀 MULTI-TURNO: Mostra viaggi aggiuntivi */}
+            {workEntry.viaggi && Array.isArray(workEntry.viaggi) && (() => {
+              let viaggioNumber = 2; // Inizia dal viaggio 2 (dopo andata/ritorno principale)
+              return workEntry.viaggi.map((viaggio, index) => (
+                <React.Fragment key={`viaggio-travel-${index}`}>
+                  {viaggio.departure_company && viaggio.arrival_site && (
+                    <DetailRow 
+                      label={`Viaggio ${viaggioNumber} - Andata`} 
+                      value={`${viaggio.departure_company} - ${viaggio.arrival_site}`}
+                      duration={(() => {
+                        const start = new Date(`2000-01-01T${viaggio.departure_company}`);
+                        const end = new Date(`2000-01-01T${viaggio.arrival_site}`);
+                        const duration = (end - start) / (1000 * 60 * 60);
+                        return formatSafeHours(duration);
+                      })()}
+                    />
+                  )}
+                  {viaggio.departure_return && viaggio.arrival_company && (
+                    <DetailRow 
+                      label={`Viaggio ${viaggioNumber++} - Ritorno`} 
+                      value={`${viaggio.departure_return} - ${viaggio.arrival_company}`}
+                      duration={(() => {
+                        const start = new Date(`2000-01-01T${viaggio.departure_return}`);
+                        const end = new Date(`2000-01-01T${viaggio.arrival_company}`);
+                        const duration = (end - start) / (1000 * 60 * 60);
+                        return formatSafeHours(duration);
+                      })()}
+                    />
+                  )}
+                  {!viaggio.departure_return && !viaggio.arrival_company && viaggioNumber++}
+                </React.Fragment>
+              ));
+            })()}
             {calculationService.calculateTravelHours && (
               <DetailRow 
                 label="Totale Viaggio" 

@@ -68,6 +68,43 @@ export const useDatabase = () => {
           needsUpdate = true;
         }
         
+        // 🔄 MIGRAZIONE NUOVE LOGICHE VIAGGIO
+        console.log('🔍 DEBUG - Controllo migrazione viaggio, travelHoursSetting attuale:', existingSettings.travelHoursSetting);
+        if (existingSettings.travelHoursSetting) {
+          const oldSetting = existingSettings.travelHoursSetting;
+          const oldSettings = ['TRAVEL_SEPARATE', 'EXCESS_AS_TRAVEL', 'EXCESS_AS_OVERTIME', 'AS_WORK', 'MULTI_SHIFT_OPTIMIZED'];
+          console.log('🔍 DEBUG - oldSetting:', oldSetting, ', è nelle vecchie?', oldSettings.includes(oldSetting));
+          
+          // Controlla se l'impostazione attuale è una di quelle vecchie
+          if (oldSettings.includes(oldSetting)) {
+            let newSetting = 'TRAVEL_RATE_EXCESS'; // Default
+            
+            if (oldSetting === 'TRAVEL_SEPARATE') {
+              newSetting = 'TRAVEL_RATE_ALL';
+            } else if (oldSetting === 'EXCESS_AS_TRAVEL') {
+              newSetting = 'TRAVEL_RATE_EXCESS';
+            } else if (oldSetting === 'EXCESS_AS_OVERTIME') {
+              newSetting = 'OVERTIME_EXCESS';
+            } else if (oldSetting === 'AS_WORK') {
+              newSetting = 'TRAVEL_RATE_EXCESS'; // Migra a logica più sensata
+            } else if (oldSetting === 'MULTI_SHIFT_OPTIMIZED') {
+              newSetting = 'TRAVEL_RATE_EXCESS';
+              updatedSettings.multiShiftTravelAsWork = true; // Abilita opzione multi-turno
+            }
+            
+            updatedSettings.travelHoursSetting = newSetting;
+            needsUpdate = true;
+            
+            console.log(`🔄 Migrazione viaggio: ${oldSetting} → ${newSetting}${updatedSettings.multiShiftTravelAsWork ? ' + multi-turno' : ''}`);
+          }
+        }
+        
+        // Aggiungi nuove opzioni se mancano
+        if (updatedSettings.multiShiftTravelAsWork === undefined) {
+          updatedSettings.multiShiftTravelAsWork = false;
+          needsUpdate = true;
+        }
+        
           if (needsUpdate) {
             console.log('🔄 Migrazione impostazioni...');
             await DatabaseService.setSetting('appSettings', updatedSettings);

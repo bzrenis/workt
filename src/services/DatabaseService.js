@@ -1,6 +1,7 @@
 import * as SQLite from 'expo-sqlite';
 import { DATABASE_TABLES } from '../constants';
 import { executeDbOperation, withLockHandling } from './DatabaseLockManager';
+import DataUpdateService from './DataUpdateService';
 
 class DatabaseService {
   constructor() {
@@ -207,6 +208,13 @@ class DatabaseService {
         console.log("Migrazione 'completamento_giornata' completata.");
       }
 
+      // Migrazione robusta: aggiungi colonna viaggi per multi-turno se manca
+      if (!await columnExists(DATABASE_TABLES.WORK_ENTRIES, 'viaggi')) {
+        console.log(`Migrazione: la colonna 'viaggi' non esiste nella tabella ${DATABASE_TABLES.WORK_ENTRIES}. Aggiungo...`);
+        await db.execAsync(`ALTER TABLE ${DATABASE_TABLES.WORK_ENTRIES} ADD COLUMN viaggi TEXT DEFAULT '[]'`);
+        console.log("Migrazione 'viaggi' completata per supporto multi-turno.");
+      }
+
       // NOTA: Le vecchie colonne standby_* non vengono rimosse per retrocompatibilità,
       // ma non verranno più popolate dalle nuove versioni dell'app.
 
@@ -405,6 +413,21 @@ class DatabaseService {
         console.log("Utilizzo colonna completamento_giornata nell'inserimento");
       }
 
+      // 🚀 MULTI-TURNO: Aggiungi la colonna viaggi se esiste
+      const hasViaggi = await columnExists(DATABASE_TABLES.WORK_ENTRIES, 'viaggi');
+      if (hasViaggi) {
+        columns.push("viaggi");
+        placeholders.push('?');
+        const viaggiJson = JSON.stringify(workEntry.viaggi || []);
+        values.push(viaggiJson);
+        console.log("🔥 SALVATAGGIO DB INSERT: Utilizzo colonna viaggi nell'inserimento.", {
+          viaggiCount: workEntry.viaggi?.length || 0,
+          viaggiArray: workEntry.viaggi,
+          viaggiJson: viaggiJson,
+          siteName: workEntry.siteName
+        });
+      }
+
       // Crea la query dinamica
       const query = `
         INSERT INTO ${DATABASE_TABLES.WORK_ENTRIES} (
@@ -413,7 +436,21 @@ class DatabaseService {
       `;
 
       console.log(`Query di inserimento dinamica con ${columns.length} colonne`);
-      await this.db.runAsync(query, values);
+      const result = await this.db.runAsync(query, values);
+      
+      // Calcola anno e mese dalla data per la notifica
+      const year = workEntry.date ? new Date(workEntry.date).getFullYear() : new Date().getFullYear();
+      const month = workEntry.date ? new Date(workEntry.date).getMonth() + 1 : new Date().getMonth() + 1;
+      
+      // Notifica l'aggiornamento dei work entries
+      DataUpdateService.notifyWorkEntriesUpdated('insert', {
+        id: result.lastInsertRowId,
+        date: workEntry.date,
+        year,
+        month
+      });
+      
+      return result;
     }, 'Insert work entry');
   }
 
@@ -680,6 +717,21 @@ class DatabaseService {
         console.log("Utilizzo colonna completamento_giornata nell'aggiornamento");
       }
 
+      // 🚀 MULTI-TURNO: Aggiungi la colonna viaggi se esiste
+      const hasViaggi = await columnExists(DATABASE_TABLES.WORK_ENTRIES, 'viaggi');
+      if (hasViaggi) {
+        updateColumns.push("viaggi = ?");
+        const viaggiJson = JSON.stringify(workEntry.viaggi || []);
+        updateParams.push(viaggiJson);
+        console.log("🔥 SALVATAGGIO DB UPDATE: Utilizzo colonna viaggi nell'aggiornamento.", {
+          viaggiCount: workEntry.viaggi?.length || 0,
+          viaggiArray: workEntry.viaggi,
+          viaggiJson: viaggiJson,
+          entryId: id,
+          siteName: workEntry.siteName
+        });
+      }
+
       // Aggiungi l'ID alla fine dei parametri
       updateParams.push(id);
 
@@ -692,15 +744,37 @@ class DatabaseService {
 
       console.log(`Query di aggiornamento dinamica con ${updateColumns.length} colonne`);
       await this.db.runAsync(query, updateParams);
+      
+      // Calcola anno e mese dalla data per la notifica
+      const year = date ? parseInt(date.split('-')[0]) : new Date().getFullYear();
+      const month = date ? parseInt(date.split('-')[1]) : new Date().getMonth() + 1;
+      
+      // Notifica l'aggiornamento dei dati
+      DataUpdateService.notifyWorkEntriesUpdated('update', { id, date, year, month });
+      
       return id;
     }, 'Update work entry');
   }
 
   async deleteWorkEntry(id) {
     return await this.safeExecute(async () => {
+      // Prima di cancellare, ottengo i dati per la notifica
+      const entryData = await this.db.getFirstAsync(`
+        SELECT date FROM ${DATABASE_TABLES.WORK_ENTRIES} WHERE id = ?
+      `, [id]);
+      
+      const date = entryData?.date;
+      const year = date ? parseInt(date.split('-')[0]) : new Date().getFullYear();
+      const month = date ? parseInt(date.split('-')[1]) : new Date().getMonth() + 1;
+      
       await this.db.runAsync(`
         DELETE FROM ${DATABASE_TABLES.WORK_ENTRIES} WHERE id = ?
       `, [id]);
+      
+      // Notifica la cancellazione dei dati
+      if (date) {
+        DataUpdateService.notifyWorkEntriesUpdated('delete', { id, date, year, month });
+      }
     }, 'Delete work entry');
   }
   // Standby calendar methods
@@ -869,6 +943,33 @@ class DatabaseService {
     } catch (e) {
       console.warn(`Impossibile parsare JSON per interventi per l'entry id ${entry.id}:`, entry.interventi);
       entry.interventi = [];
+    }
+    
+    // 🚀 MULTI-TURNO: Parse viaggi JSON if exists  
+    try {
+      const viaggiField = entry.viaggi;
+      console.log("🔥 NORMALIZZAZIONE DB: Analizzando campo viaggi dal database:", {
+        entryId: entry.id,
+        viaggiRaw: viaggiField,
+        viaggiType: typeof viaggiField,
+        viaggiLength: viaggiField?.length,
+        isString: typeof viaggiField === 'string',
+        isArray: Array.isArray(viaggiField)
+      });
+      
+      entry.viaggi = entry.viaggi ? JSON.parse(entry.viaggi) : [];
+      console.log("🔥 NORMALIZZAZIONE DB: Risultato parsing viaggi:", {
+        entryId: entry.id,
+        parsedViaggi: entry.viaggi,
+        parsedCount: entry.viaggi.length,
+        isArrayAfterParsing: Array.isArray(entry.viaggi)
+      });
+    } catch (e) {
+      console.warn(`🔥 NORMALIZZAZIONE DB: Impossibile parsare JSON per viaggi per l'entry id ${entry.id}:`, {
+        viaggiRaw: entry.viaggi,
+        error: e.message
+      });
+      entry.viaggi = [];
     }
     
     // Normalize snake_case to camelCase for React

@@ -80,9 +80,9 @@ src/
 
 - **CCNL Metalmeccanico PMI - Livello 5 (Operaio Qualificato Specializzato)** (default)
 - Possibilità di scegliere altri contratti o importarli in qualsiasi momento dalle impostazioni
-- Retribuzione mensile: €2,839.07 (CCNL Metalmeccanico PMI Level 5)
-- Retribuzione giornaliera: €109.195 (mensile/26)
-- Retribuzione oraria: €16.41081 (mensile/173)
+- Retribuzione mensile: €2,800.00 (CCNL Metalmeccanico PMI Level 5)
+- Retribuzione giornaliera: €107.69 (mensile/26)
+- Retribuzione oraria: €16.15 (mensile/173)
 - Progressione di carriera: Livello 3 → Livello 5 (+2 livelli di avanzamento! 🎉)
 - Calcolo automatico di tariffe giornaliere e orarie
 - Verifica automatica conformità CCNL
@@ -96,23 +96,23 @@ src/
 
 | Tipo Lavoro                        | Maggiorazione | Tariffa Applicata         |
 |-------------------------------------|:-------------:|--------------------------|
-| Ordinario                          |     0%        | €16.41081                |
-| Straordinario diurno                |   +20%        | €19.693                  |
-| Straordinario notturno (fino 22h)   |   +25%        | €20.513                  |
-| Straordinario notturno (dopo 22h)   |   +35%        | €22.155                  |
-| Straordinario festivo/domenicale    |   +50%        | €24.616                  |
-| Lavoro ordinario notturno           |   +25%        | €20.513                  |
-| Lavoro ordinario festivo/domenicale |   +30%        | €21.334                  |
-| Lavoro notturno festivo/domenicale  |   +60%        | €26.257                  |
-| Viaggio                             |  Configurabile| Default: €16.41081       |
+| Ordinario                          |     0%        | €16.15                   |
+| Straordinario diurno                |   +20%        | €19.38                   |
+| Straordinario notturno (fino 22h)   |   +25%        | €20.19                   |
+| Straordinario notturno (dopo 22h)   |   +35%        | €21.80                   |
+| Straordinario festivo/domenicale    |   +50%        | €24.23                   |
+| Lavoro ordinario notturno           |   +25%        | €20.19                   |
+| Lavoro ordinario festivo/domenicale |   +30%        | €20.99                   |
+| Lavoro notturno festivo/domenicale  |   +60%        | €25.84                   |
+| Viaggio                             |  Configurabile| Default: €16.15          |
 
 > **Nota:** Le maggiorazioni vengono applicate automaticamente in base a tipologia di lavoro, orario, giorno della settimana e festività. La logica segue le regole ufficiali CCNL Metalmeccanico PMI. Tutte le tariffe sono calcolate dinamicamente e mostrate nella schermata "Impostazioni Contratto". I festivi nazionali sono riconosciuti in automatico secondo il calendario italiano.
 
 #### Esempio di calcolo automatico
 
-- 2h straordinario diurno: 2 × €19.693 = €39.39
-- 1h straordinario notturno dopo le 22: 1 × €22.155 = €22.16
-- 3h lavoro festivo: 3 × €21.334 = €64.00
+- 2h straordinario diurno: 2 × €19.38 = €38.76
+- 1h straordinario notturno dopo le 22: 1 × €21.80 = €21.80
+- 3h lavoro festivo: 3 × €20.99 = €62.97
 
 ### Modalità Calcolo Ore Viaggio
 

@@ -57,6 +57,24 @@ export const createWorkEntryFromData = (entry, calculationServiceInstance = null
       }
       return workEntryData.interventi || [];
     })(),
+    // 🚀 MULTI-TURNO: Parse viaggi se è una stringa JSON
+    viaggi: (() => {
+      if (typeof workEntryData.viaggi === 'string') {
+        try {
+          const parsed = JSON.parse(workEntryData.viaggi);
+          console.log(`🔥 EARNINGSHELPER: Parsed viaggi per entry ${workEntryData.id}:`, {
+            viaggiRaw: workEntryData.viaggi,
+            viaggiParsed: parsed,
+            viaggiCount: parsed.length
+          });
+          return parsed;
+        } catch (error) {
+          console.warn('🔥 EARNINGSHELPER: Errore parsing viaggi:', error);
+          return [];
+        }
+      }
+      return workEntryData.viaggi || [];
+    })(),
     // Convert all boolean fields to 0/1
     mealLunchVoucher: workEntryData.meal_lunch_voucher === 1 ? 1 : 0,
     mealLunchCash: parseFloat(workEntryData.meal_lunch_cash || 0),

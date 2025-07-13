@@ -8,14 +8,12 @@ import {
 import { isItalianHoliday } from '../constants/holidays';
 import { NetEarningsCalculator, calculateQuickNet, calculateDetailedNet, calculateRealNet } from './NetEarningsCalculator';
 import { TimeCalculator } from './TimeCalculator';
-import { EarningsCalculator } from './EarningsCalculator';
 
 class CalculationService {
   constructor() {
     this.defaultContract = CCNL_CONTRACTS.METALMECCANICO_PMI_L5;
     this.netCalculator = new NetEarningsCalculator(this.defaultContract);
     this.timeCalculator = new TimeCalculator();
-    this.earningsCalculator = new EarningsCalculator(this.timeCalculator);
   }
 
   // Parse time string to minutes from midnight
@@ -47,17 +45,36 @@ class CalculationService {
 
   // Calculate work hours from work entry
   calculateWorkHours(workEntry) {
-    return this.timeCalculator.calculateWorkHours(workEntry);
+    let totalWorkMinutes = 0;
+    
+    // First work shift
+    if (workEntry.workStart1 && workEntry.workEnd1) {
+      totalWorkMinutes += this.calculateTimeDifference(workEntry.workStart1, workEntry.workEnd1);
+    }
+    
+    // Second work shift
+    if (workEntry.workStart2 && workEntry.workEnd2) {
+      totalWorkMinutes += this.calculateTimeDifference(workEntry.workStart2, workEntry.workEnd2);
+    }
+    
+    return this.minutesToHours(totalWorkMinutes);
   }
 
   // Calculate travel hours
   calculateTravelHours(workEntry) {
-    return this.timeCalculator.calculateTravelHours(workEntry);
-  }
-
-  // Calculate breaks between shifts for meal allowance
-  calculateBreaksBetweenShifts(workEntry) {
-    return this.timeCalculator.calculateBreaksBetweenShifts(workEntry);
+    let totalTravelMinutes = 0;
+    
+    // Outbound travel
+    if (workEntry.departureCompany && workEntry.arrivalSite) {
+      totalTravelMinutes += this.calculateTimeDifference(workEntry.departureCompany, workEntry.arrivalSite);
+    }
+    
+    // Return travel
+    if (workEntry.departureReturn && workEntry.arrivalCompany) {
+      totalTravelMinutes += this.calculateTimeDifference(workEntry.departureReturn, workEntry.arrivalCompany);
+    }
+    
+    return this.minutesToHours(totalTravelMinutes);
   }
 
   // Calculate standby work hours
@@ -136,7 +153,7 @@ class CalculationService {
     const baseRate = contract.hourlyRate || (contract.monthlySalary / 173);
     const dailyRate = contract.dailyRate || (contract.monthlySalary / 26);
     const travelCompensationRate = settings.travelCompensationRate || 1.0;
-    const travelHoursSetting = settings.travelHoursSetting || 'MULTI_SHIFT_OPTIMIZED';
+    const travelHoursSetting = settings.travelHoursSetting || 'EXCESS_AS_TRAVEL';
     
     // Log della modalità di calcolo viaggio utilizzata
     console.log(`[CalculationService] calculateDailyEarnings - Modalità calcolo viaggio: ${travelHoursSetting}`, {
@@ -273,21 +290,15 @@ class CalculationService {
         }
       } else {
         console.log(`[CalculationService] Totale ore (${totalRegularHours}h) < giornata standard: calcolo proporzionale`);
-        // Se meno di 8h, paga solo le ore effettive MA rispettando la modalità viaggio
+        // Se meno di 8h, paga solo le ore effettive
         if (travelHoursSetting === 'AS_WORK') {
           console.log(`[CalculationService] Modalità AS_WORK: tutto come lavoro normale`);
           // Tutto come lavoro normale
           regularPay = baseRate * totalRegularHours;
           regularHours = totalRegularHours;
-        } else if (travelHoursSetting === 'TRAVEL_SEPARATE') {
-          console.log(`[CalculationService] Modalità TRAVEL_SEPARATE con <8h: viaggio separato + lavoro normale`);
-          // Viaggio sempre pagato separatamente, lavoro come ore normali
-          travelPay = travelHours * baseRate * travelCompensationRate;
-          regularPay = workHours * baseRate;
-          regularHours = workHours;
         } else {
-          console.log(`[CalculationService] Altre modalità con <8h: pagamento ore effettive (${travelHoursSetting})`);
-          // Per EXCESS_AS_TRAVEL/EXCESS_AS_OVERTIME con meno di 8h, nessuna eccedenza
+          console.log(`[CalculationService] Altre modalità: pagamento ore effettive`);
+          // Per altre modalità, ancora paga tutto come ore effettive
           regularPay = baseRate * totalRegularHours;
           regularHours = totalRegularHours;
         }
@@ -518,10 +529,55 @@ class CalculationService {
     
     // Alla fine di calculateDailyEarnings, prima del return
     const mealAllowances = {};
-    if (workEntry.mealLunchVoucher === 1) mealAllowances.lunch = { type: 'voucher', amount: settings.mealAllowances?.lunch?.voucherAmount || 0 };
-    if (workEntry.mealLunchCash > 0) mealAllowances.lunch = { type: 'cash', amount: workEntry.mealLunchCash };
-    if (workEntry.mealDinnerVoucher === 1) mealAllowances.dinner = { type: 'voucher', amount: settings.mealAllowances?.dinner?.voucherAmount || 0 };
-    if (workEntry.mealDinnerCash > 0) mealAllowances.dinner = { type: 'cash', amount: workEntry.mealDinnerCash };
+    
+    // 🍽️ CALCOLO AUTOMATICO PASTI TRA TURNI MULTIPLI
+    // Calcola automaticamente i pasti basandosi sulle pause tra tutti i turni
+    const automaticMeals = this.timeCalculator.calculateAutomaticMeals(workEntry, settings);
+    
+    console.log(`[CalculationService] 🍽️ Pasti automatici calcolati per ${workEntry.date}:`, automaticMeals);
+    
+    // Applica i pasti automatici se non sono già stati specificati manualmente
+    // Pranzo: priorità ai valori manuali, poi automatici
+    if (workEntry.mealLunchVoucher === 1) {
+      mealAllowances.lunch = { type: 'voucher', amount: settings.mealAllowances?.lunch?.voucherAmount || 0 };
+    } else if (workEntry.mealLunchCash > 0) {
+      mealAllowances.lunch = { type: 'cash', amount: workEntry.mealLunchCash };
+    } else if (automaticMeals.lunch && settings.mealSettings?.autoCalculateEnabled) {
+      // Applica pranzo automatico se abilitato nelle impostazioni
+      const autoLunchType = settings.mealSettings?.defaultLunchType || 'voucher';
+      const autoLunchAmount = autoLunchType === 'voucher' 
+        ? (settings.mealAllowances?.lunch?.voucherAmount || 0)
+        : (settings.mealAllowances?.lunch?.cashAmount || 0);
+      
+      mealAllowances.lunch = { 
+        type: autoLunchType, 
+        amount: autoLunchAmount,
+        automatic: true,
+        breakInfo: automaticMeals.lunchBreak
+      };
+      console.log(`[CalculationService] 🍽️ ✅ Pranzo automatico applicato: ${autoLunchType} - €${autoLunchAmount}`);
+    }
+    
+    // Cena: stessa logica del pranzo
+    if (workEntry.mealDinnerVoucher === 1) {
+      mealAllowances.dinner = { type: 'voucher', amount: settings.mealAllowances?.dinner?.voucherAmount || 0 };
+    } else if (workEntry.mealDinnerCash > 0) {
+      mealAllowances.dinner = { type: 'cash', amount: workEntry.mealDinnerCash };
+    } else if (automaticMeals.dinner && settings.mealSettings?.autoCalculateEnabled) {
+      // Applica cena automatica se abilitata nelle impostazioni
+      const autoDinnerType = settings.mealSettings?.defaultDinnerType || 'voucher';
+      const autoDinnerAmount = autoDinnerType === 'voucher' 
+        ? (settings.mealAllowances?.dinner?.voucherAmount || 0)
+        : (settings.mealAllowances?.dinner?.cashAmount || 0);
+      
+      mealAllowances.dinner = { 
+        type: autoDinnerType, 
+        amount: autoDinnerAmount,
+        automatic: true,
+        breakInfo: automaticMeals.dinnerBreak
+      };
+      console.log(`[CalculationService] 🍽️ ✅ Cena automatica applicata: ${autoDinnerType} - €${autoDinnerAmount}`);
+    }
 
     return {
       regularPay,
@@ -716,69 +772,36 @@ class CalculationService {
       // Marca come corretto
       result.details.corrected = true;
     } else {
-      // Giorni feriali: verifica se usare modalità speciale per calcolo viaggio
-      const travelHoursSetting = settings.travelHoursSetting || 'MULTI_SHIFT_OPTIMIZED';
-      
-      if (travelHoursSetting === 'MULTI_SHIFT_OPTIMIZED') {
-        console.log(`[CalculationService] 🎯 Applying MULTI_SHIFT_OPTIMIZED mode`);
+      // Giorni feriali: calcolo standard
+      if (totalOrdinaryHours >= standardWorkDay) {
+        // Giornata piena: paga giornaliera + extra
+        result.ordinary.earnings.giornaliera = contract.dailyRate || 109.19;
+        result.ordinary.earnings.viaggio_extra = result.ordinary.hours.viaggio_extra * baseRate * (settings.travelCompensationRate || 1.0);
+        result.ordinary.earnings.lavoro_extra = result.ordinary.hours.lavoro_extra * baseRate * (contract.overtimeRates?.day || 1.2);
         
-        // Usa l'EarningsCalculator con la nuova modalità
-        const basicEarnings = this.earningsCalculator.calculateBasicEarnings(workEntry, settings, workHours, travelHours);
+        // Giornata completa: non necessita completamento
+        result.details.isPartialDay = false;
+        result.details.missingHours = 0;
+        result.details.completamentoTipo = workEntry.completamentoGiornata || 'nessuno';
+      } else {
+        // Giornata parziale: proporzionale alle ore
+        result.ordinary.earnings.giornaliera = (result.ordinary.hours.lavoro_giornaliera + 
+                                              result.ordinary.hours.viaggio_giornaliera) * baseRate;
         
-        // Aggiorna il result con i valori calcolati
-        result.ordinary.earnings.giornaliera = basicEarnings.regularPay || 0;
-        result.ordinary.earnings.lavoro_extra = basicEarnings.overtimePay || 0;
-        result.ordinary.earnings.viaggio_extra = basicEarnings.travelPay || 0;
-        result.ordinary.total = basicEarnings.regularPay + basicEarnings.overtimePay + basicEarnings.travelPay;
-        
-        // Aggiorna le ore per riflettere la modalità ottimizzata
-        if (workHours + travelHours >= standardWorkDay) {
-          result.details.isPartialDay = false;
-          result.details.missingHours = 0;
-        } else {
-          result.details.isPartialDay = true;
-          result.details.missingHours = standardWorkDay - (workHours + travelHours);
-        }
+        // Per giorni feriali: calcola le ore mancanti e imposta isPartialDay
+        result.details.isPartialDay = true;
+        result.details.missingHours = standardWorkDay - totalOrdinaryHours;
         result.details.completamentoTipo = workEntry.completamentoGiornata || 'nessuno';
         
-        console.log(`[CalculationService] 🎯 MULTI_SHIFT_OPTIMIZED result:`, {
-          regularPay: basicEarnings.regularPay,
-          overtimePay: basicEarnings.overtimePay,
-          travelPay: basicEarnings.travelPay,
-          total: result.ordinary.total
-        });
-      } else {
-        // Giorni feriali: calcolo standard
-        if (totalOrdinaryHours >= standardWorkDay) {
-          // Giornata piena: paga giornaliera + extra
+        // Se il completamento è specificato, considera la giornata come completa ai fini del calcolo
+        if (workEntry.completamentoGiornata && workEntry.completamentoGiornata !== 'nessuno') {
           result.ordinary.earnings.giornaliera = contract.dailyRate || 109.19;
-          result.ordinary.earnings.viaggio_extra = result.ordinary.hours.viaggio_extra * baseRate * (settings.travelCompensationRate || 1.0);
-          result.ordinary.earnings.lavoro_extra = result.ordinary.hours.lavoro_extra * baseRate * (contract.overtimeRates?.day || 1.2);
-          
-          // Giornata completa: non necessita completamento
-          result.details.isPartialDay = false;
-          result.details.missingHours = 0;
-          result.details.completamentoTipo = workEntry.completamentoGiornata || 'nessuno';
-        } else {
-          // Giornata parziale: proporzionale alle ore
-          result.ordinary.earnings.giornaliera = (result.ordinary.hours.lavoro_giornaliera + 
-                                                result.ordinary.hours.viaggio_giornaliera) * baseRate;
-          
-          // Per giorni feriali: calcola le ore mancanti e imposta isPartialDay
-          result.details.isPartialDay = true;
-          result.details.missingHours = standardWorkDay - totalOrdinaryHours;
-          result.details.completamentoTipo = workEntry.completamentoGiornata || 'nessuno';
-          
-          // Se il completamento è specificato, considera la giornata come completa ai fini del calcolo
-          if (workEntry.completamentoGiornata && workEntry.completamentoGiornata !== 'nessuno') {
-            result.ordinary.earnings.giornaliera = contract.dailyRate || 109.19;
-          }
         }
-        
-        result.ordinary.total = result.ordinary.earnings.giornaliera + 
-                               result.ordinary.earnings.viaggio_extra + 
-                               result.ordinary.earnings.lavoro_extra;
       }
+      
+      result.ordinary.total = result.ordinary.earnings.giornaliera + 
+                             result.ordinary.earnings.viaggio_extra + 
+                             result.ordinary.earnings.lavoro_extra;
     }
     
     // Calcola la reperibilità se attiva
@@ -927,6 +950,7 @@ class CalculationService {
       // Se c'è un valore specifico nel form, usa solo quello
       result.allowances.meal += workEntry.mealLunchCash;
     } else if (workEntry.mealLunchVoucher === 1) {
+      // Altrimenti usa i valori standard dalle impostazioni (sia buono che contanti)
       result.allowances.meal += settings.mealAllowances?.lunch?.voucherAmount || 0;
       result.allowances.meal += settings.mealAllowances?.lunch?.cashAmount || 0;
     }
@@ -936,6 +960,7 @@ class CalculationService {
       // Se c'è un valore specifico nel form, usa solo quello
       result.allowances.meal += workEntry.mealDinnerCash;
     } else if (workEntry.mealDinnerVoucher === 1) {
+      // Altrimenti usa i valori standard dalle impostazioni (sia buono che contanti)
       result.allowances.meal += settings.mealAllowances?.dinner?.voucherAmount || 0;
       result.allowances.meal += settings.mealAllowances?.dinner?.cashAmount || 0;
     }
@@ -986,6 +1011,8 @@ class CalculationService {
       console.log("[CalculationService] Nei giorni speciali (sabato/domenica/festivi) non è richiesto effettuare 8 ore lavorative. Il completamento giornata è stato disattivato.");
     }
     
+    return result;
+
     // Log per debug - per tutti i giorni speciali
     if (isSpecialDay) {
       console.log("[CalculationService] Calcolo totale guadagno per " + workEntry.date + ":", {
@@ -1055,7 +1082,6 @@ class CalculationService {
     const isInCalendar = Boolean(standbySettings && 
                         standbySettings.enabled && 
                         standbyDays && 
-                        dateStr && 
                         standbyDays[dateStr] && 
                         standbyDays[dateStr].selected === true);
     
@@ -1191,7 +1217,7 @@ class CalculationService {
     const standardWorkDay = getWorkDayHours(); // 8 ore
     
     // Nei giorni feriali, se le ORE ORDINARIE superano le 8 ore, le ore eccedenti di reperibilità 
-    // potrebbero essere considerate straordinari secondo normativa CCNL
+    // potrebbero essere considerate straordinarie secondo normativa CCNL
     // CORREZIONE: il controllo deve essere SOLO sulle ore ordinarie, non sul totale
     const isWeekday = !isSaturday && !isSunday && !isHoliday;
     const shouldApplyOvertimeToStandby = isWeekday && ordinaryTotalHours >= standardWorkDay;
@@ -1212,20 +1238,18 @@ class CalculationService {
     const workMultipliers = {
       ordinary: shouldApplyOvertimeToStandby ? (ccnlRates.day || 1.2) : 1.0, // Se supera 8h feriali, diventa straordinario
       evening: shouldApplyOvertimeToStandby ? (ccnlRates.nightUntil22 || 1.25) : (ccnlRates.nightUntil22 || 1.25), // Serale 20:00-22:00 +25%
-      night: shouldApplyOvertimeToStandby ? (ccnlRates.nightAfter22 || 1.35) : (ccnlRates.nightUntil22 || 1.25), // Straordinario notturno o ordinario notturno
+      night: shouldApplyOvertimeToStandby ? (ccnlRates.nightAfter22 || 1.35) : 1.25, // Straordinario notturno o ordinario notturno
       saturday: ccnlRates.saturday || 1.25, // Maggiorazione sabato configurabile
       saturday_night: (ccnlRates.saturday || 1.25) * 1.25, // Sabato + notturno
-      holiday: shouldApplyOvertimeToStandby ? (ccnlRates.holiday || 1.3) : (ccnlRates.holiday || 1.3), // Straordinario festivo o ordinario festivo
-      night_holiday: shouldApplyOvertimeToStandby ? 
-        (ccnlRates.nightAfter22 || 1.35) * (ccnlRates.holiday || 1.3) / 1.0 : 
-        (ccnlRates.nightUntil22 || 1.25) * (ccnlRates.holiday || 1.3) / 1.0 // Maggiorazione composta per straordinario o ordinario
+      holiday: shouldApplyOvertimeToStandby ? (ccnlRates.holiday || 1.35) : 1.30, // Straordinario festivo o ordinario festivo
+      night_holiday: shouldApplyOvertimeToStandby ? 1.60 : 1.55 // Maggiorazione composta per straordinario o ordinario
     };
     
     // Multipliers per VIAGGI (solo maggiorazioni di fascia oraria, MAI straordinari)
     const travelMultipliers = {
       ordinary: 1.0, // Viaggi diurni sempre a tariffa base
       evening: ccnlRates.nightUntil22 || 1.25, // Viaggi serali sempre +25% (fascia oraria)
-      night: ccnlRates.nightUntil22 || 1.25, // Viaggi notturni sempre +25% (fascia oraria, non straordinario)
+      night: 1.25, // Viaggi notturni sempre +25% (fascia oraria, non straordinario)
       saturday: 1.0, // Viaggi sabato a tariffa base (solo fascia oraria conta)
       saturday_night: 1.25, // Viaggi sabato notte +25% (solo fascia notturna)
       holiday: 1.0, // Viaggi festivi a tariffa base
@@ -1312,7 +1336,7 @@ class CalculationService {
     if (category === 'overtime_night_holiday') return ccnlRates.holiday || 1.3; // Festivo
     if (category === 'overtime_holiday') return ccnlRates.holiday || 1.3; // Festivo
     if (category === 'overtime_night') return ccnlRates.nightAfter22 || 1.35; // Notturno +35%
-    if (category === 'overtime') return ccnlRates.day || 1.2; // Diurno +20%
+    if (category === 'overtime') return ccnlRates.day || 1.20; // Diurno +20%
     if (category === 'ordinary_night_holiday') return ccnlRates.holiday || 1.3; // Festivo
     if (category === 'ordinary_holiday') return ccnlRates.holiday || 1.3; // Festivo
     if (category === 'ordinary_night') return ccnlRates.nightUntil22 || 1.25; // Serale +25%
@@ -1327,11 +1351,8 @@ class CalculationService {
           meal: 0,
       };
 
-      // Dichiarazioni delle impostazioni
-      const travelSettings = settings.travelAllowance || {};
-      const standbySettings = settings.standbySettings || {};
-
       // Logica Indennità di Trasferta
+      const travelSettings = settings.travelAllowance || {};
       if (travelSettings.enabled) {
           // Verifica se ci sono ore di viaggio
           const travelHours = (hoursBreakdown.viaggio_giornaliera || 0) + (hoursBreakdown.viaggio_extra || 0);
@@ -1348,6 +1369,7 @@ class CalculationService {
 
       // Logica Indennità di Reperibilità
       // NOTA: Questo valore viene usato per mostrare l'indennità nel riepilogo
+      const standbySettings = settings.standbySettings || {};
       const dateStr = workEntry.date; // Data in formato YYYY-MM-DD
       
       // Se la reperibilità è esplicitamente disattivata nel form, ignora le impostazioni calendario
@@ -1455,7 +1477,7 @@ class CalculationService {
   }) {
     // Usa i tassi CCNL se disponibili, altrimenti fallback
     const rates = contract?.overtimeRates || {
-      day: 1.2,
+      day: 1.20,
       nightUntil22: 1.25,
       nightAfter22: 1.35,
       saturday: 1.25,
@@ -1464,7 +1486,7 @@ class CalculationService {
 
     if (isOvertime && isNight) return baseRate * (rates.nightAfter22 || 1.35); // Straordinario notturno +35%
     if (isOvertime && (isHoliday || isSunday)) return baseRate * (rates.holiday || 1.3); // Straordinario festivo/domenicale +30%
-    if (isOvertime) return baseRate * (rates.day || 1.2); // Straordinario diurno +20%
+    if (isOvertime) return baseRate * (rates.day || 1.20); // Straordinario diurno +20%
     if (isNight && isHoliday) return baseRate * (rates.holiday || 1.3); // Lavoro ordinario notturno festivo +30%
     if (isNight) return baseRate * (rates.nightUntil22 || 1.25); // Lavoro ordinario notturno +25%
     if (isHoliday || isSunday) return baseRate * (rates.holiday || 1.3); // Lavoro ordinario festivo/domenicale +30%

@@ -10,13 +10,13 @@ export const CCNL_CONTRACTS = {
       progression: '🎉 AVANZAMENTO: Livello 3 → Livello 5 (+2 livelli!)',
       achievement: 'Da Operaio Comune a Operaio Qualificato Specializzato'
     },
-    monthlySalary: 2839.07, // Da busta paga reale B.Z. S.R.L.
-    dailyRate: 109.195, // Calcolato: 2839.07 / 26 giorni lavorativi
-    hourlyRate: 16.41081, // Da busta paga reale - Livello 5 qualificato
+    monthlySalary: 2800.00, // CCNL Metalmeccanico PMI Livello 5 base
+    dailyRate: 107.69, // Calcolato: 2800.00 / 26 giorni lavorativi
+    hourlyRate: 16.15, // CCNL Metalmeccanico PMI Livello 5 base
     workingDaysPerMonth: 26, // Standard per calcolo giornaliero
     workingHoursPerDay: 8, // Standard CCNL
     overtimeRates: {
-      day: 1.20, // +20% Straordinario diurno (06:00-20:00)
+      day: 1.2, // +20% Straordinario diurno (06:00-20:00)
       nightUntil22: 1.25, // +25% Straordinario serale (20:00-22:00)
       nightAfter22: 1.35, // +35% Straordinario notturno (22:00-06:00)
       saturday: 1.25, // +25% Sabato (conforme CCNL)
@@ -25,20 +25,22 @@ export const CCNL_CONTRACTS = {
     nightWorkStart: 22, // 22:00
     nightWorkEnd: 6, // 06:00
     contractDetails: {
-      company: 'B.Z. S.R.L.',
-      employee: 'LIKAJ RENIS',
+      company: 'Azienda di Esempio',
+      employee: 'Dipendente',
       qualification: 'Operaio Qualificato (Livello 5)',
       experienceLevel: 'Intermedio-Avanzato'
     },
-    lastUpdated: '2025-06-20', // Data ultima verifica con busta paga
-    source: 'Busta paga B.Z. S.R.L. - LIKAJ RENIS - 05/2025'
+    lastUpdated: '2025-06-20', // Data ultima verifica
+    source: 'CCNL Metalmeccanico PMI - Livello 5'
   },
 };
 
 export const DEFAULT_SETTINGS = {
   contract: CCNL_CONTRACTS.METALMECCANICO_PMI_L5,
   travelCompensationRate: 1.0, // 100% of hourly rate
-  travelHoursSetting: 'TRAVEL_SEPARATE', // 'AS_WORK', 'TRAVEL_SEPARATE', 'EXCESS_AS_TRAVEL', 'EXCESS_AS_OVERTIME'
+  // 🔄 NUOVE LOGICHE VIAGGIO
+  travelHoursSetting: 'TRAVEL_RATE_EXCESS', // 'TRAVEL_RATE_EXCESS', 'TRAVEL_RATE_ALL', 'OVERTIME_EXCESS'
+  multiShiftTravelAsWork: false, // Viaggi multi-turno come ore lavoro
   standbySettings: {
     enabled: false,
     dailyAllowance: 0,
@@ -93,6 +95,19 @@ export const isNightWork = (hour) => {
 
 export const getWorkDayHours = () => 8; // Standard work day hours
 
+// 🔄 NUOVE LOGICHE VIAGGIO - Sistema pulito e chiaro
+export const TRAVEL_HOURS_SETTINGS = {
+  TRAVEL_RATE_EXCESS: 'TRAVEL_RATE_EXCESS', // LOGICA 1: Ore viaggio eccedenti le 8h con tariffa viaggio
+  TRAVEL_RATE_ALL: 'TRAVEL_RATE_ALL', // LOGICA 2: Tutte le ore viaggio sempre con tariffa viaggio
+  OVERTIME_EXCESS: 'OVERTIME_EXCESS', // LOGICA 3: Ore viaggio eccedenti le 8h come straordinari
+};
+
+export const TRAVEL_HOURS_DESCRIPTIONS = {
+  [TRAVEL_HOURS_SETTINGS.TRAVEL_RATE_EXCESS]: '🚗 Viaggio eccedente con tariffa viaggio (CONSIGLIATA)',
+  [TRAVEL_HOURS_SETTINGS.TRAVEL_RATE_ALL]: '🛣️ Viaggio sempre con tariffa viaggio',
+  [TRAVEL_HOURS_SETTINGS.OVERTIME_EXCESS]: '⏰ Viaggio eccedente come straordinario',
+};
+
 export const WORK_TYPES = {
   REGULAR: 'regular',
   OVERTIME: 'overtime',
@@ -144,7 +159,7 @@ export const determineContractLevel = (hourlyRate) => {
     'Livello 2 (Apprendisti)': { min: 14.00, max: 15.19, description: 'Apprendisti e operai generici' },
     'Livello 3 (Operai)': { min: 15.20, max: 15.99, description: 'IL TUO LIVELLO DI PARTENZA - Operai comuni' },
     'Livello 4 (Operai Esperti)': { min: 16.00, max: 16.79, description: 'Operai con esperienza' },
-    'Livello 5 (Operai Qualificati)': { min: 16.41, max: 17.49, description: 'IL TUO LIVELLO ATTUALE - Operai qualificati specializzati 🌟' },
+    'Livello 5 (Operai Qualificati)': { min: 16.00, max: 17.49, description: 'IL TUO LIVELLO ATTUALE - Operai qualificati specializzati 🌟' },
     'Livello 6 (Tecnici)': { min: 17.50, max: 19.99, description: 'PROSSIMO OBIETTIVO - Tecnici specializzati' },
     'Livello 7 (Specialisti)': { min: 20.00, max: 24.99, description: 'Specialisti e quadri intermedi' },
     'Livello 8 (Dirigenti)': { min: 25.00, max: 35.00, description: 'Dirigenti e quadri superiori' },
@@ -181,7 +196,7 @@ export const analyzeCareerProgression = (contract) => {
     2: { rate: 14.60, title: 'Apprendista/Operaio Generico', description: 'Primo livello operativo' },
     3: { rate: 15.60, title: 'Operaio Comune', description: 'IL TUO LIVELLO DI PARTENZA - Operaio con esperienza base' },
     4: { rate: 16.20, title: 'Operaio Esperto', description: 'Operaio con maggiore esperienza' },
-    5: { rate: 16.41, title: 'Operaio Qualificato Specializzato', description: 'TUA POSIZIONE ATTUALE - Operaio altamente qualificato 🌟' },
+    5: { rate: 16.15, title: 'Operaio Qualificato Specializzato', description: 'TUA POSIZIONE ATTUALE - Operaio altamente qualificato 🌟' },
     6: { rate: 18.00, title: 'Tecnico Specializzato', description: 'PROSSIMO OBIETTIVO - Tecnico qualificato' },
     7: { rate: 22.50, title: 'Specialista/Quadro Intermedio', description: 'Responsabilità tecniche avanzate' },
     8: { rate: 28.00, title: 'Dirigente/Quadro Senior', description: 'Livello dirigenziale' }

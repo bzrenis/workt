@@ -54,7 +54,7 @@ export const useVacationAutoCompile = (date, dayType, settings) => {
 
   const generateAutoCompileData = (dayType, vacationSettings) => {
     // Calcola la retribuzione giornaliera secondo CCNL
-    const ccnlDailyRate = settings?.contract?.dailyRate || 109.195; // CCNL Metalmeccanico PMI Level 5
+    const ccnlDailyRate = settings?.contract?.dailyRate || 107.69; // CCNL Metalmeccanico PMI Level 5
 
     const baseData = {
       // Campi sempre compilati per giorni non lavorativi

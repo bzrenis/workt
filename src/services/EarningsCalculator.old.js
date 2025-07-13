@@ -6,7 +6,6 @@ import { isItalianHoliday } from '../constants/holidays';
 
 /**
  * Gestisce i calcoli delle retribuzioni base (giornaliera, straordinari, maggiorazioni)
- * VERSIONE AGGIORNATA con nuove logiche viaggio
  */
 export class EarningsCalculator {
   
@@ -99,15 +98,7 @@ export class EarningsCalculator {
   }
 
   /**
-   * NUOVA LOGICA VIAGGIO - Calcola la retribuzione base per una giornata lavorativa
-   * 
-   * LOGICHE DISPONIBILI:
-   * - TRAVEL_RATE_EXCESS (default): Le ore viaggio eccedenti le 8h sono pagate con tariffa viaggio
-   * - TRAVEL_RATE_ALL: Tutte le ore viaggio sono sempre pagate con tariffa viaggio
-   * - OVERTIME_EXCESS: Le ore viaggio eccedenti le 8h sono pagate come straordinari
-   * 
-   * OPZIONE MULTI-TURNO:
-   * - multiShiftTravelAsWork: I viaggi tra cantieri nei multi-turni sono considerati ore lavoro
+   * Calcola la retribuzione base per una giornata lavorativa
    */
   calculateBasicEarnings(workEntry, settings, workHours, travelHours) {
     const contract = settings.contract || this.defaultContract;
@@ -132,7 +123,7 @@ export class EarningsCalculator {
     const isSaturday = dateObj.getDay() === 6;
     const isHoliday = isItalianHoliday(workEntry.date);
     
-    // Inizializzazione variabili risultato
+    // Calcolo straordinari
     let overtimePay = 0;
     let overtimeHours = 0;
     let regularPay = 0;
@@ -255,9 +246,91 @@ export class EarningsCalculator {
         overtimeHours = 0; // Nessun straordinario
       }
     }
+        const extraWorkHours = effectiveWorkHours - standardWorkDay;
+        if (extraWorkHours > 0) {
+          let overtimeBonusRate = this.getHourlyRateWithBonus({
+            baseRate,
+            isOvertime: true,
+            isNight: workEntry.isNight || false,
+            isHoliday,
+            isSunday,
+            contract
+          });
+          overtimePay = extraWorkHours * overtimeBonusRate;
+          overtimeHours = extraWorkHours;
+        }
+      } else {
+        regularPay = baseRate * effectiveWorkHours;
+        regularHours = effectiveWorkHours;
+        overtimeHours = 0;
+      }
+      
+      console.log(`[EarningsCalculator] 🎯 MULTI_SHIFT result:`, {
+        regularPay: regularPay.toFixed(2),
+        overtimePay: overtimePay.toFixed(2),
+        travelPay: travelPay.toFixed(2),
+        total: (regularPay + overtimePay + travelPay).toFixed(2)
+      });
+    } else {
+      console.log(`[EarningsCalculator] Applicando modalità ${travelHoursSetting} (logica esistente)`);
+      // LOGICHE ESISTENTI: considera viaggio + lavoro insieme
+      const totalRegularHours = workHours + travelHours;
+      if (totalRegularHours >= standardWorkDay) {
+        regularPay = dailyRate;
+        regularHours = standardWorkDay;
+        const extraHours = totalRegularHours - standardWorkDay;
+        if (extraHours > 0) {
+          if (travelHoursSetting === 'EXCESS_AS_TRAVEL') {
+            console.log(`[EarningsCalculator] Ore extra (${extraHours}h) pagate come viaggio`);
+            // Le ore oltre 8h sono pagate come viaggio
+            travelPay = extraHours * baseRate * travelCompensationRate;
+            overtimeHours = 0;
+          } else if (travelHoursSetting === 'EXCESS_AS_OVERTIME') {
+            console.log(`[EarningsCalculator] Ore extra (${extraHours}h) pagate come straordinario`);
+            // Le ore oltre 8h sono pagate come straordinario
+            let overtimeBonusRate = this.getHourlyRateWithBonus({
+              baseRate,
+              isOvertime: true,
+              isNight: workEntry.isNight || false,
+              isHoliday,
+              isSunday,
+              contract
+            });
+            overtimePay = extraHours * overtimeBonusRate;
+            overtimeHours = extraHours;
+          } else {
+            console.log(`[EarningsCalculator] Modalità AS_WORK: ore extra incluse nel normale lavoro`);
+            // AS_WORK: Default nessun extra, tutto come lavoro normale
+            overtimeHours = 0;
+          }
+        }
+      } else {
+        console.log(`[EarningsCalculator] Totale ore (${totalRegularHours}h) < giornata standard: calcolo proporzionale`);
+        // Se meno di 8h, paga solo le ore effettive MA rispettando la modalità viaggio
+        if (travelHoursSetting === 'AS_WORK') {
+          console.log(`[EarningsCalculator] Modalità AS_WORK: tutto come lavoro normale`);
+          // Tutto come lavoro normale
+          regularPay = baseRate * totalRegularHours;
+          regularHours = totalRegularHours;
+        } else if (travelHoursSetting === 'TRAVEL_SEPARATE') {
+          console.log(`[EarningsCalculator] Modalità TRAVEL_SEPARATE con <8h: viaggio separato + lavoro normale`);
+          // Viaggio sempre pagato separatamente, lavoro come ore normali
+          travelPay = travelHours * baseRate * travelCompensationRate;
+          regularPay = workHours * baseRate;
+          regularHours = workHours;
+        } else {
+          console.log(`[EarningsCalculator] Altre modalità con <8h: pagamento ore effettive (${travelHoursSetting})`);
+          // Per EXCESS_AS_TRAVEL/EXCESS_AS_OVERTIME con meno di 8h, nessuna eccedenza
+          regularPay = baseRate * totalRegularHours;
+          regularHours = totalRegularHours;
+        }
+        overtimeHours = 0;
+      }
+    }
 
     // Lavoro ordinario notturno/festivo/domenicale
     let ordinaryBonusPay = 0;
+    const totalRegularHours = workHours + travelHours;
     if (!overtimeHours && (workEntry.isNight || isHoliday || isSunday)) {
       let ordinaryBonusRate = this.getHourlyRateWithBonus({
         baseRate,
@@ -267,18 +340,8 @@ export class EarningsCalculator {
         isSunday,
         contract
       });
-      ordinaryBonusPay = (effectiveWorkHours + effectiveTravelHours) * (ordinaryBonusRate - baseRate);
+      ordinaryBonusPay = totalRegularHours * (ordinaryBonusRate - baseRate);
     }
-
-    console.log('🔧 EarningsCalculator - RISULTATO FINALE:', {
-      modalità: travelHoursSetting,
-      multiShift: multiShiftTravelAsWork,
-      regularPay: regularPay.toFixed(2),
-      overtimePay: overtimePay.toFixed(2),
-      travelPay: travelPay.toFixed(2),
-      ordinaryBonusPay: ordinaryBonusPay.toFixed(2),
-      total: (regularPay + overtimePay + travelPay + ordinaryBonusPay).toFixed(2)
-    });
 
     return {
       regularPay,

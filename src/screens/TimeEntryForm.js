@@ -144,15 +144,22 @@ const EarningsSummary = ({ form, settings, isDateInStandbyCalendar, isStandbyCal
   
   // Create a work entry object from the form for calculation
   const workEntry = useMemo(() => {
-    const viaggi = form.viaggi[0] || {};
+    const primaryShift = form.viaggi[0] || {};
+    const additionalShifts = form.viaggi.slice(1) || []; // Turni aggiuntivi (dall'indice 1 in poi)
+    
     // Log per debug viaggi
-    console.log("Form viaggi debug:", {
-      viaggi: viaggi,
-      departure_company: viaggi.departure_company,
-      arrival_site: viaggi.arrival_site,
-      departure_return: viaggi.departure_return,
-      arrival_company: viaggi.arrival_company
+    console.log("🔥 MULTI-TURNO DEBUG - Form structure:", {
+      primaryShift,
+      additionalShifts,
+      viaggiCount: form.viaggi.length,
+      totalViaggi: form.viaggi,
+      willCreateWorkEntry: {
+        mainFields: `${primaryShift.work_start_1}-${primaryShift.work_end_1}`,
+        additionalShiftsCount: additionalShifts.length,
+        additionalShiftsDetails: additionalShifts.map((s, i) => `Turno ${i+2}: ${s.work_start_1}-${s.work_end_1}`)
+      }
     });
+    
     // Log per debug
     console.log("Form reperibilità:", form.reperibilita);
     
@@ -166,14 +173,17 @@ const EarningsSummary = ({ form, settings, isDateInStandbyCalendar, isStandbyCal
       })(),
       siteName: form.site_name || '',
       vehicleDriven: form.veicolo || '',
-      departureCompany: viaggi.departure_company || '',
-      arrivalSite: viaggi.arrival_site || '',
-      workStart1: viaggi.work_start_1 || '',
-      workEnd1: viaggi.work_end_1 || '',
-      workStart2: viaggi.work_start_2 || '',
-      workEnd2: viaggi.work_end_2 || '',
-      departureReturn: viaggi.departure_return || '',
-      arrivalCompany: viaggi.arrival_company || '',
+      // 🔥 TURNO PRINCIPALE - da form.viaggi[0]
+      departureCompany: primaryShift.departure_company || '',
+      arrivalSite: primaryShift.arrival_site || '',
+      workStart1: primaryShift.work_start_1 || '',
+      workEnd1: primaryShift.work_end_1 || '',
+      workStart2: primaryShift.work_start_2 || '',
+      workEnd2: primaryShift.work_end_2 || '',
+      departureReturn: primaryShift.departure_return || '',
+      arrivalCompany: primaryShift.arrival_company || '',
+      // 🚀 TURNI AGGIUNTIVI - da form.viaggi[1+] per multi-turno ordinario
+      viaggi: additionalShifts, // Solo i turni aggiuntivi (non include il primo)
       interventi: form.interventi || [],
       mealLunchVoucher: form.pasti.pranzo ? 1 : 0,
       mealLunchCash: form.mealLunchCash || 0, // Accesso corretto alla proprietà
@@ -187,10 +197,27 @@ const EarningsSummary = ({ form, settings, isDateInStandbyCalendar, isStandbyCal
       completamentoGiornata: form.completamentoGiornata || 'nessuno', // Modalità di completamento giornata
       // Nuovi campi per gestione giorni fissi
       isFixedDay: isFixedDay,
-      fixedEarnings: form.fixedEarnings || (isFixedDay ? (settings?.contract?.dailyRate || 109.195) : 0),
+      fixedEarnings: form.fixedEarnings || (isFixedDay ? (settings?.contract?.dailyRate || 107.69) : 0),
       dayType: form.dayType || dayType
     };
   }, [form, dayType]);
+
+  // Log del workEntry creato per debug multi-turno
+  useEffect(() => {
+    console.log("🔥 WORKENTRY CREATED FOR TIMECALCULATOR:", {
+      mainShift: `${workEntry.workStart1}-${workEntry.workEnd1} + ${workEntry.workStart2}-${workEntry.workEnd2}`,
+      viaggiArray: workEntry.viaggi,
+      viaggiCount: workEntry.viaggi?.length || 0,
+      viaggiDetails: workEntry.viaggi?.map((v, i) => ({
+        index: i,
+        shift1: `${v.work_start_1}-${v.work_end_1}`,
+        shift2: `${v.work_start_2}-${v.work_end_2}`,
+        travel: `${v.departure_company}-${v.arrival_site} / ${v.departure_return}-${v.arrival_company}`
+      })) || [],
+      expectedTotalShifts: (workEntry.workStart1 ? 1 : 0) + (workEntry.workStart2 ? 1 : 0) + (workEntry.viaggi?.length || 0),
+      formViaggiLength: form.viaggi?.length || 0
+    });
+  }, [workEntry, form.viaggi?.length]);
   
   // Calculate earnings breakdown when form changes
   useEffect(() => {
@@ -208,7 +235,7 @@ const EarningsSummary = ({ form, settings, isDateInStandbyCalendar, isStandbyCal
         }
       },
       travelCompensationRate: 1.0,
-      travelHoursSetting: 'TRAVEL_SEPARATE', // Modalità di calcolo viaggio
+      travelHoursSetting: 'MULTI_SHIFT_OPTIMIZED', // Modalità di calcolo viaggio predefinita
       standbySettings: {
         dailyAllowance: 7.5,
         dailyIndemnity: 7.5,
@@ -227,7 +254,7 @@ const EarningsSummary = ({ form, settings, isDateInStandbyCalendar, isStandbyCal
       contract: { ...defaultSettings.contract, ...(settings?.contract || {}) },
       standbySettings: { ...defaultSettings.standbySettings, ...(settings?.standbySettings || {}) },
       mealAllowances: { ...defaultSettings.mealAllowances, ...(settings?.mealAllowances || {}) },
-      travelHoursSetting: settings?.travelHoursSetting || 'TRAVEL_SEPARATE' // Aggiungi modalità viaggio
+      travelHoursSetting: settings?.travelHoursSetting || 'MULTI_SHIFT_OPTIMIZED' // Modalità viaggio predefinita
     };
     
     // Se è un giorno di ferie/malattia/riposo, calcola la retribuzione fissa
@@ -254,8 +281,14 @@ const EarningsSummary = ({ form, settings, isDateInStandbyCalendar, isStandbyCal
         console.log('DEBUG breakdown 06/07/2025:', JSON.stringify(result, null, 2));
       }
       // Log delle impostazioni viaggio per debug
-      console.log('DEBUG impostazioni viaggio:', {
-        travelHoursSetting: safeSettings.travelHoursSetting,
+      console.log('🚀 DEBUG MODALITÀ VIAGGIO ATTIVA:', {
+        modalitaSelezionata: safeSettings.travelHoursSetting,
+        descrizione: safeSettings.travelHoursSetting === 'AS_WORK' ? 'Come ore lavorative' :
+                     safeSettings.travelHoursSetting === 'TRAVEL_SEPARATE' ? 'Viaggio con tariffa separata' :
+                     safeSettings.travelHoursSetting === 'EXCESS_AS_TRAVEL' ? 'Eccedenza come retribuzione viaggio' :
+                     safeSettings.travelHoursSetting === 'EXCESS_AS_OVERTIME' ? 'Eccedenza come straordinario' : 
+                     safeSettings.travelHoursSetting === 'MULTI_SHIFT_OPTIMIZED' ? 'Multi-turno ottimizzato (viaggi interni = lavoro)' : 'Sconosciuta',
+        settingsOriginali: settings?.travelHoursSetting,
         travelCompensationRate: safeSettings.travelCompensationRate,
         workHours: calculationService.calculateWorkHours(workEntry),
         travelHours: calculationService.calculateTravelHours(workEntry)
@@ -368,7 +401,7 @@ const EarningsSummary = ({ form, settings, isDateInStandbyCalendar, isStandbyCal
      breakdown?.ordinary?.hours?.lavoro_extra > 0 || 
      breakdown?.ordinary?.hours?.viaggio_extra > 0);
      
-  const hasStandbyHours = breakdown?.standby?.workHours && 
+  const hasStandbyHours = breakdown?.standby && 
     (Object.values(breakdown?.standby?.workHours || {}).some(h => h > 0) || 
      Object.values(breakdown?.standby?.travelHours || {}).some(h => h > 0));
      
@@ -548,23 +581,46 @@ const EarningsSummary = ({ form, settings, isDateInStandbyCalendar, isStandbyCal
                 {(breakdown?.ordinary?.hours?.viaggio_extra > 0) && (
                   <View style={styles.breakdownItem}>
                     <View style={styles.breakdownRow}>
-                      <Text style={styles.breakdownLabel}>Viaggio extra (oltre 8h)</Text>
+                      <Text style={styles.breakdownLabel}>
+                        {settings?.travelHoursSetting === 'EXCESS_AS_OVERTIME' 
+                          ? 'Straordinario (da eccedenza viaggio)' 
+                          : settings?.travelHoursSetting === 'MULTI_SHIFT_OPTIMIZED'
+                          ? 'Viaggio esterno (primo/ultimo)'
+                          : 'Viaggio extra (oltre 8h)'}
+                      </Text>
                       <Text style={styles.breakdownValue}>{formatSafeHours(breakdown?.ordinary?.hours?.viaggio_extra)}</Text>
                     </View>
                     {(breakdown?.ordinary?.earnings?.viaggio_extra > 0) && (
                       <Text style={styles.rateCalc}>
                         {(() => {
                           const base = settings.contract?.hourlyRate || 16.41;
-                          // Calcolo con maggiorazione se è un giorno speciale
-                          if (breakdown?.details?.isSunday || breakdown?.details?.isHoliday) {
-                            const multiplier = settings.contract?.overtimeRates?.holiday || 1.3;
-                            const label = breakdown?.details?.isSunday ? 'Maggiorazione Domenica' : 'Maggiorazione Festivo';
-                            return `${base.toFixed(2).replace('.', ',')} € x ${multiplier.toFixed(2).replace('.', ',')} x ${formatSafeHours(breakdown?.ordinary?.hours?.viaggio_extra)} (${label}) = ${(base * multiplier * breakdown?.ordinary?.hours?.viaggio_extra).toFixed(2).replace('.', ',')} €`;
-                          } else if (breakdown?.details?.isSaturday) {
-                            const multiplier = settings.contract?.overtimeRates?.saturday || 1.25;
-                            return `${base.toFixed(2).replace('.', ',')} € x ${multiplier.toFixed(2).replace('.', ',')} x ${formatSafeHours(breakdown?.ordinary?.hours?.viaggio_extra)} (Maggiorazione Sabato) = ${(base * multiplier * breakdown?.ordinary?.hours?.viaggio_extra).toFixed(2).replace('.', ',')} €`;
+                          
+                          if (settings?.travelHoursSetting === 'EXCESS_AS_OVERTIME') {
+                            // Calcolo con maggiorazione straordinario se è un giorno speciale
+                            if (breakdown?.details?.isSunday || breakdown?.details?.isHoliday) {
+                              const multiplier = settings.contract?.overtimeRates?.holiday || 1.3;
+                              const label = breakdown?.details?.isSunday ? 'Straordinario Domenica' : 'Straordinario Festivo';
+                              return `${base.toFixed(2).replace('.', ',')} € x ${multiplier.toFixed(2).replace('.', ',')} x ${formatSafeHours(breakdown?.ordinary?.hours?.viaggio_extra)} (${label}) = ${(base * multiplier * breakdown?.ordinary?.hours?.viaggio_extra).toFixed(2).replace('.', ',')} €`;
+                            } else if (breakdown?.details?.isSaturday) {
+                              const multiplier = settings.contract?.overtimeRates?.saturday || 1.25;
+                              return `${base.toFixed(2).replace('.', ',')} € x ${multiplier.toFixed(2).replace('.', ',')} x ${formatSafeHours(breakdown?.ordinary?.hours?.viaggio_extra)} (Straordinario Sabato) = ${(base * multiplier * breakdown?.ordinary?.hours?.viaggio_extra).toFixed(2).replace('.', ',')} €`;
+                            } else {
+                              const multiplier = settings.contract?.overtimeRates?.day || 1.2;
+                              return `${base.toFixed(2).replace('.', ',')} € x ${multiplier.toFixed(2).replace('.', ',')} x ${formatSafeHours(breakdown?.ordinary?.hours?.viaggio_extra)} (Straordinario +20%) = ${(base * multiplier * breakdown?.ordinary?.hours?.viaggio_extra).toFixed(2).replace('.', ',')} €`;
+                            }
                           } else {
-                            return `${base.toFixed(2).replace('.', ',')} € x ${formatSafeHours(breakdown?.ordinary?.hours?.viaggio_extra)} = ${breakdown?.ordinary?.earnings?.viaggio_extra.toFixed(2).replace('.', ',')} €`;
+                            // Calcolo con maggiorazione viaggio se è un giorno speciale
+                            if (breakdown?.details?.isSunday || breakdown?.details?.isHoliday) {
+                              const multiplier = settings.contract?.overtimeRates?.holiday || 1.3;
+                              const label = breakdown?.details?.isSunday ? 'Maggiorazione Domenica' : 'Maggiorazione Festivo';
+                              return `${base.toFixed(2).replace('.', ',')} € x ${multiplier.toFixed(2).replace('.', ',')} x ${formatSafeHours(breakdown?.ordinary?.hours?.viaggio_extra)} (${label}) = ${(base * multiplier * breakdown?.ordinary?.hours?.viaggio_extra).toFixed(2).replace('.', ',')} €`;
+                            } else if (breakdown?.details?.isSaturday) {
+                              const multiplier = settings.contract?.overtimeRates?.saturday || 1.25;
+                              return `${base.toFixed(2).replace('.', ',')} € x ${multiplier.toFixed(2).replace('.', ',')} x ${formatSafeHours(breakdown?.ordinary?.hours?.viaggio_extra)} (Maggiorazione Sabato) = ${(base * multiplier * breakdown?.ordinary?.hours?.viaggio_extra).toFixed(2).replace('.', ',')} €`;
+                            } else {
+                              const rate = base * (settings.travelCompensationRate || 1.0);
+                              return `${rate.toFixed(2).replace('.', ',')} € x ${formatSafeHours(breakdown?.ordinary?.hours?.viaggio_extra)} (Tariffa viaggio ${Math.round((settings.travelCompensationRate || 1.0) * 100)}%) = ${breakdown?.ordinary?.earnings?.viaggio_extra.toFixed(2).replace('.', ',')} €`;
+                            }
                           }
                         })()}
                       </Text>
@@ -581,12 +637,30 @@ const EarningsSummary = ({ form, settings, isDateInStandbyCalendar, isStandbyCal
            !breakdown?.details?.isHoliday && (
             <View style={styles.breakdownItem}>
               <View style={styles.breakdownRow}>
-                <Text style={styles.breakdownLabel}>Viaggio extra (oltre 8h)</Text>
+                <Text style={styles.breakdownLabel}>
+                  {settings?.travelHoursSetting === 'EXCESS_AS_OVERTIME' 
+                    ? 'Straordinario (da eccedenza viaggio)' 
+                    : settings?.travelHoursSetting === 'MULTI_SHIFT_OPTIMIZED'
+                    ? 'Viaggio esterno (primo/ultimo)'
+                    : 'Viaggio extra (oltre 8h)'}
+                </Text>
                 <Text style={styles.breakdownValue}>{formatSafeHours(breakdown?.ordinary?.hours?.viaggio_extra)}</Text>
               </View>
               {breakdown?.ordinary?.earnings?.viaggio_extra > 0 && breakdown?.ordinary?.hours?.viaggio_extra > 0 && (
                 <Text style={styles.rateCalc}>
-                  {((settings.contract?.hourlyRate || 16.41) * (settings.travelCompensationRate || 1.0)).toFixed(2).replace('.', ',')} € x {formatSafeHours(breakdown?.ordinary?.hours?.viaggio_extra)} = {breakdown?.ordinary?.earnings?.viaggio_extra.toFixed(2).replace('.', ',')} €
+                  {(() => {
+                    if (settings?.travelHoursSetting === 'EXCESS_AS_OVERTIME') {
+                      // Mostra come straordinario con tariffa maggiorata
+                      const base = settings.contract?.hourlyRate || 16.41;
+                      const overtime = settings.contract?.overtimeRates?.day || 1.2;
+                      const rate = base * overtime;
+                      return `${rate.toFixed(2).replace('.', ',')} € x ${formatSafeHours(breakdown?.ordinary?.hours?.viaggio_extra)} (Straordinario +20%) = ${breakdown?.ordinary?.earnings?.viaggio_extra.toFixed(2).replace('.', ',')} €`;
+                    } else {
+                      // Mostra come viaggio con tariffa ridotta
+                      const rate = (settings.contract?.hourlyRate || 16.41) * (settings.travelCompensationRate || 1.0);
+                      return `${rate.toFixed(2).replace('.', ',')} € x ${formatSafeHours(breakdown?.ordinary?.hours?.viaggio_extra)} (Tariffa viaggio ${Math.round((settings.travelCompensationRate || 1.0) * 100)}%) = ${breakdown?.ordinary?.earnings?.viaggio_extra.toFixed(2).replace('.', ',')} €`;
+                    }
+                  })()}
                 </Text>
               )}
             </View>
@@ -624,6 +698,21 @@ const EarningsSummary = ({ form, settings, isDateInStandbyCalendar, isStandbyCal
             <Text style={styles.breakdownLabel}>Totale ordinario</Text>
             <Text style={styles.breakdownTotal}>{formatSafeAmount(breakdown?.ordinary?.total || 0)}</Text>
           </View>
+          
+          {/* Nota modalità MULTI_SHIFT_OPTIMIZED */}
+          {settings?.travelHoursSetting === 'MULTI_SHIFT_OPTIMIZED' && (
+            <View style={styles.breakdownDetail}>
+              <Text style={{fontSize: 12, color: '#4CAF50', fontStyle: 'italic', marginTop: 4}}>
+                🎯 Modalità Multi-turno Ottimizzata attiva
+              </Text>
+              <Text style={{fontSize: 12, color: '#4CAF50', fontStyle: 'italic', marginTop: 2}}>
+                • Viaggi tra turni considerati come ore lavorative
+              </Text>
+              <Text style={{fontSize: 12, color: '#4CAF50', fontStyle: 'italic', marginTop: 2}}>
+                • Solo primo viaggio (partenza azienda) e ultimo viaggio (arrivo azienda) pagati come viaggio
+              </Text>
+            </View>
+          )}
           
           {/* Nota maggiorazione CCNL */}
           {(breakdown?.details?.isSunday || breakdown?.details?.isHoliday || breakdown?.details?.isSaturday) && (
@@ -721,17 +810,83 @@ const EarningsSummary = ({ form, settings, isDateInStandbyCalendar, isStandbyCal
               )}
             </View>
           )}
+
+          {/* Lavoro sabato reperibilità */}
+          {breakdown?.standby?.workHours?.saturday > 0 && (
+            <View style={styles.breakdownItem}>
+              <View style={styles.breakdownRow}>
+                <Text style={styles.breakdownLabel}>
+                  Lavoro sabato {breakdown?.standby?.workEarnings?.saturday && breakdown?.standby?.workHours?.saturday > 0 
+                    ? `(+${Math.round(((breakdown.standby.workEarnings.saturday / breakdown.standby.workHours.saturday) / (settings.contract?.hourlyRate || 16.41) - 1) * 100)}%)`
+                    : '(+25%)'
+                  }
+                </Text>
+                <Text style={styles.breakdownValue}>{formatSafeHours(breakdown?.standby?.workHours?.saturday)}</Text>
+              </View>
+              {breakdown?.standby?.workEarnings?.saturday > 0 && breakdown?.standby?.workHours?.saturday > 0 && (
+                <Text style={styles.rateCalc}>
+                  {(breakdown.standby.workEarnings.saturday / breakdown.standby.workHours.saturday).toFixed(2).replace('.', ',')} € x {formatSafeHours(breakdown?.standby?.workHours?.saturday)} = {breakdown?.standby?.workEarnings?.saturday.toFixed(2).replace('.', ',')} €
+                </Text>
+              )}
+            </View>
+          )}
+
+          {/* Lavoro festivo/domenica reperibilità */}
+          {breakdown?.standby?.workHours?.holiday > 0 && (
+            <View style={styles.breakdownItem}>
+              <View style={styles.breakdownRow}>
+                <Text style={styles.breakdownLabel}>
+                  Lavoro festivo {breakdown?.standby?.workEarnings?.holiday && breakdown?.standby?.workHours?.holiday > 0 
+                    ? `(+${Math.round(((breakdown.standby.workEarnings.holiday / breakdown.standby.workHours.holiday) / (settings.contract?.hourlyRate || 16.41) - 1) * 100)}%)`
+                    : '(+30%)'
+                  }
+                </Text>
+                <Text style={styles.breakdownValue}>{formatSafeHours(breakdown?.standby?.workHours?.holiday)}</Text>
+              </View>
+              {breakdown?.standby?.workEarnings?.holiday > 0 && breakdown?.standby?.workHours?.holiday > 0 && (
+                <Text style={styles.rateCalc}>
+                  {(breakdown.standby.workEarnings.holiday / breakdown.standby.workHours.holiday).toFixed(2).replace('.', ',')} € x {formatSafeHours(breakdown?.standby?.workHours?.holiday)} = {breakdown?.standby?.workEarnings?.holiday.toFixed(2).replace('.', ',')} €
+                </Text>
+              )}
+            </View>
+          )}
           
           {/* Viaggi reperibilità */}
           {breakdown?.standby?.travelHours?.ordinary > 0 && (
             <View style={styles.breakdownItem}>
               <View style={styles.breakdownRow}>
-                <Text style={styles.breakdownLabel}>Viaggio diurno</Text>
+                <Text style={styles.breakdownLabel}>
+                  {(() => {
+                    if (settings?.travelHoursSetting === 'EXCESS_AS_OVERTIME') {
+                      // Verifica se le ore totali superano 8h per determinare se è straordinario
+                      const totalOrdinaryHours = (breakdown?.ordinary?.hours?.lavoro_giornaliera || 0) + 
+                                                 (breakdown?.ordinary?.hours?.viaggio_giornaliera || 0);
+                      const isOvertime = totalOrdinaryHours >= 8;
+                      return isOvertime ? 'Straordinario diurno (da viaggio reperibilità)' : 'Viaggio diurno';
+                    }
+                    return 'Viaggio diurno';
+                  })()}
+                </Text>
                 <Text style={styles.breakdownValue}>{formatSafeHours(breakdown?.standby?.travelHours?.ordinary)}</Text>
               </View>
               {breakdown?.standby?.travelEarnings?.ordinary > 0 && breakdown?.standby?.travelHours?.ordinary > 0 && (
                 <Text style={styles.rateCalc}>
-                  {((settings.contract?.hourlyRate || 16.41) * (settings.travelCompensationRate || 1.0)).toFixed(2).replace('.', ',')} € x {formatSafeHours(breakdown?.standby?.travelHours?.ordinary)} = {breakdown?.standby?.travelEarnings?.ordinary.toFixed(2).replace('.', ',')} €
+                  {(() => {
+                    const base = settings.contract?.hourlyRate || 16.41;
+                    if (settings?.travelHoursSetting === 'EXCESS_AS_OVERTIME') {
+                      const totalOrdinaryHours = (breakdown?.ordinary?.hours?.lavoro_giornaliera || 0) + 
+                                                 (breakdown?.ordinary?.hours?.viaggio_giornaliera || 0);
+                      const isOvertime = totalOrdinaryHours >= 8;
+                      if (isOvertime) {
+                        const overtimeRate = settings.contract?.overtimeRates?.day || 1.2;
+                        const rate = base * overtimeRate;
+                        return `${rate.toFixed(2).replace('.', ',')} € x ${formatSafeHours(breakdown?.standby?.travelHours?.ordinary)} (Straordinario +20%) = ${breakdown?.standby?.travelEarnings?.ordinary.toFixed(2).replace('.', ',')} €`;
+                      }
+                    }
+                    // Tariffa viaggio normale
+                    const rate = base * (settings.travelCompensationRate || 1.0);
+                    return `${rate.toFixed(2).replace('.', ',')} € x ${formatSafeHours(breakdown?.standby?.travelHours?.ordinary)} (Tariffa viaggio ${Math.round((settings.travelCompensationRate || 1.0) * 100)}%) = ${breakdown?.standby?.travelEarnings?.ordinary.toFixed(2).replace('.', ',')} €`;
+                  })()}
                 </Text>
               )}
             </View>
@@ -741,12 +896,38 @@ const EarningsSummary = ({ form, settings, isDateInStandbyCalendar, isStandbyCal
           {breakdown?.standby?.travelHours?.evening > 0 && (
             <View style={styles.breakdownItem}>
               <View style={styles.breakdownRow}>
-                <Text style={styles.breakdownLabel}>Viaggio serale (+25%)</Text>
+                <Text style={styles.breakdownLabel}>
+                  {(() => {
+                    if (settings?.travelHoursSetting === 'EXCESS_AS_OVERTIME') {
+                      const totalOrdinaryHours = (breakdown?.ordinary?.hours?.lavoro_giornaliera || 0) + 
+                                                 (breakdown?.ordinary?.hours?.viaggio_giornaliera || 0);
+                      const isOvertime = totalOrdinaryHours >= 8;
+                      return isOvertime ? 'Straordinario serale (da viaggio reperibilità) (+25%)' : 'Viaggio serale (+25%)';
+                    }
+                    return 'Viaggio serale (+25%)';
+                  })()}
+                </Text>
                 <Text style={styles.breakdownValue}>{formatSafeHours(breakdown?.standby?.travelHours?.evening)}</Text>
               </View>
               {breakdown?.standby?.travelEarnings?.evening > 0 && breakdown?.standby?.travelHours?.evening > 0 && (
                 <Text style={styles.rateCalc}>
-                  {((settings.contract?.hourlyRate || 16.41) * (settings.contract?.overtimeRates?.nightUntil22 || 1.25) * (settings.travelCompensationRate || 1.0)).toFixed(2).replace('.', ',')} € x {formatSafeHours(breakdown?.standby?.travelHours?.evening)} = {breakdown?.standby?.travelEarnings?.evening.toFixed(2).replace('.', ',')} €
+                  {(() => {
+                    const base = settings.contract?.hourlyRate || 16.41;
+                    const nightMultiplier = settings.contract?.overtimeRates?.nightUntil22 || 1.25;
+                    
+                    if (settings?.travelHoursSetting === 'EXCESS_AS_OVERTIME') {
+                      const totalOrdinaryHours = (breakdown?.ordinary?.hours?.lavoro_giornaliera || 0) + 
+                                                 (breakdown?.ordinary?.hours?.viaggio_giornaliera || 0);
+                      const isOvertime = totalOrdinaryHours >= 8;
+                      if (isOvertime) {
+                        const rate = base * nightMultiplier;
+                        return `${rate.toFixed(2).replace('.', ',')} € x ${formatSafeHours(breakdown?.standby?.travelHours?.evening)} (Straordinario serale +25%) = ${breakdown?.standby?.travelEarnings?.evening.toFixed(2).replace('.', ',')} €`;
+                      }
+                    }
+                    // Tariffa viaggio con maggiorazione serale
+                    const rate = base * nightMultiplier * (settings.travelCompensationRate || 1.0);
+                    return `${rate.toFixed(2).replace('.', ',')} € x ${formatSafeHours(breakdown?.standby?.travelHours?.evening)} (Viaggio serale +25%) = ${breakdown?.standby?.travelEarnings?.evening.toFixed(2).replace('.', ',')} €`;
+                  })()}
                 </Text>
               )}
             </View>
@@ -756,12 +937,82 @@ const EarningsSummary = ({ form, settings, isDateInStandbyCalendar, isStandbyCal
           {breakdown?.standby?.travelHours?.night > 0 && (
             <View style={styles.breakdownItem}>
               <View style={styles.breakdownRow}>
-                <Text style={styles.breakdownLabel}>Viaggio notturno (+25%)</Text>
+                <Text style={styles.breakdownLabel}>
+                  {(() => {
+                    if (settings?.travelHoursSetting === 'EXCESS_AS_OVERTIME') {
+                      const totalOrdinaryHours = (breakdown?.ordinary?.hours?.lavoro_giornaliera || 0) + 
+                                                 (breakdown?.ordinary?.hours?.viaggio_giornaliera || 0);
+                      const isOvertime = totalOrdinaryHours >= 8;
+                      return isOvertime ? 'Straordinario notturno (da viaggio reperibilità) (+35%)' : 'Viaggio notturno (+35%)';
+                    }
+                    return 'Viaggio notturno (+25%)';
+                  })()}
+                </Text>
                 <Text style={styles.breakdownValue}>{formatSafeHours(breakdown?.standby?.travelHours?.night)}</Text>
               </View>
               {breakdown?.standby?.travelEarnings?.night > 0 && breakdown?.standby?.travelHours?.night > 0 && (
                 <Text style={styles.rateCalc}>
-                  {((settings.contract?.hourlyRate || 16.41) * 1.25 * (settings.travelCompensationRate || 1.0)).toFixed(2).replace('.', ',')} € x {formatSafeHours(breakdown?.standby?.travelHours?.night)} = {breakdown?.standby?.travelEarnings?.night.toFixed(2).replace('.', ',')} €
+                  {(() => {
+                    const base = settings.contract?.hourlyRate || 16.41;
+                    const nightMultiplier = settings.contract?.overtimeRates?.nightAfter22 || 1.35; // Maggiorazione notturna dopo 22:00
+                    
+                    if (settings?.travelHoursSetting === 'EXCESS_AS_OVERTIME') {
+                      const totalOrdinaryHours = (breakdown?.ordinary?.hours?.lavoro_giornaliera || 0) + 
+                                                 (breakdown?.ordinary?.hours?.viaggio_giornaliera || 0);
+                      const isOvertime = totalOrdinaryHours >= 8;
+                      if (isOvertime) {
+                        const rate = base * nightMultiplier;
+                        return `${rate.toFixed(2).replace('.', ',')} € x ${formatSafeHours(breakdown?.standby?.travelHours?.night)} (Straordinario notturno +35%) = ${breakdown?.standby?.travelEarnings?.night.toFixed(2).replace('.', ',')} €`;
+                      }
+                    }
+                    // Tariffa viaggio con maggiorazione notturna
+                    const rate = base * nightMultiplier * (settings.travelCompensationRate || 1.0);
+                    return `${rate.toFixed(2).replace('.', ',')} € x ${formatSafeHours(breakdown?.standby?.travelHours?.night)} (Viaggio notturno +25%) = ${breakdown?.standby?.travelEarnings?.night.toFixed(2).replace('.', ',')} €`;
+                  })()}
+                </Text>
+              )}
+            </View>
+          )}
+
+          {/* Viaggio sabato reperibilità */}
+          {breakdown?.standby?.travelHours?.saturday > 0 && (
+            <View style={styles.breakdownItem}>
+              <View style={styles.breakdownRow}>
+                <Text style={styles.breakdownLabel}>
+                  Viaggio sabato (+25%)
+                </Text>
+                <Text style={styles.breakdownValue}>{formatSafeHours(breakdown?.standby?.travelHours?.saturday)}</Text>
+              </View>
+              {breakdown?.standby?.travelEarnings?.saturday > 0 && breakdown?.standby?.travelHours?.saturday > 0 && (
+                <Text style={styles.rateCalc}>
+                  {(() => {
+                    const base = settings.contract?.hourlyRate || 16.41;
+                    const saturdayMultiplier = settings.contract?.overtimeRates?.saturday || 1.25;
+                    const rate = base * saturdayMultiplier * (settings.travelCompensationRate || 1.0);
+                    return `${rate.toFixed(2).replace('.', ',')} € x ${formatSafeHours(breakdown?.standby?.travelHours?.saturday)} (Viaggio sabato +25%) = ${breakdown?.standby?.travelEarnings?.saturday.toFixed(2).replace('.', ',')} €`;
+                  })()}
+                </Text>
+              )}
+            </View>
+          )}
+
+          {/* Viaggio festivo/domenica reperibilità */}
+          {breakdown?.standby?.travelHours?.holiday > 0 && (
+            <View style={styles.breakdownItem}>
+              <View style={styles.breakdownRow}>
+                <Text style={styles.breakdownLabel}>
+                  Viaggio festivo (+30%)
+                </Text>
+                <Text style={styles.breakdownValue}>{formatSafeHours(breakdown?.standby?.travelHours?.holiday)}</Text>
+              </View>
+              {breakdown?.standby?.travelEarnings?.holiday > 0 && breakdown?.standby?.travelHours?.holiday > 0 && (
+                <Text style={styles.rateCalc}>
+                  {(() => {
+                    const base = settings.contract?.hourlyRate || 16.41;
+                    const holidayMultiplier = settings.contract?.overtimeRates?.holiday || 1.3;
+                    const rate = base * holidayMultiplier * (settings.travelCompensationRate || 1.0);
+                    return `${rate.toFixed(2).replace('.', ',')} € x ${formatSafeHours(breakdown?.standby?.travelHours?.holiday)} (Viaggio festivo +30%) = ${breakdown?.standby?.travelEarnings?.holiday.toFixed(2).replace('.', ',')} €`;
+                  })()}
                 </Text>
               )}
             </View>
@@ -1056,8 +1307,8 @@ const TimeEntryForm = ({ route, navigation }) => {
     reperibilita: false,
     reperibilityManualOverride: false, // Nuovo flag per tracciare override manuale
     interventi: [],
-    pasti: { pranzo: true, cena: true },
-    trasferta: true,
+    pasti: { pranzo: false, cena: false },
+    trasferta: false,
     trasfertaManualOverride: false, // Flag per override manuale indennità trasferta
     trasfertaPercent: 1.0,
     note: '',
@@ -1119,8 +1370,10 @@ const TimeEntryForm = ({ route, navigation }) => {
         site_name: entryToEdit.site_name || entryToEdit.siteName || '',
         veicolo: entryToEdit.veicolo || entryToEdit.vehicleDriven || 'andata_ritorno',
         targa_veicolo: entryToEdit.targa_veicolo || entryToEdit.vehiclePlate || '',
-        viaggi: [
-          {
+        // 🚀 MULTI-TURNO: Ricostruisci array viaggi completo
+        viaggi: (() => {
+          // Turno principale dai campi del database
+          const primaryShift = {
             departure_company: entryToEdit.departure_company || entryToEdit.departureCompany || '',
             arrival_site: entryToEdit.arrival_site || entryToEdit.arrivalSite || '',
             work_start_1: entryToEdit.work_start_1 || entryToEdit.workStart1 || '',
@@ -1129,8 +1382,44 @@ const TimeEntryForm = ({ route, navigation }) => {
             work_end_2: entryToEdit.work_end_2 || entryToEdit.workEnd2 || '',
             departure_return: entryToEdit.departure_return || entryToEdit.departureReturn || '',
             arrival_company: entryToEdit.arrival_company || entryToEdit.arrivalCompany || '',
+          };
+          
+          // Turni aggiuntivi dal campo viaggi del database  
+          console.log("🔥 CARICAMENTO FORM: Debug campo viaggi dal DB:", {
+            viaggiRaw: entryToEdit.viaggi,
+            viaggiType: typeof entryToEdit.viaggi,
+            viaggiIsArray: Array.isArray(entryToEdit.viaggi),
+            viaggiLength: entryToEdit.viaggi?.length,
+            entryId: entryToEdit.id
+          });
+          
+          // 🚀 Parse viaggi dal database (può essere stringa JSON o array)
+          let additionalShifts = [];
+          if (entryToEdit.viaggi) {
+            if (typeof entryToEdit.viaggi === 'string') {
+              try {
+                additionalShifts = JSON.parse(entryToEdit.viaggi);
+                console.log("🔥 CARICAMENTO FORM: Viaggi parsati da stringa JSON:", additionalShifts);
+              } catch (error) {
+                console.warn("🔥 CARICAMENTO FORM: Errore parsing viaggi JSON:", error);
+                additionalShifts = [];
+              }
+            } else if (Array.isArray(entryToEdit.viaggi)) {
+              additionalShifts = entryToEdit.viaggi;
+              console.log("🔥 CARICAMENTO FORM: Viaggi già array:", additionalShifts);
+            }
           }
-        ],
+          
+          console.log("🔥 CARICAMENTO FORM: Ricostruendo viaggi da DB:", {
+            primaryShift,
+            additionalShifts,
+            additionalShiftsLength: additionalShifts.length,
+            totalShifts: 1 + additionalShifts.length
+          });
+          
+          // Combina turno principale + turni aggiuntivi
+          return [primaryShift, ...additionalShifts];
+        })(),
         reperibilita: entryToEdit.is_standby_day === 1 || entryToEdit.isStandbyDay === 1,
         reperibilityManualOverride: entryToEdit.reperibilityManualOverride === true || false,
         // Carica l'array di interventi direttamente dal DB
@@ -1169,7 +1458,7 @@ const TimeEntryForm = ({ route, navigation }) => {
       console.log('Auto-compilazione attivata per:', dayType);
       
       // Calcola la retribuzione giornaliera secondo CCNL
-      const ccnlDailyRate = settings?.contract?.dailyRate || 109.195;
+      const ccnlDailyRate = settings?.contract?.dailyRate || 107.69;
       
       // Applica i dati di auto-compilazione sempre per giorni di ferie/malattia/riposo/permesso
       setForm(prev => ({
@@ -1252,10 +1541,10 @@ const TimeEntryForm = ({ route, navigation }) => {
           isFixedDay: false,
           fixedEarnings: 0,
           dayType: 'lavorativa',
-          // Ripristina valori di default per giornata lavorativa
+          // Ripristina valori di default per giornata lavorativa - SENZA auto-attivazione
           veicolo: 'andata_ritorno',
-          pasti: { pranzo: true, cena: true },
-          trasferta: true,
+          pasti: { pranzo: false, cena: false },
+          trasferta: false,
         }));
       }
     }
@@ -1306,8 +1595,8 @@ const TimeEntryForm = ({ route, navigation }) => {
           fixedEarnings: 0,
           dayType: 'lavorativa',
           veicolo: 'andata_ritorno',
-          pasti: { pranzo: true, cena: true },
-          trasferta: true,
+          pasti: { pranzo: false, cena: false },
+          trasferta: false,
           site_name: '',
           note: ''
         }));
@@ -1389,22 +1678,13 @@ const TimeEntryForm = ({ route, navigation }) => {
         const viaggi = [...form.viaggi];
         viaggi[parseInt(idx)][field] = timeString;
         
-        // Funzionalità: Compilazione automatica "ora inizio 1 turno" quando viene inserito "ora arrivo in cantiere"
+        // Auto-compilazione orari specifici - sempre attiva
         if (field === 'arrival_site') {
-          // Verifica se "ora inizio 1 turno" è vuoto prima di riempirlo automaticamente
-          if (!viaggi[parseInt(idx)]['work_start_1']) {
-            console.log(`Auto-compilazione ora inizio 1° turno con: ${timeString}`);
-            viaggi[parseInt(idx)]['work_start_1'] = timeString;
-          }
-        }
-        
-        // Funzionalità: Compilazione automatica "ora partenza rientro" quando viene inserito "ora fine 2 turno"
-        if (field === 'work_end_2') {
-          // Verifica se "ora partenza rientro" è vuoto prima di riempirlo automaticamente
-          if (!viaggi[parseInt(idx)]['departure_return']) {
-            console.log(`Auto-compilazione ora partenza rientro con: ${timeString}`);
-            viaggi[parseInt(idx)]['departure_return'] = timeString;
-          }
+          // Quando inserisci "ora arrivo cantiere", auto-compila sempre "ora inizio 1° turno"
+          viaggi[parseInt(idx)].work_start_1 = timeString;
+        } else if (field === 'work_end_2') {
+          // Quando inserisci "ora fine 2° turno", auto-compila sempre "ora partenza rientro"
+          viaggi[parseInt(idx)].departure_return = timeString;
         }
         
         setForm({ ...form, viaggi });
@@ -1413,22 +1693,13 @@ const TimeEntryForm = ({ route, navigation }) => {
         const interventi = [...form.interventi];
         interventi[parseInt(idx)][field] = timeString;
         
-        // Applica la stessa logica anche agli interventi di reperibilità
+        // Auto-compilazione orari specifici per interventi - sempre attiva
         if (field === 'arrival_site') {
-          // Verifica se "ora inizio 1 turno" è vuoto prima di riempirlo automaticamente
-          if (!interventi[parseInt(idx)]['work_start_1']) {
-            console.log(`Auto-compilazione ora inizio 1° turno (intervento) con: ${timeString}`);
-            interventi[parseInt(idx)]['work_start_1'] = timeString;
-          }
-        }
-        
-        // Funzionalità: Compilazione automatica "ora partenza rientro" per interventi quando viene inserito "ora fine 2 turno"
-        if (field === 'work_end_2') {
-          // Verifica se "ora partenza rientro" è vuoto prima di riempirlo automaticamente
-          if (!interventi[parseInt(idx)]['departure_return']) {
-            console.log(`Auto-compilazione ora partenza rientro (intervento) con: ${timeString}`);
-            interventi[parseInt(idx)]['departure_return'] = timeString;
-          }
+          // Quando inserisci "ora arrivo cantiere", auto-compila sempre "ora inizio 1° turno"
+          interventi[parseInt(idx)].work_start_1 = timeString;
+        } else if (field === 'work_end_2') {
+          // Quando inserisci "ora fine 2° turno", auto-compila sempre "ora partenza rientro"
+          interventi[parseInt(idx)].departure_return = timeString;
         }
         
         setForm({ ...form, interventi });
@@ -1449,7 +1720,7 @@ const TimeEntryForm = ({ route, navigation }) => {
 
   // Aggiungi viaggio/lavoro
   const addViaggio = () => {
-    setForm({ ...form, viaggi: [...form.viaggi, {
+    const newViaggio = {
       departure_company: '',
       arrival_site: '',
       work_start_1: '',
@@ -1458,7 +1729,18 @@ const TimeEntryForm = ({ route, navigation }) => {
       work_end_2: '',
       departure_return: '',
       arrival_company: '',
-    }] });
+    };
+    
+    const newViaggi = [...form.viaggi, newViaggio];
+    
+    console.log("🚀 MULTI-TURNO: Aggiunto nuovo turno:", {
+      viaggiPrima: form.viaggi.length,
+      viaggiDopo: newViaggi.length,
+      nuovoViaggio: newViaggio,
+      tuttiIViaggi: newViaggi
+    });
+    
+    setForm({ ...form, viaggi: newViaggi });
   };
 
   // Aggiungi intervento reperibilità
@@ -1781,105 +2063,172 @@ const TimeEntryForm = ({ route, navigation }) => {
     );
   };
 
-  // Migliora la selezione tipo giornata e trasferta
+  // Auto-regole basate sugli orari inseriti dall'utente
   useEffect(() => {
-    // Unifica la logica in un solo useEffect per pasti e trasferta
-    const viaggiConPausa = form.viaggi.some(v => v.work_end_1 && v.work_start_2);
-    const viaggiValidi = form.viaggi.some(v => v.departure_company && v.arrival_site);
+    // Verifica se ci sono orari effettivamente inseriti nei turni o negli interventi
+    const hasTimeInputs = form.viaggi.some(v => 
+      v.departure_company || v.arrival_site || v.work_start_1 || v.work_end_1 || 
+      v.work_start_2 || v.work_end_2 || v.departure_return || v.arrival_company
+    ) || form.interventi.some(v => 
+      v.departure_company || v.arrival_site || v.work_start_1 || v.work_end_1 || 
+      v.work_start_2 || v.work_end_2 || v.departure_return || v.arrival_company
+    );
 
-    // --- PASTI ---
-    if (!viaggiConPausa) {
-      if (form.pasti.pranzo) setForm(f => ({ ...f, pasti: { ...f.pasti, pranzo: false } }));
-      if (form.pasti.cena) setForm(f => ({ ...f, pasti: { ...f.pasti, cena: false } }));
-    } else {
-      let autoPranzo = false, autoCena = false;
-      form.viaggi.forEach(v => {
-        if (v.work_end_1 && v.work_start_2) {
-          const [h1,m1] = v.work_end_1.split(':').map(Number);
-          const [h2,m2] = v.work_start_2.split(':').map(Number);
-          const end1 = h1*60+m1, start2 = h2*60+m2;
-          const pausa = start2-end1;
-          if (pausa>=30 && h1>=11 && h1<=14 && h2>=12 && h2<=15) autoPranzo = true;
-          if (pausa>=30 && h1>=18 && h1<=21 && h2>=19 && h2<=22) autoCena = true;
-        }
-      });
-      if (autoPranzo && !form.pasti.pranzo) setForm(f=>({...f,pasti:{...f.pasti,pranzo:true}}));
-      if (autoCena && !form.pasti.cena) setForm(f=>({...f,pasti:{...f.pasti,cena:true}}));
+    // Solo se l'utente ha inserito degli orari, applica le regole automatiche
+    if (!hasTimeInputs) {
+      // Nessun orario inserito - non attivare automaticamente nulla
+      return;
     }
 
-    // --- TRASFERTA ---
-    if (!viaggiValidi) {
-      if (form.trasferta && !form.trasfertaManualOverride) {
-        // Disattiva solo se non c'è un override manuale
-        setForm(f => ({ ...f, trasferta: false }));
+    // Logica per i pasti - basata su pause orarie reali tra fine 1° turno e prossimo orario
+    let autoPranzo = false, autoCena = false;
+    
+    // Analizza tutti i turni: viaggi principali + interventi reperibilità
+    const allShifts = [...form.viaggi, ...form.interventi];
+    
+    allShifts.forEach((v, index) => {
+      const shiftType = index < form.viaggi.length ? 'turno' : 'intervento';
+      const shiftNumber = index < form.viaggi.length ? index + 1 : index - form.viaggi.length + 1;
+      
+      if (v.work_end_1) {
+        // Trova il prossimo orario inserito dopo la fine del 1° turno
+        const nextTimeSlots = [
+          { field: 'work_start_2', time: v.work_start_2, source: `${shiftType} #${shiftNumber}` },
+          { field: 'departure_return', time: v.departure_return, source: `${shiftType} #${shiftNumber}` },
+          { field: 'arrival_company', time: v.arrival_company, source: `${shiftType} #${shiftNumber}` }
+        ].filter(slot => slot.time); // Solo orari effettivamente inseriti
+        
+        // Se non ci sono orari nel turno corrente, cerca nel turno successivo
+        if (nextTimeSlots.length === 0 && index < allShifts.length - 1) {
+          for (let nextIndex = index + 1; nextIndex < allShifts.length; nextIndex++) {
+            const nextShift = allShifts[nextIndex];
+            const nextShiftType = nextIndex < form.viaggi.length ? 'turno' : 'intervento';
+            const nextShiftNumber = nextIndex < form.viaggi.length ? nextIndex + 1 : nextIndex - form.viaggi.length + 1;
+            
+            if (nextShift.departure_company || nextShift.arrival_site || nextShift.work_start_1) {
+              // Prendi il primo orario disponibile del turno successivo
+              const firstAvailableTime = nextShift.departure_company || nextShift.arrival_site || nextShift.work_start_1;
+              nextTimeSlots.push({ 
+                field: 'next_shift_start', 
+                time: firstAvailableTime, 
+                source: `${nextShiftType} #${nextShiftNumber}` 
+              });
+              break;
+            }
+          }
+        }
+        
+        if (nextTimeSlots.length > 0) {
+          // Prendi il primo orario inserito dopo fine 1° turno
+          const nextTime = nextTimeSlots[0].time;
+          const nextSource = nextTimeSlots[0].source;
+          
+          const [h1, m1] = v.work_end_1.split(':').map(Number);
+          const [h2, m2] = nextTime.split(':').map(Number);
+          const end1 = h1 * 60 + m1;
+          const start2 = h2 * 60 + m2;
+          const pausa = start2 - end1;
+          
+          console.log(`Analisi pausa ${shiftType} #${shiftNumber}: Fine 1° turno ${v.work_end_1} → Prossimo orario ${nextTime} (da ${nextSource}) = ${pausa} min`);
+          
+          // Pausa pranzo (11:00-15:00, minimo 30 min)
+          if (pausa >= 30 && h1 >= 11 && h1 <= 14 && h2 >= 12 && h2 <= 15) {
+            autoPranzo = true;
+            console.log(`✅ Rilevata pausa pranzo automatica da ${shiftType} #${shiftNumber} → ${nextSource}`);
+          }
+          // Pausa cena (18:00-22:00, minimo 30 min)
+          if (pausa >= 30 && h1 >= 18 && h1 <= 21 && h2 >= 19 && h2 <= 22) {
+            autoCena = true;
+            console.log(`✅ Rilevata pausa cena automatica da ${shiftType} #${shiftNumber} → ${nextSource}`);
+          }
+        } else {
+          console.log(`Nessun orario successivo inserito dopo fine 1° turno ${shiftType} #${shiftNumber} - nessun rimborso automatico`);
+        }
       }
-    } else {
+    });
+    
+    // Attiva i pasti solo se identificate le pause e non sono già attivi
+    if (autoPranzo && !form.pasti.pranzo) {
+      setForm(f => ({ ...f, pasti: { ...f.pasti, pranzo: true } }));
+    }
+    if (autoCena && !form.pasti.cena) {
+      setForm(f => ({ ...f, pasti: { ...f.pasti, cena: true } }));
+    }
+    
+    // Disattiva i pasti se non ci sono più pause valide
+    if (!autoPranzo && form.pasti.pranzo) {
+      setForm(f => ({ ...f, pasti: { ...f.pasti, pranzo: false } }));
+    }
+    if (!autoCena && form.pasti.cena) {
+      setForm(f => ({ ...f, pasti: { ...f.pasti, cena: false } }));
+    }
+
+    // Logica per la trasferta - solo se ci sono viaggi validi E non c'è override manuale
+    const viaggiValidi = form.viaggi.some(v => v.departure_company && v.arrival_site);
+    
+    if (viaggiValidi && !form.trasfertaManualOverride) {
       // Calcolo ore viaggio e lavoro
       let totalWork = 0, totalTravel = 0, maxTravel = 0;
+      
       form.viaggi.forEach(v => {
         // Ore lavoro
         if (v.work_start_1 && v.work_end_1) {
           const [h1, m1] = v.work_start_1.split(':').map(Number);
           const [h2, m2] = v.work_end_1.split(':').map(Number);
-          totalWork += ((h2*60+m2)-(h1*60+m1))/60;
+          totalWork += ((h2 * 60 + m2) - (h1 * 60 + m1)) / 60;
         }
         if (v.work_start_2 && v.work_end_2) {
           const [h1, m1] = v.work_start_2.split(':').map(Number);
           const [h2, m2] = v.work_end_2.split(':').map(Number);
-          totalWork += ((h2*60+m2)-(h1*60+m1))/60;
+          totalWork += ((h2 * 60 + m2) - (h1 * 60 + m1)) / 60;
         }
+        
         // Ore viaggio
         if (v.departure_company && v.arrival_site) {
           const [h1, m1] = v.departure_company.split(':').map(Number);
           const [h2, m2] = v.arrival_site.split(':').map(Number);
-          const travel = ((h2*60+m2)-(h1*60+m1))/60;
+          const travel = ((h2 * 60 + m2) - (h1 * 60 + m1)) / 60;
           totalTravel += travel;
           if (travel > maxTravel) maxTravel = travel;
         }
         if (v.departure_return && v.arrival_company) {
           const [h1, m1] = v.departure_return.split(':').map(Number);
           const [h2, m2] = v.arrival_company.split(':').map(Number);
-          const travel = ((h2*60+m2)-(h1*60+m1))/60;
+          const travel = ((h2 * 60 + m2) - (h1 * 60 + m1)) / 60;
           totalTravel += travel;
           if (travel > maxTravel) maxTravel = travel;
         }
       });
-      // Giornata intera: lavoro+viaggio >=8h oppure viaggio >=8h senza pause
+      
+      // Giornata intera: lavoro+viaggio >=8h oppure viaggio >=8h
       const giornataIntera = (totalWork + totalTravel) >= 8 || maxTravel >= 8;
       
-           
       // Verifica se è un giorno domenicale o festivo
       const dateObj = new Date(form.date.split('/').reverse().join('-'));
       const isSunday = dateObj.getDay() === 0;
-      const isHoliday = false; // Questa è una semplificazione, idealmente chiameresti una funzione per verificare se è festivo
-      const isSpecialDay = isSunday || isHoliday;
+      const isSpecialDay = isSunday; // Semplificato per ora
       
-      // Controlla se l'indennità di trasferta può essere applicata nei giorni speciali dalle impostazioni
+      // Controlla le impostazioni per giorni speciali
       const canApplyOnSpecialDays = settings?.travelAllowance?.applyOnSpecialDays || false;
       
-      // Attiva o disattiva l'indennità di trasferta in base alle condizioni
-      // Rispetta trasfertaManualOverride se presente
-      if (form.trasfertaManualOverride) {
-        // Non fare nulla, il valore è stato impostato manualmente
-        console.log("Rispetto override manuale trasferta:", form.trasferta);
-      } else if (isSpecialDay && !canApplyOnSpecialDays) {
-        // Disattiva l'indennità nei giorni speciali se non è permesso dalle impostazioni
-        if (form.trasferta) setForm(f => ({ ...f, trasferta: false }));
-      } else if (totalTravel > 0 && !form.trasferta) {
-        // Attiva l'indennità se c'è viaggio e non siamo in un giorno speciale (o è permesso applicarla)
-        setForm(f => ({ ...f, trasferta: true }));
+      // Attiva trasferta solo se appropriato e se c'è effettivamente del viaggio
+      if (totalTravel > 0 && (!isSpecialDay || canApplyOnSpecialDays)) {
+        if (!form.trasferta) {
+          setForm(f => ({ 
+            ...f, 
+            trasferta: true,
+            trasfertaPercent: giornataIntera ? 1.0 : 0.5
+          }));
+        } else {
+          // Aggiorna solo la percentuale se già attiva
+          setForm(f => ({ 
+            ...f, 
+            trasfertaPercent: giornataIntera ? 1.0 : 0.5
+          }));
+        }
       }
-      
-      // Salva la percentuale per CalculationService (es: 1.0 o 0.5)
-      // Assicurati di non sovrascrivere trasfertaManualOverride
-      setForm(f => ({ 
-        ...f, 
-        trasfertaPercent: giornataIntera ? 1.0 : 0.5,
-        // Mantieni lo stato dell'override manuale
-        trasfertaManualOverride: f.trasfertaManualOverride  
-      }));
     }
-  }, [form.viaggi]);
+  }, [form.viaggi, form.interventi, form.trasfertaManualOverride, form.pasti, settings]);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -2062,17 +2411,26 @@ const TimeEntryForm = ({ route, navigation }) => {
               <View style={styles.shiftHeader}>
                 <MaterialCommunityIcons name="briefcase-outline" size={18} color="#4CAF50" />
                 <Text style={styles.shiftTitle}>Turno #{idx + 1}</Text>
-                {form.viaggi.length > 1 && (
-                  <TouchableOpacity
-                    style={styles.removeShiftButton}
-                    onPress={() => {
-                      const newViaggi = form.viaggi.filter((_, i) => i !== idx);
-                      setForm({ ...form, viaggi: newViaggi });
-                    }}
-                  >
-                    <MaterialCommunityIcons name="close" size={16} color="#f44336" />
-                  </TouchableOpacity>
-                )}
+                <TouchableOpacity
+                  style={styles.removeShiftButton}
+                  onPress={() => {
+                    const newViaggi = form.viaggi.filter((_, i) => i !== idx);
+                    // Se rimane solo un turno vuoto, mantienilo, altrimenti se rimangono 0 turni, crea un turno vuoto
+                    const finalViaggi = newViaggi.length === 0 ? [{
+                      departure_company: '',
+                      arrival_site: '',
+                      work_start_1: '',
+                      work_end_1: '',
+                      work_start_2: '',
+                      work_end_2: '',
+                      departure_return: '',
+                      arrival_company: '',
+                    }] : newViaggi;
+                    setForm({ ...form, viaggi: finalViaggi });
+                  }}
+                >
+                  <MaterialCommunityIcons name="close" size={16} color="#f44336" />
+                </TouchableOpacity>
               </View>
               
               <View style={styles.timeFieldsGrid}>
@@ -2242,17 +2600,15 @@ const TimeEntryForm = ({ route, navigation }) => {
                   <View style={styles.interventoHeader}>
                     <MaterialCommunityIcons name="phone-ring" size={16} color="#FF9800" />
                     <Text style={styles.interventoTitle}>Intervento #{idx + 1}</Text>
-                    {form.interventi.length > 1 && (
-                      <TouchableOpacity
-                        style={styles.removeInterventoButton}
-                        onPress={() => {
-                          const newInterventi = form.interventi.filter((_, i) => i !== idx);
-                          setForm({ ...form, interventi: newInterventi });
-                        }}
-                      >
-                        <MaterialCommunityIcons name="close" size={16} color="#f44336" />
-                      </TouchableOpacity>
-                    )}
+                    <TouchableOpacity
+                      style={styles.removeInterventoButton}
+                      onPress={() => {
+                        const newInterventi = form.interventi.filter((_, i) => i !== idx);
+                        setForm({ ...form, interventi: newInterventi });
+                      }}
+                    >
+                      <MaterialCommunityIcons name="close" size={16} color="#f44336" />
+                    </TouchableOpacity>
                   </View>
                   
                   <View style={styles.timeFieldsGrid}>
@@ -2629,6 +2985,16 @@ const TimeEntryForm = ({ route, navigation }) => {
           onPress={async () => {
             try {
               const viaggi = form.viaggi[0] || {};
+              
+              // 🚀 MULTI-TURNO: Estrai turni aggiuntivi per salvataggio
+              const additionalShifts = form.viaggi.slice(1) || [];
+              console.log("🔥 SALVATAGGIO MULTI-TURNO:", {
+                totalViaggi: form.viaggi.length,
+                primaryShift: viaggi,
+                additionalShifts: additionalShifts,
+                willSaveAdditionalShifts: additionalShifts.length > 0
+              });
+              
               const entry = {
                 date: (() => {
                   const [d, m, y] = form.date.split('/');
@@ -2644,6 +3010,8 @@ const TimeEntryForm = ({ route, navigation }) => {
                 workEnd2: viaggi.work_end_2 || '',
                 departureReturn: viaggi.departure_return || '',
                 arrivalCompany: viaggi.arrival_company || '',
+                // 🚀 MULTI-TURNO: Salva turni aggiuntivi
+                viaggi: additionalShifts,
                 interventi: form.interventi || [],
                 mealLunchVoucher: form.pasti.pranzo && !(mealCash.pranzo && parseFloat(mealCash.pranzo) > 0) ? 1 : 0,
                 mealLunchCash: mealCash.pranzo && parseFloat(mealCash.pranzo) > 0 ? parseFloat(mealCash.pranzo.replace(',','.')) : 0,
@@ -2661,7 +3029,7 @@ const TimeEntryForm = ({ route, navigation }) => {
                 dayType,
                 // Nuovi campi per giorni fissi
                 isFixedDay: form.isFixedDay || ['ferie', 'malattia', 'riposo', 'permesso'].includes(dayType),
-                fixedEarnings: form.fixedEarnings || ((['ferie', 'malattia', 'riposo', 'permesso'].includes(dayType)) ? (settings?.contract?.dailyRate || 109.195) : 0)
+                fixedEarnings: form.fixedEarnings || ((['ferie', 'malattia', 'riposo', 'permesso'].includes(dayType)) ? (settings?.contract?.dailyRate || 107.69) : 0)
               };
               
               const settingsObj = settings || {};

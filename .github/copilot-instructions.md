@@ -30,9 +30,9 @@ This is a React Native Expo application for tracking work hours with automatic s
 
 ## Salary Calculation Logic
 Base the calculations on Italian CCNL Metalmeccanico PMI Level 5 (configurable for multi-user):
-- Monthly salary: €2,839.07 (Level 5 standard, user configurable)
-- Daily rate: €109.195 (calculated from monthly)
-- Hourly rate: €16.41081 (calculated from monthly)
+- Monthly salary: €2,800.00 (Level 5 standard, user configurable)
+- Daily rate: €107.69 (calculated from monthly)
+- Hourly rate: €16.15 (calculated from monthly)
 - Overtime rates: +20% day, +25% night until 22h, +35% night after 22h
 - Travel compensation: 100% of hourly rate (configurable per user)
 - Multi-user support: each user can configure their own contract parameters

@@ -187,7 +187,7 @@ class HolidayService {
    */
   calculateHolidayPay(settings) {
     // Per i giorni festivi feriali si applica la retribuzione giornaliera normale
-    return settings?.contract?.dailyRate || 109.195;
+    return settings?.contract?.dailyRate || 107.69;
   }
 
   /**

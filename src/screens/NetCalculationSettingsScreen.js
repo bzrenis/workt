@@ -21,7 +21,7 @@ const NetCalculationSettingsScreen = ({ navigation }) => {
   const [useActualAmount, setUseActualAmount] = useState(
     settings?.netCalculation?.useActualAmount ?? false
   );
-  const [previewAmount] = useState(2839.07); // Esempio per preview
+  const [previewAmount] = useState(2800.00); // Esempio per preview
 
   // Debug caricamento impostazioni
   React.useEffect(() => {

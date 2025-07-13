@@ -14,53 +14,56 @@ import { useSettings } from '../hooks';
 
 const TravelSettingsScreen = ({ navigation }) => {
   const { settings, updatePartialSettings, isLoading } = useSettings();
-  const [selectedOption, setSelectedOption] = useState('TRAVEL_SEPARATE');
-  const [internalTravelOption, setInternalTravelOption] = useState('AS_WORK');
+  const [selectedOption, setSelectedOption] = useState('TRAVEL_RATE_EXCESS');
+  const [multiShiftTravelAsWork, setMultiShiftTravelAsWork] = useState(false);
 
   useEffect(() => {
     if (settings.travelHoursSetting) {
       setSelectedOption(settings.travelHoursSetting);
     }
-    if (settings.internalTravelSetting) {
-      setInternalTravelOption(settings.internalTravelSetting);
+    if (settings.multiShiftTravelAsWork !== undefined) {
+      setMultiShiftTravelAsWork(settings.multiShiftTravelAsWork);
     }
   }, [settings]);
 
   const travelOptions = [
     {
-      id: 'AS_WORK',
-      title: 'Come ore lavorative',
-      description: 'Le ore di viaggio vengono considerate come ore lavorative normali',
-      example: 'Esempio: 2h viaggio + 6h lavoro = 8h retribuzione giornaliera'
+      id: 'TRAVEL_RATE_EXCESS',
+      title: '🚗 Viaggio eccedente con tariffa viaggio',
+      description: 'Le prime 8 ore (lavoro + viaggio) sono retribuite con tariffa giornaliera. Le ore di viaggio eccedenti le 8h totali sono pagate con tariffa viaggio.',
+      example: 'Esempio: 2h viaggio + 8h lavoro = 8h retribuzione giornaliera + 2h retribuzione viaggio',
+      isRecommended: true
     },
     {
-      id: 'TRAVEL_SEPARATE',
-      title: 'Viaggio con tariffa separata',
-      description: 'Le ore di viaggio vengono sempre pagate con tariffa viaggio, indipendentemente dalle ore totali',
+      id: 'TRAVEL_RATE_ALL',
+      title: '🛣️ Viaggio sempre con tariffa viaggio',
+      description: 'Tutte le ore di viaggio sono sempre pagate con tariffa viaggio specifica, indipendentemente dalle ore totali.',
       example: 'Esempio: 2h viaggio + 6h lavoro = 6h retribuzione giornaliera + 2h retribuzione viaggio'
     },
     {
-      id: 'EXCESS_AS_TRAVEL',
-      title: 'Eccedenza come retribuzione viaggio',
-      description: 'Calcolo di 8 ore totali (viaggio + lavoro), le ore eccedenti vengono pagate con retribuzione viaggio',
-      example: 'Esempio: 2h viaggio + 8h lavoro = 8h retribuzione giornaliera + 2h retribuzione viaggio'
-    },
-    {
-      id: 'EXCESS_AS_OVERTIME',
-      title: 'Eccedenza come straordinario',
-      description: 'Calcolo di 8 ore totali (viaggio + lavoro), le ore eccedenti vengono pagate come straordinario',
-      example: 'Esempio: 2h viaggio + 8h lavoro = 8h retribuzione giornaliera + 2h straordinario'
+      id: 'OVERTIME_EXCESS',
+      title: '⏰ Viaggio eccedente come straordinario',
+      description: 'Le prime 8 ore (lavoro + viaggio) sono retribuite con tariffa giornaliera. Le ore di viaggio eccedenti le 8h totali sono pagate come straordinari.',
+      example: 'Esempio: 2h viaggio + 8h lavoro = 8h retribuzione giornaliera + 2h straordinario (+20%)'
     }
   ];
 
   const handleSave = async () => {
     try {
+      console.log('🚀 TravelSettingsScreen - Salvando nuove impostazioni viaggio:', {
+        travelHoursSetting: selectedOption,
+        multiShiftTravelAsWork: multiShiftTravelAsWork,
+        settingsCorrente: settings.travelHoursSetting
+      });
+      
       await updatePartialSettings({
         travelHoursSetting: selectedOption,
-        internalTravelSetting: internalTravelOption
+        multiShiftTravelAsWork: multiShiftTravelAsWork
       });
 
-      Alert.alert('Successo', 'Impostazioni ore di viaggio salvate correttamente', [
+      console.log('✅ TravelSettingsScreen - Nuove impostazioni salvate con successo');
+
+      Alert.alert('Successo', 'Impostazioni ore di viaggio aggiornate correttamente', [
         { text: 'OK', onPress: () => navigation.goBack() }
       ]);
     } catch (error) {
@@ -74,7 +77,8 @@ const TravelSettingsScreen = ({ navigation }) => {
       key={option.id}
       style={[
         styles.optionCard,
-        selectedOption === option.id && styles.selectedOption
+        selectedOption === option.id && styles.selectedOption,
+        option.isRecommended && styles.recommendedOption
       ]}
       onPress={() => setSelectedOption(option.id)}
     >
@@ -85,6 +89,11 @@ const TravelSettingsScreen = ({ navigation }) => {
           )}
         </View>
         <Text style={styles.optionTitle}>{option.title}</Text>
+        {option.isRecommended && (
+          <View style={styles.recommendedBadge}>
+            <Text style={styles.recommendedText}>CONSIGLIATA</Text>
+          </View>
+        )}
       </View>
       
       <Text style={styles.optionDescription}>{option.description}</Text>
@@ -122,13 +131,51 @@ const TravelSettingsScreen = ({ navigation }) => {
             <Text style={styles.infoTitle}>Come funziona</Text>
           </View>
           <Text style={styles.infoText}>
-            Le ore di viaggio includono il tempo per raggiungere il cantiere (andata) e il tempo per tornare in azienda (ritorno). 
-            Seleziona come vuoi che vengano calcolate nel sistema di retribuzione.
+            Le ore di viaggio includono gli spostamenti per raggiungere i cantieri. 
+            Seleziona la logica di calcolo più adatta al tuo contratto e tipo di lavoro.
           </Text>
         </View>
 
         <View style={styles.optionsContainer}>
+          <Text style={styles.sectionTitle}>Logica di Calcolo</Text>
           {travelOptions.map(renderOption)}
+        </View>
+
+        {/* Sezione Opzioni Multi-turno */}
+        <View style={styles.multiShiftContainer}>
+          <Text style={styles.sectionTitle}>Opzioni Multi-turno</Text>
+          <TouchableOpacity
+            style={[
+              styles.multiShiftCard,
+              multiShiftTravelAsWork && styles.selectedMultiShift
+            ]}
+            onPress={() => setMultiShiftTravelAsWork(!multiShiftTravelAsWork)}
+          >
+            <View style={styles.multiShiftHeader}>
+              <View style={[
+                styles.multiShiftCheckbox,
+                multiShiftTravelAsWork && styles.multiShiftCheckboxSelected
+              ]}>
+                {multiShiftTravelAsWork && (
+                  <Ionicons name="checkmark" size={16} color="white" />
+                )}
+              </View>
+              <Text style={styles.multiShiftTitle}>
+                🔄 Viaggi multi-turno come ore lavoro
+              </Text>
+            </View>
+            <Text style={styles.multiShiftDescription}>
+              Gli spostamenti tra cantieri durante la stessa giornata lavorativa 
+              sono considerati ore di lavoro invece che viaggi. Solo andata/ritorno 
+              dall'azienda vengono calcolati come viaggi.
+            </Text>
+            <View style={styles.exampleContainer}>
+              <Text style={styles.exampleLabel}>Esempio:</Text>
+              <Text style={styles.exampleText}>
+                Azienda → Cantiere A (viaggio) → Cantiere B (lavoro) → Cantiere C (lavoro) → Azienda (viaggio)
+              </Text>
+            </View>
+          </TouchableOpacity>
         </View>
 
         <View style={styles.detailsContainer}>
@@ -149,7 +196,13 @@ const TravelSettingsScreen = ({ navigation }) => {
             <View style={styles.detailRow}>
               <Ionicons name="trending-up" size={20} color="#666" />
               <Text style={styles.detailText}>
-                Straordinari: calcolati in base all'orario di lavoro
+                Straordinari: +20% retribuzione oraria (giorno), +25% (sera), +35% (notte)
+              </Text>
+            </View>
+            <View style={styles.detailRow}>
+              <Ionicons name="card" size={20} color="#666" />
+              <Text style={styles.detailText}>
+                Retribuzione giornaliera: €{(settings.contract?.dailyRate || 107.69).toFixed(2)}
               </Text>
             </View>
           </View>
@@ -222,6 +275,14 @@ const styles = StyleSheet.create({
   },
   optionsContainer: {
     paddingHorizontal: 15,
+    marginBottom: 20,
+  },
+  sectionTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#333',
+    marginBottom: 15,
+    marginTop: 5,
   },
   optionCard: {
     backgroundColor: 'white',
@@ -239,6 +300,9 @@ const styles = StyleSheet.create({
   selectedOption: {
     borderColor: '#2196F3',
     backgroundColor: '#f3f9ff',
+  },
+  recommendedOption: {
+    borderColor: '#4CAF50',
   },
   optionHeader: {
     flexDirection: 'row',
@@ -262,10 +326,73 @@ const styles = StyleSheet.create({
     backgroundColor: '#2196F3',
   },
   optionTitle: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '600',
     color: '#333',
     flex: 1,
+  },
+  recommendedBadge: {
+    backgroundColor: '#4CAF50',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 12,
+  },
+  recommendedText: {
+    color: 'white',
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  // Stili Multi-turno
+  multiShiftContainer: {
+    paddingHorizontal: 15,
+    marginBottom: 20,
+  },
+  multiShiftCard: {
+    backgroundColor: 'white',
+    borderRadius: 12,
+    padding: 15,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+    borderWidth: 2,
+    borderColor: '#e0e0e0',
+  },
+  selectedMultiShift: {
+    borderColor: '#FF9800',
+    backgroundColor: '#fff8f0',
+  },
+  multiShiftHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  multiShiftCheckbox: {
+    width: 20,
+    height: 20,
+    borderRadius: 4,
+    borderWidth: 2,
+    borderColor: '#FF9800',
+    backgroundColor: 'transparent',
+    marginRight: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  multiShiftCheckboxSelected: {
+    backgroundColor: '#FF9800',
+  },
+  multiShiftTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    flex: 1,
+  },
+  multiShiftDescription: {
+    fontSize: 14,
+    color: '#666',
+    lineHeight: 20,
+    marginBottom: 10,
   },
   optionDescription: {
     fontSize: 14,

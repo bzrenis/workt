@@ -97,6 +97,12 @@ const ContractSettingsScreen = ({ navigation }) => {
     const ordinaryHoliday = officialHourlyRate * 1.30; // Lavoro ordinario festivo +30%
     const ordinarySunday = officialHourlyRate * 1.30; // Lavoro ordinario domenicale +30%
     const ordinaryNightHoliday = officialHourlyRate * 1.60; // Lavoro ordinario notturno festivo +60%
+    
+    // Calcoli per maggiorazioni composte reperibilità
+    const standbyOrdinarySaturdayNight = officialHourlyRate * 1.25 * 1.25; // Sabato (25%) + notturno (25%) = +56%
+    const standbyOvertimeSaturdayNight = officialHourlyRate * 1.25 * 1.35; // Sabato (25%) + notturno straord (35%) = +69%
+    const standbyOrdinaryHolidayNight = officialHourlyRate * 1.25 * 1.30; // Notturno (25%) + festivo (30%) = +62%
+    const standbyOvertimeHolidayNight = officialHourlyRate * 1.35 * 1.30; // Notturno straord (35%) + festivo (30%) = +76%
 
     setCalculatedRates({
       monthlySalary: monthly,
@@ -111,6 +117,10 @@ const ContractSettingsScreen = ({ navigation }) => {
       ordinaryHoliday,
       ordinarySunday,
       ordinaryNightHoliday,
+      standbyOrdinarySaturdayNight,
+      standbyOvertimeSaturdayNight,
+      standbyOrdinaryHolidayNight,
+      standbyOvertimeHolidayNight,
     });
   };
 
@@ -303,7 +313,7 @@ const ContractSettingsScreen = ({ navigation }) => {
                 style={styles.textInput}
                 value={formData.monthlySalary}
                 onChangeText={handleMonthlySalaryChange}
-                placeholder="2839.07"
+                placeholder="2800.00"
                 keyboardType="numeric"
                 returnKeyType="next"
               />
@@ -375,34 +385,24 @@ const ContractSettingsScreen = ({ navigation }) => {
                         <Text style={{flex:1, textAlign:'right'}}>{formatCurrency(calculatedRates.overtimeNightUntil22)}</Text>
                       </View>
                       <View style={{flexDirection:'row', padding:4}}>
-                        <Text style={{flex:2}}>Lavoro ordinario notturno (dopo le 22)</Text>
+                        <Text style={{flex:2}}>Straordinario notturno (dopo le 22)</Text>
                         <Text style={{flex:1, textAlign:'right'}}>+35%</Text>
                         <Text style={{flex:1, textAlign:'right'}}>{formatCurrency(calculatedRates.overtimeNightAfter22)}</Text>
                       </View>
                       <View style={{flexDirection:'row', padding:4, backgroundColor:'#f9f9f9'}}>
-                        <Text style={{flex:2}}>Straordinario festivo</Text>
-                        <Text style={{flex:1, textAlign:'right'}}>+50%</Text>
-                        <Text style={{flex:1, textAlign:'right'}}>{formatCurrency(calculatedRates.overtimeHoliday)}</Text>
+                        <Text style={{flex:2}}>Lavoro sabato</Text>
+                        <Text style={{flex:1, textAlign:'right'}}>+25%</Text>
+                        <Text style={{flex:1, textAlign:'right'}}>{formatCurrency(calculatedRates.officialHourlyRate * 1.25)}</Text>
                       </View>
                       <View style={{flexDirection:'row', padding:4}}>
-                        <Text style={{flex:2}}>Straordinario domenicale</Text>
-                        <Text style={{flex:1, textAlign:'right'}}>+50%</Text>
-                        <Text style={{flex:1, textAlign:'right'}}>{formatCurrency(calculatedRates.overtimeSunday)}</Text>
-                      </View>
-                      <View style={{flexDirection:'row', padding:4, backgroundColor:'#f9f9f9'}}>
                         <Text style={{flex:2}}>Lavoro ordinario festivo</Text>
                         <Text style={{flex:1, textAlign:'right'}}>+30%</Text>
                         <Text style={{flex:1, textAlign:'right'}}>{formatCurrency(calculatedRates.ordinaryHoliday)}</Text>
                       </View>
-                      <View style={{flexDirection:'row', padding:4}}>
+                      <View style={{flexDirection:'row', padding:4, backgroundColor:'#f9f9f9'}}>
                         <Text style={{flex:2}}>Lavoro ordinario domenicale</Text>
                         <Text style={{flex:1, textAlign:'right'}}>+30%</Text>
                         <Text style={{flex:1, textAlign:'right'}}>{formatCurrency(calculatedRates.ordinarySunday)}</Text>
-                      </View>
-                      <View style={{flexDirection:'row', padding:4, backgroundColor:'#f9f9f9'}}>
-                        <Text style={{flex:2}}>Lavoro ordinario notturno festivo</Text>
-                        <Text style={{flex:1, textAlign:'right'}}>+60%</Text>
-                        <Text style={{flex:1, textAlign:'right'}}>{formatCurrency(calculatedRates.ordinaryNightHoliday)}</Text>
                       </View>
                     </>
                   ) : (
@@ -411,11 +411,56 @@ const ContractSettingsScreen = ({ navigation }) => {
                     </View>
                   )}
                 </View>
+                
+                {/* Tabella maggiorazioni composte reperibilità */}
+                <Text style={{fontWeight:'bold', fontSize:15, marginBottom:4, marginTop:12}}>Maggiorazioni Composte Reperibilità</Text>
+                <View style={{borderWidth:1, borderColor:'#e0e0e0', borderRadius:8, marginBottom:8}}>
+                  {['standbyOrdinarySaturdayNight','standbyOvertimeSaturdayNight','standbyOrdinaryHolidayNight','standbyOvertimeHolidayNight'].every(k => typeof calculatedRates[k] === 'number') ? (
+                    <>
+                      <View style={{flexDirection:'row', padding:4, backgroundColor:'#fff3e0'}}>
+                        <Text style={{flex:2, fontWeight:'bold'}}>Tipo Combinato</Text>
+                        <Text style={{flex:1, fontWeight:'bold', textAlign:'right'}}>Calcolo</Text>
+                        <Text style={{flex:1, fontWeight:'bold', textAlign:'right'}}>Valore</Text>
+                      </View>
+                      <View style={{flexDirection:'row', padding:4}}>
+                        <Text style={{flex:2}}>Sabato notturno ordinario</Text>
+                        <Text style={{flex:1, textAlign:'right', fontSize:12}}>+25% × +25% = +56%</Text>
+                        <Text style={{flex:1, textAlign:'right'}}>{formatCurrency(calculatedRates.standbyOrdinarySaturdayNight)}</Text>
+                      </View>
+                      <View style={{flexDirection:'row', padding:4, backgroundColor:'#f9f9f9'}}>
+                        <Text style={{flex:2}}>Sabato notturno straordinario</Text>
+                        <Text style={{flex:1, textAlign:'right', fontSize:12}}>+25% × +35% = +69%</Text>
+                        <Text style={{flex:1, textAlign:'right'}}>{formatCurrency(calculatedRates.standbyOvertimeSaturdayNight)}</Text>
+                      </View>
+                      <View style={{flexDirection:'row', padding:4}}>
+                        <Text style={{flex:2}}>Festivo notturno ordinario</Text>
+                        <Text style={{flex:1, textAlign:'right', fontSize:12}}>+25% × +30% = +62%</Text>
+                        <Text style={{flex:1, textAlign:'right'}}>{formatCurrency(calculatedRates.standbyOrdinaryHolidayNight)}</Text>
+                      </View>
+                      <View style={{flexDirection:'row', padding:4, backgroundColor:'#f9f9f9'}}>
+                        <Text style={{flex:2}}>Festivo notturno straordinario</Text>
+                        <Text style={{flex:1, textAlign:'right', fontSize:12}}>+35% × +30% = +76%</Text>
+                        <Text style={{flex:1, textAlign:'right'}}>{formatCurrency(calculatedRates.standbyOvertimeHolidayNight)}</Text>
+                      </View>
+                    </>
+                  ) : (
+                    <View style={{padding:8}}>
+                      <Text style={{color:'red'}}>Dati maggiorazioni composte non disponibili.</Text>
+                    </View>
+                  )}
+                </View>
+                
+                <View style={{marginTop: 8, backgroundColor: '#fff3e0', borderRadius: 8, padding: 8}}>
+                  <Text style={{fontSize: 12, color: '#f57c00', fontWeight: 'bold'}}>ℹ️ Maggiorazioni Composte:</Text>
+                  <Text style={{fontSize: 12, color: '#f57c00'}}>
+                    Le maggiorazioni composte si applicano durante la reperibilità quando si combinano più fattori (es. sabato + notte). Il calcolo dipende se il lavoro supera le 8h giornaliere (straordinario) o meno (ordinario).
+                  </Text>
+                </View>
               </View>
               <View style={{marginTop: 10, backgroundColor: '#f0f4ff', borderRadius: 8, padding: 10}}>
-                <Text style={{fontSize: 13, color: '#333', fontWeight: 'bold'}}>Nota:</Text>
+                <Text style={{fontSize: 13, color: '#333', fontWeight: 'bold'}}>Nota CCNL:</Text>
                 <Text style={{fontSize: 13, color: '#333'}}>
-                  Le maggiorazioni CCNL Metalmeccanico PMI sono: straordinario diurno +20%, notturno +50%, festivo +50%, domenicale +50%, lavoro ordinario notturno +25%, festivo +30%, domenicale +30%, notturno festivo +60%. La retribuzione oraria ufficiale si calcola come mensile diviso 173 ore (fonte: CCNL Metalmeccanico, FIM-CISL, UILM, busta paga reale).
+                  Le maggiorazioni CCNL Metalmeccanico PMI sono: straordinario diurno +20%, notturno +25%/+35%, sabato +25%, festivo +30%. Per la reperibilità si applicano maggiorazioni composte quando si combinano più fattori (es. sabato + notte = +56%). La retribuzione oraria ufficiale si calcola come mensile diviso 173 ore (fonte: CCNL Metalmeccanico).
                 </Text>
               </View>
             </View>

@@ -5,7 +5,7 @@
  * Include fallback a calcoli teorici per compatibilità.
  * 
  * PRIORITÀ:
- * 1. 🎯 Dati reali da buste paga B.Z. S.R.L. (marzo-maggio 2025)
+ * 1. 🎯 Dati reali da buste paga CCNL (marzo-maggio 2025)
  * 2. 📊 Calcolo teorico CCNL con trattenute standard
  * 3. 🚀 Stima rapida per performance
  * 
@@ -38,7 +38,7 @@ export class NetEarningsCalculator {
             ...realCalculation,
             method: 'real_payslip_quick',
             priority: 1,
-            dataSource: 'Buste paga B.Z. S.R.L.'
+            dataSource: 'Buste paga CCNL'
           };
         }
       }

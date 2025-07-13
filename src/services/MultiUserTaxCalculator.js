@@ -72,7 +72,7 @@ export class UserFiscalProfile {
     this.contractInfo = {
       ccnl: userData.ccnl || 'METALMECCANICO_PMI_L5',
       level: userData.level || 5,
-      monthlySalary: userData.monthlySalary || 2839.07,
+      monthlySalary: userData.monthlySalary || 2800.00,
       hireDateYear: userData.hireDateYear || 2024
     };
     

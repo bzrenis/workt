@@ -38,27 +38,40 @@ export class TimeCalculator {
     
     // First work shift
     if (workEntry.workStart1 && workEntry.workEnd1) {
-      totalWorkMinutes += this.calculateTimeDifference(workEntry.workStart1, workEntry.workEnd1);
+      const minutes = this.calculateTimeDifference(workEntry.workStart1, workEntry.workEnd1);
+      totalWorkMinutes += minutes;
+      console.log(`[TimeCalculator] Main shift 1: ${workEntry.workStart1}-${workEntry.workEnd1} = ${minutes/60}h`);
     }
     
     // Second work shift
     if (workEntry.workStart2 && workEntry.workEnd2) {
-      totalWorkMinutes += this.calculateTimeDifference(workEntry.workStart2, workEntry.workEnd2);
+      const minutes = this.calculateTimeDifference(workEntry.workStart2, workEntry.workEnd2);
+      totalWorkMinutes += minutes;
+      console.log(`[TimeCalculator] Main shift 2: ${workEntry.workStart2}-${workEntry.workEnd2} = ${minutes/60}h`);
     }
 
     // Additional work shifts from viaggi array
     if (workEntry.viaggi && Array.isArray(workEntry.viaggi)) {
-      workEntry.viaggi.forEach(viaggio => {
+      console.log(`[TimeCalculator] 🔥 PROCESSING ${workEntry.viaggi.length} VIAGGI:`, workEntry.viaggi);
+      workEntry.viaggi.forEach((viaggio, index) => {
         if (viaggio.work_start_1 && viaggio.work_end_1) {
-          totalWorkMinutes += this.calculateTimeDifference(viaggio.work_start_1, viaggio.work_end_1);
+          const minutes = this.calculateTimeDifference(viaggio.work_start_1, viaggio.work_end_1);
+          totalWorkMinutes += minutes;
+          console.log(`[TimeCalculator] 🚀 Viaggio ${index+1} shift 1: ${viaggio.work_start_1}-${viaggio.work_end_1} = ${minutes/60}h`);
         }
         if (viaggio.work_start_2 && viaggio.work_end_2) {
-          totalWorkMinutes += this.calculateTimeDifference(viaggio.work_start_2, viaggio.work_end_2);
+          const minutes = this.calculateTimeDifference(viaggio.work_start_2, viaggio.work_end_2);
+          totalWorkMinutes += minutes;
+          console.log(`[TimeCalculator] 🚀 Viaggio ${index+1} shift 2: ${viaggio.work_start_2}-${viaggio.work_end_2} = ${minutes/60}h`);
         }
       });
+    } else {
+      console.log(`[TimeCalculator] ❌ No viaggi found or empty array:`, workEntry.viaggi);
     }
     
-    return this.minutesToHours(totalWorkMinutes);
+    const totalHours = this.minutesToHours(totalWorkMinutes);
+    console.log(`[TimeCalculator] 📊 TOTAL WORK HOURS: ${totalHours}h (${totalWorkMinutes} minutes)`);
+    return totalHours;
   }
 
   // Calculate travel hours
@@ -67,26 +80,134 @@ export class TimeCalculator {
     
     // Main entry travel
     if (workEntry.departureCompany && workEntry.arrivalSite) {
-      totalTravelMinutes += this.calculateTimeDifference(workEntry.departureCompany, workEntry.arrivalSite);
+      const minutes = this.calculateTimeDifference(workEntry.departureCompany, workEntry.arrivalSite);
+      totalTravelMinutes += minutes;
+      console.log(`[TimeCalculator] Main travel outbound: ${workEntry.departureCompany}-${workEntry.arrivalSite} = ${minutes/60}h`);
     }
     
     if (workEntry.departureReturn && workEntry.arrivalCompany) {
-      totalTravelMinutes += this.calculateTimeDifference(workEntry.departureReturn, workEntry.arrivalCompany);
+      const minutes = this.calculateTimeDifference(workEntry.departureReturn, workEntry.arrivalCompany);
+      totalTravelMinutes += minutes;
+      console.log(`[TimeCalculator] Main travel return: ${workEntry.departureReturn}-${workEntry.arrivalCompany} = ${minutes/60}h`);
     }
 
     // Additional travel from viaggi array
     if (workEntry.viaggi && Array.isArray(workEntry.viaggi)) {
-      workEntry.viaggi.forEach(viaggio => {
+      console.log(`[TimeCalculator] 🔥 PROCESSING TRAVEL FOR ${workEntry.viaggi.length} VIAGGI:`);
+      workEntry.viaggi.forEach((viaggio, index) => {
         if (viaggio.departure_company && viaggio.arrival_site) {
-          totalTravelMinutes += this.calculateTimeDifference(viaggio.departure_company, viaggio.arrival_site);
+          const minutes = this.calculateTimeDifference(viaggio.departure_company, viaggio.arrival_site);
+          totalTravelMinutes += minutes;
+          console.log(`[TimeCalculator] 🚀 Viaggio ${index+1} outbound: ${viaggio.departure_company}-${viaggio.arrival_site} = ${minutes/60}h`);
         }
         if (viaggio.departure_return && viaggio.arrival_company) {
-          totalTravelMinutes += this.calculateTimeDifference(viaggio.departure_return, viaggio.arrival_company);
+          const minutes = this.calculateTimeDifference(viaggio.departure_return, viaggio.arrival_company);
+          totalTravelMinutes += minutes;
+          console.log(`[TimeCalculator] 🚀 Viaggio ${index+1} return: ${viaggio.departure_return}-${viaggio.arrival_company} = ${minutes/60}h`);
         }
       });
     }
     
-    return this.minutesToHours(totalTravelMinutes);
+    const totalHours = this.minutesToHours(totalTravelMinutes);
+    console.log(`[TimeCalculator] 📊 TOTAL TRAVEL HOURS: ${totalHours}h (${totalTravelMinutes} minutes)`);
+    return totalHours;
+  }
+
+  // Calculate travel hours with distinction between external and internal travel
+  // NUOVO METODO per modalità MULTI_SHIFT_OPTIMIZED
+  calculateTravelHoursWithTypes(workEntry) {
+    let externalTravelMinutes = 0; // Viaggi partenza azienda + arrivo azienda
+    let internalTravelMinutes = 0;  // Viaggi tra turni
+    
+    console.log(`[TimeCalculator] 🎯 CALCULATING TYPED TRAVEL HOURS for MULTI_SHIFT_OPTIMIZED mode`);
+    
+    // 1. VIAGGI ESTERNI - Solo primo viaggio (partenza azienda) del turno principale
+    if (workEntry.departureCompany && workEntry.arrivalSite) {
+      const minutes = this.calculateTimeDifference(workEntry.departureCompany, workEntry.arrivalSite);
+      externalTravelMinutes += minutes;
+      console.log(`[TimeCalculator] 🚗 EXTERNAL travel (main outbound): ${workEntry.departureCompany}-${workEntry.arrivalSite} = ${minutes/60}h`);
+    }
+    
+    // 2. VIAGGI ESTERNI - Solo ultimo viaggio (arrivo azienda) dell'ultimo turno
+    // Determiniamo qual è l'ultimo turno con dati di ritorno
+    let lastReturnTravel = null;
+    
+    // Controlla se il turno principale ha viaggio di ritorno
+    if (workEntry.departureReturn && workEntry.arrivalCompany) {
+      lastReturnTravel = {
+        departure: workEntry.departureReturn,
+        arrival: workEntry.arrivalCompany,
+        source: 'main'
+      };
+    }
+    
+    // Controlla tutti i viaggi aggiuntivi per trovare l'ultimo con viaggio di ritorno
+    if (workEntry.viaggi && Array.isArray(workEntry.viaggi)) {
+      for (let i = workEntry.viaggi.length - 1; i >= 0; i--) {
+        const viaggio = workEntry.viaggi[i];
+        if (viaggio.departure_return && viaggio.arrival_company) {
+          lastReturnTravel = {
+            departure: viaggio.departure_return,
+            arrival: viaggio.arrival_company,
+            source: `viaggio_${i+1}`
+          };
+          break; // Prendi solo l'ultimo
+        }
+      }
+    }
+    
+    // Aggiungi l'ultimo viaggio di ritorno come esterno
+    if (lastReturnTravel) {
+      const minutes = this.calculateTimeDifference(lastReturnTravel.departure, lastReturnTravel.arrival);
+      externalTravelMinutes += minutes;
+      console.log(`[TimeCalculator] 🚗 EXTERNAL travel (last return from ${lastReturnTravel.source}): ${lastReturnTravel.departure}-${lastReturnTravel.arrival} = ${minutes/60}h`);
+    }
+    
+    // 3. VIAGGI INTERNI - Tutti gli altri viaggi (tra turni)
+    
+    // Viaggi di ritorno del turno principale (se non è l'ultimo)
+    if (workEntry.departureReturn && workEntry.arrivalCompany && 
+        (!lastReturnTravel || lastReturnTravel.source !== 'main')) {
+      const minutes = this.calculateTimeDifference(workEntry.departureReturn, workEntry.arrivalCompany);
+      internalTravelMinutes += minutes;
+      console.log(`[TimeCalculator] 🔄 INTERNAL travel (main return): ${workEntry.departureReturn}-${workEntry.arrivalCompany} = ${minutes/60}h`);
+    }
+    
+    // Viaggi di tutti i turni aggiuntivi (eccetto l'ultimo viaggio di ritorno se è quello finale)
+    if (workEntry.viaggi && Array.isArray(workEntry.viaggi)) {
+      workEntry.viaggi.forEach((viaggio, index) => {
+        // Viaggio di andata (sempre interno, mai il primo)
+        if (viaggio.departure_company && viaggio.arrival_site) {
+          const minutes = this.calculateTimeDifference(viaggio.departure_company, viaggio.arrival_site);
+          internalTravelMinutes += minutes;
+          console.log(`[TimeCalculator] 🔄 INTERNAL travel (viaggio ${index+1} outbound): ${viaggio.departure_company}-${viaggio.arrival_site} = ${minutes/60}h`);
+        }
+        
+        // Viaggio di ritorno (interno se non è l'ultimo)
+        if (viaggio.departure_return && viaggio.arrival_company &&
+            (!lastReturnTravel || lastReturnTravel.source !== `viaggio_${index+1}`)) {
+          const minutes = this.calculateTimeDifference(viaggio.departure_return, viaggio.arrival_company);
+          internalTravelMinutes += minutes;
+          console.log(`[TimeCalculator] 🔄 INTERNAL travel (viaggio ${index+1} return): ${viaggio.departure_return}-${viaggio.arrival_company} = ${minutes/60}h`);
+        }
+      });
+    }
+    
+    const externalHours = this.minutesToHours(externalTravelMinutes);
+    const internalHours = this.minutesToHours(internalTravelMinutes);
+    const totalHours = externalHours + internalHours;
+    
+    console.log(`[TimeCalculator] 📊 TYPED TRAVEL HOURS BREAKDOWN:`, {
+      external: `${externalHours}h (${externalTravelMinutes} min)`,
+      internal: `${internalHours}h (${internalTravelMinutes} min)`,
+      total: `${totalHours}h (${externalTravelMinutes + internalTravelMinutes} min)`
+    });
+    
+    return {
+      external: externalHours,
+      internal: internalHours,
+      total: totalHours
+    };
   }
 
   // Calculate standby work hours
@@ -225,6 +346,72 @@ export class TimeCalculator {
     }
 
     return breaks;
+  }
+
+  // Calculate automatic meal allowances based on breaks between all shifts
+  calculateAutomaticMeals(workEntry, settings = {}) {
+    const breaks = this.calculateBreaksBetweenShifts(workEntry);
+    const mealSettings = settings.mealSettings || {
+      minBreakForLunch: 60, // 1 ora minima per pranzo
+      minBreakForDinner: 60, // 1 ora minima per cena  
+      lunchTimeStart: 12 * 60, // 12:00 in minuti
+      lunchTimeEnd: 14 * 60,   // 14:00 in minuti
+      dinnerTimeStart: 19 * 60, // 19:00 in minuti
+      dinnerTimeEnd: 21 * 60,   // 21:00 in minuti
+    };
+
+    let automaticMeals = {
+      lunch: false,
+      dinner: false,
+      lunchBreak: null,
+      dinnerBreak: null
+    };
+
+    console.log(`[TimeCalculator] 🍽️ Analyzing ${breaks.length} breaks for automatic meals:`, breaks);
+
+    breaks.forEach((breakInfo, index) => {
+      const breakStart = breakInfo.startTime;
+      const breakEnd = breakInfo.endTime;
+      const breakDuration = breakInfo.durationMinutes;
+
+      console.log(`[TimeCalculator] 🍽️ Break ${index + 1}: ${Math.floor(breakStart/60)}:${String(breakStart%60).padStart(2,'0')} - ${Math.floor(breakEnd/60)}:${String(breakEnd%60).padStart(2,'0')} (${breakDuration} min)`);
+
+      // Verifica se la pausa è abbastanza lunga
+      if (breakDuration < mealSettings.minBreakForLunch) {
+        console.log(`[TimeCalculator] 🍽️ Break ${index + 1}: troppo corta per pasto (${breakDuration} < ${mealSettings.minBreakForLunch} min)`);
+        return;
+      }
+
+      // Verifica se la pausa cade nell'orario pranzo
+      const isLunchTime = (breakStart >= mealSettings.lunchTimeStart && breakStart <= mealSettings.lunchTimeEnd) ||
+                         (breakEnd >= mealSettings.lunchTimeStart && breakEnd <= mealSettings.lunchTimeEnd) ||
+                         (breakStart < mealSettings.lunchTimeStart && breakEnd > mealSettings.lunchTimeEnd);
+
+      // Verifica se la pausa cade nell'orario cena
+      const isDinnerTime = (breakStart >= mealSettings.dinnerTimeStart && breakStart <= mealSettings.dinnerTimeEnd) ||
+                          (breakEnd >= mealSettings.dinnerTimeStart && breakEnd <= mealSettings.dinnerTimeEnd) ||
+                          (breakStart < mealSettings.dinnerTimeStart && breakEnd > mealSettings.dinnerTimeEnd);
+
+      if (isLunchTime && !automaticMeals.lunch) {
+        automaticMeals.lunch = true;
+        automaticMeals.lunchBreak = breakInfo;
+        console.log(`[TimeCalculator] 🍽️ ✅ PRANZO automatico - Break ${index + 1} nell'orario pranzo`);
+      }
+
+      if (isDinnerTime && !automaticMeals.dinner) {
+        automaticMeals.dinner = true;
+        automaticMeals.dinnerBreak = breakInfo;
+        console.log(`[TimeCalculator] 🍽️ ✅ CENA automatica - Break ${index + 1} nell'orario cena`);
+      }
+    });
+
+    console.log(`[TimeCalculator] 🍽️ Risultato pasti automatici:`, {
+      lunch: automaticMeals.lunch,
+      dinner: automaticMeals.dinner,
+      totalBreaks: breaks.length
+    });
+
+    return automaticMeals;
   }
 }
 

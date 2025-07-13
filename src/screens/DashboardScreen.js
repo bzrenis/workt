@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
@@ -13,10 +13,12 @@ import {
   Platform,
   StatusBar
 } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { formatDate, formatCurrency } from '../utils';
 import { useSettings, useCalculationService } from '../hooks';
 import DatabaseService from '../services/DatabaseService';
+import DataUpdateService from '../services/DataUpdateService';
 import FixedDaysService from '../services/FixedDaysService';
 import { createWorkEntryFromData } from '../utils/earningsHelper';
 import { RealPayslipCalculator } from '../services/RealPayslipCalculator';
@@ -48,6 +50,9 @@ const DashboardScreen = ({ navigation, route }) => {
   const [refreshing, setRefreshing] = useState(false);
   const [fixedDaysData, setFixedDaysData] = useState(null);
   const [fixedDaysLoading, setFixedDaysLoading] = useState(true);
+  const [completionData, setCompletionData] = useState(null);
+  const [completionLoading, setCompletionLoading] = useState(true);
+  const [isDailyBreakdownExpanded, setIsDailyBreakdownExpanded] = useState(false);
 
   // 🔄 Ascolta parametri di navigazione per refresh automatico
   useEffect(() => {
@@ -66,13 +71,54 @@ const DashboardScreen = ({ navigation, route }) => {
     }
   }, [route?.params?.refreshCalculations, route?.params?.timestamp]);
 
+  // 🔄 Listener per aggiornamenti automatici dei dati dal database
+  useEffect(() => {
+    const handleWorkEntriesUpdate = (action, data) => {
+      console.log('🔄 DASHBOARD - Ricevuto aggiornamento:', action, data);
+      
+      // Ricarica i dati solo se l'aggiornamento riguarda il mese corrente
+      const entryYear = data?.year;
+      const entryMonth = data?.month;
+      const currentYear = selectedDate.getFullYear();
+      const currentMonth = selectedDate.getMonth() + 1;
+      
+      if (entryYear === currentYear && entryMonth === currentMonth) {
+        console.log('🔄 DASHBOARD - Aggiornamento per mese corrente, ricarico dati...');
+        loadData();
+      }
+    };
+
+    DataUpdateService.onWorkEntriesUpdated(handleWorkEntriesUpdate);
+
+    return () => {
+      DataUpdateService.removeAllListeners('workEntriesUpdated');
+    };
+  }, [selectedDate]);
+
+  // 🔄 AGGIORNAMENTO AUTOMATICO: Ricarica dati ogni volta che la Dashboard viene aperta/focalizzata
+  useFocusEffect(
+    useCallback(() => {
+      console.log('🔄 DASHBOARD - Screen focalizzato, ricarico dati automaticamente...');
+      loadData();
+    }, [selectedDate]) // Dipende da selectedDate per ricaricare quando cambia il mese
+  );
+
   // 🔄 Effetto per ricaricamento automatico quando cambiano le impostazioni
   useEffect(() => {
     if (!settingsLoading && settings) {
-      console.log('🔄 DASHBOARD - Impostazioni aggiornate, ricalcolo...');
+      console.log('🔄 DASHBOARD - Impostazioni aggiornate, ricalcolo completo...');
+      console.log('🔧 DASHBOARD DEBUG - Travel mode attuale:', settings?.travelHoursSetting);
+      console.log('🔧 DASHBOARD DEBUG - Meal settings attuali:', JSON.stringify(settings?.mealAllowances, null, 2));
       calculateMonthlyAggregation(workEntries);
     }
-  }, [settings?.netCalculation?.method, settings?.netCalculation?.customDeductionRate, settings?.netCalculation?.useActualAmount]);
+  }, [
+    settings?.netCalculation?.method, 
+    settings?.netCalculation?.customDeductionRate, 
+    settings?.netCalculation?.useActualAmount,
+    settings?.travelHoursSetting, // Aggiungi modalità viaggio
+    settings?.mealAllowances,     // Aggiungi impostazioni pasti
+    settings?.contract?.hourlyRate // Aggiungi tariffe CCNL
+  ]);
 
   // 🔍 DEBUG SETTINGS CARICAMENTO
   useEffect(() => {
@@ -81,6 +127,8 @@ const DashboardScreen = ({ navigation, route }) => {
     if (settings) {
       console.log('🔍 DASHBOARD DEBUG - Settings mealAllowances:', JSON.stringify(settings.mealAllowances, null, 2));
       console.log('🔍 DASHBOARD DEBUG - Settings travelAllowance:', JSON.stringify(settings.travelAllowance, null, 2));
+      console.log('🔍 DASHBOARD DEBUG - Settings travelHoursSetting:', settings.travelHoursSetting);
+      console.log('🔍 DASHBOARD DEBUG - Settings travelCompensationRate:', settings.travelCompensationRate);
     }
   }, [settingsLoading, settings]);
 
@@ -98,6 +146,9 @@ const DashboardScreen = ({ navigation, route }) => {
       
       // Carica dati giorni fissi (ferie, permessi, etc.)
       await loadFixedDaysData();
+      
+      // Carica dati completamento giornata
+      await loadCompletionData();
     } catch (error) {
       console.error('Errore nel caricamento dati:', error);
       Alert.alert('Errore', 'Impossibile caricare i dati.');
@@ -146,6 +197,37 @@ const DashboardScreen = ({ navigation, route }) => {
     }
   };
 
+  // Carica dati dei giorni in completamento
+  const loadCompletionData = async () => {
+    try {
+      setCompletionLoading(true);
+      const startDate = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 1);
+      const endDate = new Date(selectedDate.getFullYear(), selectedDate.getMonth() + 1, 0);
+      
+      // Carica dati completamento usando FixedDaysService
+      if (FixedDaysService && typeof FixedDaysService.getCompletionStats === 'function') {
+        const data = await FixedDaysService.getCompletionStats(startDate, endDate);
+        setCompletionData(data);
+      } else {
+        console.warn('FixedDaysService.getCompletionStats non disponibile');
+        setCompletionData({
+          totalEntries: 0,
+          totalCompletionHours: 0,
+          byType: {}
+        });
+      }
+    } catch (error) {
+      console.error('Errore nel caricamento dati completamento:', error);
+      setCompletionData({
+        totalEntries: 0,
+        totalCompletionHours: 0,
+        byType: {}
+      });
+    } finally {
+      setCompletionLoading(false);
+    }
+  };
+
   // Calcola aggregazione mensile fedele al breakdown del TimeEntryForm
   const calculateMonthlyAggregation = async (entries) => {
     // ⭐ CONTROLLO CRITICO: Non calcolare finché le impostazioni non sono caricate
@@ -155,16 +237,20 @@ const DashboardScreen = ({ navigation, route }) => {
     }
 
     if (!settings) {
-      console.log('🔧 DASHBOARD DEBUG - Settings non disponibili, attesa...');
+      console.log(' DASHBOARD DEBUG - Settings non disponibili, skip...');
       return;
     }
+
+    console.log('🔧 DASHBOARD - Calcolo aggregazione per', entries.length, 'entries');
+    console.log('🔧 DASHBOARD DEBUG - Travel mode corrente:', settings?.travelHoursSetting);
+    console.log('🔧 DASHBOARD DEBUG - Meal settings correnti:', JSON.stringify(settings?.mealAllowances, null, 2));
 
     // Definizione di safeSettings (identica al TimeEntryForm)
     const defaultSettings = {
       contract: {
-        hourlyRate: 16.41081,
-        dailyRate: 109.195,
-        monthlyGrossSalary: 2839.07,
+        hourlyRate: 16.15,
+        dailyRate: 107.69,
+        monthlyGrossSalary: 2800.00,
         normalHours: 40,
         dailyHours: 8,
         saturdayBonus: 0.2,
@@ -193,8 +279,15 @@ const DashboardScreen = ({ navigation, route }) => {
       ...(settings || {}),
       contract: { ...defaultSettings.contract, ...(settings?.contract || {}) },
       standbySettings: { ...defaultSettings.standbySettings, ...(settings?.standbySettings || {}) },
-      mealAllowances: { ...defaultSettings.mealAllowances, ...(settings?.mealAllowances || {}) }
+      mealAllowances: { ...defaultSettings.mealAllowances, ...(settings?.mealAllowances || {}) },
+      travelHoursSetting: settings?.travelHoursSetting || 'TRAVEL_RATE_EXCESS', // Nuova logica di default
+      multiShiftTravelAsWork: settings?.multiShiftTravelAsWork || false // Nuova opzione multi-turno
     };
+
+    console.log('🔧 DASHBOARD DEBUG - settings originali:', JSON.stringify(settings, null, 2));
+    console.log('🔧 DASHBOARD DEBUG - safeSettings travelHoursSetting:', safeSettings.travelHoursSetting);
+    console.log('🔧 DASHBOARD DEBUG - safeSettings pasti:', JSON.stringify(safeSettings.mealAllowances, null, 2));
+    console.log('🔧 DASHBOARD DEBUG - safeSettings trasferta:', JSON.stringify(safeSettings.travelAllowance, null, 2));
 
     if (!entries || entries.length === 0) {
       setMonthlyAggregated({
@@ -296,6 +389,7 @@ const DashboardScreen = ({ navigation, route }) => {
         days: 0,
         workHours: {
           ordinary: 0,
+          evening: 0,
           night: 0,
           holiday: 0,
           saturday: 0,
@@ -304,6 +398,7 @@ const DashboardScreen = ({ navigation, route }) => {
         },
         travelHours: {
           ordinary: 0,
+          evening: 0,
           night: 0,
           holiday: 0,
           saturday: 0,
@@ -312,6 +407,7 @@ const DashboardScreen = ({ navigation, route }) => {
         },
         workEarnings: {
           ordinary: 0,
+          evening: 0,
           night: 0,
           holiday: 0,
           saturday: 0,
@@ -320,6 +416,7 @@ const DashboardScreen = ({ navigation, route }) => {
         },
         travelEarnings: {
           ordinary: 0,
+          evening: 0,
           night: 0,
           holiday: 0,
           saturday: 0,
@@ -334,6 +431,12 @@ const DashboardScreen = ({ navigation, route }) => {
         travelDays: 0,
         mealDays: 0,
         standbyDays: 0,
+        // Suddivisione indennità reperibilità per tipo di giorno
+        standbyByType: {
+          feriale: { amount: 0, days: 0 },
+          festivo: { amount: 0, days: 0 },
+          sabato: { amount: 0, days: 0 }
+        },
         // Suddivisione indennità trasferta per percentuale
         travelByPercent: {
           '100': { amount: 0, days: 0 },
@@ -443,7 +546,14 @@ const DashboardScreen = ({ navigation, route }) => {
 
         // Conta interventi reperibilità (usa workEntry parsato invece di entry grezzo)
         if (workEntry.interventi && Array.isArray(workEntry.interventi) && workEntry.interventi.length > 0) {
-          aggregated.analytics.standbyInterventions += workEntry.interventi.length;
+          // Conta solo gli interventi con dati validi (non vuoti)
+          const validInterventi = workEntry.interventi.filter(intervento => {
+            return intervento.work_start_1 && intervento.work_end_1; // Almeno orario inizio e fine del primo turno
+          });
+          if (validInterventi.length > 0) {
+            console.log(`🔧 DEBUG INTERVENTI - Giorno ${workEntry.date}: ${validInterventi.length} interventi validi su ${workEntry.interventi.length} totali`);
+          }
+          aggregated.analytics.standbyInterventions += validInterventi.length;
         }
 
         // Aggrega ore ordinarie
@@ -557,7 +667,29 @@ const DashboardScreen = ({ navigation, route }) => {
         
         // Aggrega altre indennità
         if (breakdown.allowances) {
-          aggregated.allowances.standby += breakdown.allowances.standby || 0;
+          const standbyAmount = breakdown.allowances.standby || 0;
+          aggregated.allowances.standby += standbyAmount;
+          
+          // Se c'è indennità reperibilità, categorizza per tipo di giorno
+          if (standbyAmount > 0) {
+            const entryDate = new Date(entry.date);
+            const isWeekend = entryDate.getDay() === 0 || entryDate.getDay() === 6;
+            const isSaturday = entryDate.getDay() === 6;
+            const isSunday = entryDate.getDay() === 0;
+            const isHoliday = entry.isHoliday || false;
+            
+            let dayType = 'feriale';
+            if (isSaturday) {
+              dayType = 'sabato';
+            } else if (isSunday || isHoliday) {
+              dayType = 'festivo';
+            }
+            
+            aggregated.allowances.standbyByType[dayType].amount += standbyAmount;
+            aggregated.allowances.standbyByType[dayType].days += 1;
+            
+            console.log(`🔧 DEBUG STANDBY TIPO - Giorno ${entry.date} (${dayType}): €${standbyAmount.toFixed(2)}, totale ${dayType}: €${aggregated.allowances.standbyByType[dayType].amount.toFixed(2)} (${aggregated.allowances.standbyByType[dayType].days} giorni)`);
+          }
         }
         
         // Conta giorni con indennità basandosi sui dati diretti
@@ -737,10 +869,18 @@ const DashboardScreen = ({ navigation, route }) => {
       if (aggregated.totalEarnings > 0) {
         aggregated.analytics.standbyWorkRatio = (aggregated.standby.totalEarnings / aggregated.totalEarnings) * 100;
         
+        // CORREZIONE: Usa la somma corretta dei componenti per calcolare le percentuali
+        // totalEarnings = ordinary + travel + standby.totalEarnings (che già include standby allowance)
+        // Quindi per le percentuali dobbiamo usare: ordinary + standby.totalEarnings + travel + meal
+        const totalEarningsForPercentages = aggregated.ordinary.total + 
+                                           aggregated.standby.totalEarnings + 
+                                           (aggregated.allowances.travel || 0) + 
+                                           (aggregated.allowances.meal || 0);
+        
         // Percentuali di breakdown earnings
-        aggregated.analytics.breakdown.ordinaryPercentage = (aggregated.ordinary.total / aggregated.totalEarnings) * 100;
-        aggregated.analytics.breakdown.standbyPercentage = (aggregated.standby.totalEarnings / aggregated.totalEarnings) * 100;
-        aggregated.analytics.breakdown.allowancesPercentage = ((aggregated.allowances.travel + aggregated.allowances.standby) / aggregated.totalEarnings) * 100;
+        aggregated.analytics.breakdown.ordinaryPercentage = (aggregated.ordinary.total / totalEarningsForPercentages) * 100;
+        aggregated.analytics.breakdown.standbyPercentage = (aggregated.standby.totalEarnings / totalEarningsForPercentages) * 100;
+        aggregated.analytics.breakdown.allowancesPercentage = ((aggregated.allowances.travel || 0) / totalEarningsForPercentages) * 100;
       }
 
       // Efficienza lavoro vs viaggio
@@ -777,6 +917,9 @@ const DashboardScreen = ({ navigation, route }) => {
       mealDays: aggregated.allowances.mealDays,
       totalDaysWorked: aggregated.daysWorked
     });
+
+    // Aggiungi le impostazioni per il calcolo delle percentuali nella dashboard
+    aggregated.settings = safeSettings;
 
     setMonthlyAggregated(aggregated);
   };
@@ -849,50 +992,55 @@ const DashboardScreen = ({ navigation, route }) => {
     if (!hasOrdinaryData) return null;
 
     const ordinary = monthlyAggregated?.ordinary || {};
+    const dailyRate = monthlyAggregated?.settings?.contract?.dailyRate || 107.69;
+    const hourlyRate = monthlyAggregated?.settings?.contract?.hourlyRate || 16.15;
+    
+    // Calcola totale ore lavorate e viaggio
+    const totalWorkHours = (ordinary.hours.lavoro_giornaliera || 0) + (ordinary.hours.lavoro_extra || 0);
+    const totalTravelHours = (ordinary.hours.viaggio_giornaliera || 0) + (ordinary.hours.viaggio_extra || 0);
+    const totalHours = totalWorkHours + totalTravelHours;
     
     return (
       <View style={styles.sectionCard}>
-        <Text style={styles.sectionTitle}>Attività Ordinarie</Text>
+        <Text style={styles.sectionTitle}>Lavoro Ordinario</Text>
         
-        {/* Contatore giorni ordinari */}
+        {/* Riepilogo giorni e ore */}
+        <View style={styles.breakdownItem}>
+          <Text style={styles.breakdownDetail}>
+            {ordinary.days} giorni lavorativi • {formatSafeHours(totalHours)} totali
+          </Text>
+          <Text style={styles.breakdownDetail}>
+            ↳ Lavoro: {formatSafeHours(totalWorkHours)} • Viaggio: {formatSafeHours(totalTravelHours)}
+          </Text>
+        </View>
+
+        {/* Retribuzione giornaliera base */}
         {ordinary.days > 0 && (
           <View style={styles.breakdownItem}>
-            <Text style={styles.breakdownDetail}>
-              {ordinary.days} giorni con attività ordinarie
-            </Text>
-          </View>
-        )}
-        
-        {/* Ore giornaliere (prime 8h) */}
-        {(ordinary.hours.lavoro_giornaliera > 0 || ordinary.hours.viaggio_giornaliera > 0) && (
-          <View style={styles.breakdownItem}>
             <View style={styles.breakdownRow}>
-              <Text style={styles.breakdownLabel}>Giornaliero (prime 8h)</Text>
+              <Text style={styles.breakdownLabel}>
+                Retribuzione giornaliera CCNL
+              </Text>
               <Text style={styles.breakdownValue}>
-                {formatSafeHours(ordinary.hours.lavoro_giornaliera + ordinary.hours.viaggio_giornaliera)}
+                {ordinary.days} giorni
               </Text>
             </View>
             <Text style={styles.breakdownAmount}>
-              {formatSafeAmount(ordinary.earnings.giornaliera)}
+              {formatSafeAmount(dailyRate * ordinary.days)}
             </Text>
-            {ordinary.hours.lavoro_giornaliera > 0 && (
-              <Text style={styles.breakdownDetail}>
-                - Lavoro: {formatSafeHours(ordinary.hours.lavoro_giornaliera)}
-              </Text>
-            )}
-            {ordinary.hours.viaggio_giornaliera > 0 && (
-              <Text style={styles.breakdownDetail}>
-                - Viaggio: {formatSafeHours(ordinary.hours.viaggio_giornaliera)}
-              </Text>
-            )}
+            <Text style={styles.breakdownDetail}>
+              €{dailyRate.toFixed(2).replace('.', ',')} × {ordinary.days} = €{(dailyRate * ordinary.days).toFixed(2).replace('.', ',')}
+            </Text>
           </View>
         )}
 
-        {/* Lavoro extra */}
+        {/* Straordinari lavoro */}
         {ordinary.hours.lavoro_extra > 0 && (
           <View style={styles.breakdownItem}>
             <View style={styles.breakdownRow}>
-              <Text style={styles.breakdownLabel}>Lavoro extra (oltre 8h)</Text>
+              <Text style={styles.breakdownLabel}>
+                Straordinari lavoro (+20%)
+              </Text>
               <Text style={styles.breakdownValue}>
                 {formatSafeHours(ordinary.hours.lavoro_extra)}
               </Text>
@@ -900,14 +1048,19 @@ const DashboardScreen = ({ navigation, route }) => {
             <Text style={styles.breakdownAmount}>
               {formatSafeAmount(ordinary.earnings.lavoro_extra)}
             </Text>
+            <Text style={styles.breakdownDetail}>
+              €{hourlyRate.toFixed(2).replace('.', ',')} × 1,20 × {formatSafeHours(ordinary.hours.lavoro_extra)} = €{(hourlyRate * 1.20 * ordinary.hours.lavoro_extra).toFixed(2).replace('.', ',')}
+            </Text>
           </View>
         )}
 
-        {/* Viaggio extra */}
+        {/* Straordinari viaggio */}
         {ordinary.hours.viaggio_extra > 0 && (
           <View style={styles.breakdownItem}>
             <View style={styles.breakdownRow}>
-              <Text style={styles.breakdownLabel}>Viaggio extra (oltre 8h)</Text>
+              <Text style={styles.breakdownLabel}>
+                Viaggio extra (tariff. viaggio)
+              </Text>
               <Text style={styles.breakdownValue}>
                 {formatSafeHours(ordinary.hours.viaggio_extra)}
               </Text>
@@ -915,37 +1068,49 @@ const DashboardScreen = ({ navigation, route }) => {
             <Text style={styles.breakdownAmount}>
               {formatSafeAmount(ordinary.earnings.viaggio_extra)}
             </Text>
+            <Text style={styles.breakdownDetail}>
+              €{hourlyRate.toFixed(2).replace('.', ',')} × {formatSafeHours(ordinary.hours.viaggio_extra)} = €{(hourlyRate * ordinary.hours.viaggio_extra).toFixed(2).replace('.', ',')}
+            </Text>
           </View>
         )}
 
-        {/* Maggiorazioni CCNL */}
+        {/* Maggiorazioni weekend/festivi */}
         {(ordinary.earnings.sabato_bonus > 0 || ordinary.earnings.domenica_bonus > 0 || ordinary.earnings.festivo_bonus > 0) && (
           <View style={styles.breakdownItem}>
             <View style={styles.breakdownRow}>
-              <Text style={styles.breakdownLabel}>Maggiorazioni CCNL</Text>
+              <Text style={styles.breakdownLabel}>Maggiorazioni weekend/festivi</Text>
               <Text style={styles.breakdownValue}></Text>
             </View>
             {ordinary.earnings.sabato_bonus > 0 && (
               <Text style={styles.breakdownDetail}>
-                - Sabato: {formatSafeAmount(ordinary.earnings.sabato_bonus)}
+                • Sabato (+25%): {formatSafeAmount(ordinary.earnings.sabato_bonus)}
               </Text>
             )}
             {ordinary.earnings.domenica_bonus > 0 && (
               <Text style={styles.breakdownDetail}>
-                - Domenica: {formatSafeAmount(ordinary.earnings.domenica_bonus)}
+                • Domenica (+30%): {formatSafeAmount(ordinary.earnings.domenica_bonus)}
               </Text>
             )}
             {ordinary.earnings.festivo_bonus > 0 && (
               <Text style={styles.breakdownDetail}>
-                - Festivo: {formatSafeAmount(ordinary.earnings.festivo_bonus)}
+                • Festivo (+30%): {formatSafeAmount(ordinary.earnings.festivo_bonus)}
               </Text>
             )}
           </View>
         )}
 
         <View style={[styles.breakdownRow, styles.totalRow]}>
-          <Text style={styles.totalLabel}>Totale ordinario</Text>
-          <Text style={styles.totalAmount}>{formatSafeAmount(ordinary.total)}</Text>
+          <Text style={styles.totalLabel}>Totale Lavoro Ordinario</Text>
+          <Text style={styles.totalAmount}>
+            {formatSafeAmount(
+              (dailyRate * ordinary.days) + 
+              (ordinary.earnings.lavoro_extra || 0) + 
+              (ordinary.earnings.viaggio_extra || 0) + 
+              (ordinary.earnings.sabato_bonus || 0) + 
+              (ordinary.earnings.domenica_bonus || 0) + 
+              (ordinary.earnings.festivo_bonus || 0)
+            )}
+          </Text>
         </View>
       </View>
     );
@@ -955,6 +1120,15 @@ const DashboardScreen = ({ navigation, route }) => {
     if (!hasStandbyData) return null;
 
     const standby = monthlyAggregated?.standby || {};
+    
+    // Debug log per vedere i dati standby
+    console.log('🔍 STANDBY DEBUG - Dati standby ricevuti:', {
+      workHours: standby.workHours,
+      workEarnings: standby.workEarnings,
+      travelHours: standby.travelHours,
+      travelEarnings: standby.travelEarnings,
+      totalEarnings: standby.totalEarnings
+    });
     
     return (
       <View style={styles.sectionCard}>
@@ -975,27 +1149,88 @@ const DashboardScreen = ({ navigation, route }) => {
         )}
         
         {/* Lavoro diurno reperibilità */}
-        {standby.workHours.ordinary > 0 && (
+        {(standby.workHours?.ordinary || 0) > 0 && (
           <View style={styles.breakdownItem}>
             <View style={styles.breakdownRow}>
-              <Text style={styles.breakdownLabel}>Lavoro diurno</Text>
-              <Text style={styles.breakdownValue}>{formatSafeHours(standby.workHours.ordinary)}</Text>
+              <Text style={styles.breakdownLabel}>
+                Lavoro diurno ({String(
+                  (() => {
+                    try {
+                      if (standby.workEarnings?.ordinary && standby.workHours?.ordinary > 0 && monthlyAggregated?.settings?.contract?.hourlyRate) {
+                        const hourlyEarned = standby.workEarnings.ordinary / standby.workHours.ordinary;
+                        const baseRate = monthlyAggregated.settings.contract.hourlyRate;
+                        const percentage = Math.round((hourlyEarned / baseRate - 1) * 100);
+                        return `+${percentage}% - ${hourlyEarned.toFixed(2).replace('.', ',')}€/h`;
+                      }
+                      return '+20%';
+                    } catch (error) {
+                      return '+20%';
+                    }
+                  })() || '+20%'
+                )})
+              </Text>
+              <Text style={styles.breakdownValue}>{formatSafeHours(standby.workHours?.ordinary || 0)}</Text>
             </View>
             <Text style={styles.breakdownAmount}>
-              {formatSafeAmount(standby.workEarnings.ordinary)}
+              {formatSafeAmount(standby.workEarnings?.ordinary || 0)}
             </Text>
           </View>
         )}
 
-        {/* Lavoro notturno reperibilità */}
-        {standby.workHours.night > 0 && (
+        {/* Lavoro serale reperibilità (18-22h) */}
+        {(standby.workHours?.evening || 0) > 0 && (
           <View style={styles.breakdownItem}>
             <View style={styles.breakdownRow}>
-              <Text style={styles.breakdownLabel}>Lavoro notturno (+25%)</Text>
-              <Text style={styles.breakdownValue}>{formatSafeHours(standby.workHours.night)}</Text>
+              <Text style={styles.breakdownLabel}>
+                Lavoro serale ({String(
+                  (() => {
+                    try {
+                      if (standby.workEarnings?.evening && standby.workHours?.evening > 0 && monthlyAggregated?.settings?.contract?.hourlyRate) {
+                        const hourlyEarned = standby.workEarnings.evening / standby.workHours.evening;
+                        const baseRate = monthlyAggregated.settings.contract.hourlyRate;
+                        const percentage = Math.round((hourlyEarned / baseRate - 1) * 100);
+                        return `+${percentage}% - ${hourlyEarned.toFixed(2).replace('.', ',')}€/h`;
+                      }
+                      return '+25%';
+                    } catch (error) {
+                      return '+25%';
+                    }
+                  })() || '+25%'
+                )})
+              </Text>
+              <Text style={styles.breakdownValue}>{formatSafeHours(standby.workHours?.evening || 0)}</Text>
             </View>
             <Text style={styles.breakdownAmount}>
-              {formatSafeAmount(standby.workEarnings.night)}
+              {formatSafeAmount(standby.workEarnings?.evening || 0)}
+            </Text>
+          </View>
+        )}
+
+        {/* Lavoro notturno reperibilità (22-06h) */}
+        {(standby.workHours?.night || 0) > 0 && (
+          <View style={styles.breakdownItem}>
+            <View style={styles.breakdownRow}>
+              <Text style={styles.breakdownLabel}>
+                Lavoro notturno ({String(
+                  (() => {
+                    try {
+                      if (standby.workEarnings?.night && standby.workHours?.night > 0 && monthlyAggregated?.settings?.contract?.hourlyRate) {
+                        const hourlyEarned = standby.workEarnings.night / standby.workHours.night;
+                        const baseRate = monthlyAggregated.settings.contract.hourlyRate;
+                        const percentage = Math.round((hourlyEarned / baseRate - 1) * 100);
+                        return `+${percentage}% - ${hourlyEarned.toFixed(2).replace('.', ',')}€/h`;
+                      }
+                      return '+25%/+35%';
+                    } catch (error) {
+                      return '+25%/+35%';
+                    }
+                  })() || '+25%/+35%'
+                )})
+              </Text>
+              <Text style={styles.breakdownValue}>{formatSafeHours(standby.workHours?.night || 0)}</Text>
+            </View>
+            <Text style={styles.breakdownAmount}>
+              {formatSafeAmount(standby.workEarnings?.night || 0)}
             </Text>
           </View>
         )}
@@ -1004,7 +1239,19 @@ const DashboardScreen = ({ navigation, route }) => {
         {standby.workHours.holiday > 0 && (
           <View style={styles.breakdownItem}>
             <View style={styles.breakdownRow}>
-              <Text style={styles.breakdownLabel}>Lavoro festivo (+30%)</Text>
+              <Text style={styles.breakdownLabel}>
+                Lavoro festivo ({String(
+                  (() => {
+                    if (standby.workEarnings.holiday && standby.workHours.holiday > 0 && monthlyAggregated?.settings?.contract?.hourlyRate) {
+                      const hourlyEarned = standby.workEarnings.holiday / standby.workHours.holiday;
+                      const baseRate = monthlyAggregated.settings.contract.hourlyRate;
+                      const percentage = Math.round((hourlyEarned / baseRate - 1) * 100);
+                      return `+${percentage}% - ${hourlyEarned.toFixed(2).replace('.', ',')}€/h`;
+                    }
+                    return '+30%';
+                  })()
+                )})
+              </Text>
               <Text style={styles.breakdownValue}>{formatSafeHours(standby.workHours.holiday)}</Text>
             </View>
             <Text style={styles.breakdownAmount}>
@@ -1017,7 +1264,19 @@ const DashboardScreen = ({ navigation, route }) => {
         {standby.workHours.saturday > 0 && (
           <View style={styles.breakdownItem}>
             <View style={styles.breakdownRow}>
-              <Text style={styles.breakdownLabel}>Lavoro sabato (+25%)</Text>
+              <Text style={styles.breakdownLabel}>
+                Lavoro sabato ({String(
+                  (() => {
+                    if (standby.workEarnings.saturday && standby.workHours.saturday > 0 && monthlyAggregated?.settings?.contract?.hourlyRate) {
+                      const hourlyEarned = standby.workEarnings.saturday / standby.workHours.saturday;
+                      const baseRate = monthlyAggregated.settings.contract.hourlyRate;
+                      const percentage = Math.round((hourlyEarned / baseRate - 1) * 100);
+                      return `+${percentage}% - ${hourlyEarned.toFixed(2).replace('.', ',')}€/h`;
+                    }
+                    return '+25%';
+                  })()
+                )})
+              </Text>
               <Text style={styles.breakdownValue}>{formatSafeHours(standby.workHours.saturday)}</Text>
             </View>
             <Text style={styles.breakdownAmount}>
@@ -1030,7 +1289,19 @@ const DashboardScreen = ({ navigation, route }) => {
         {standby.workHours.saturday_night > 0 && (
           <View style={styles.breakdownItem}>
             <View style={styles.breakdownRow}>
-              <Text style={styles.breakdownLabel}>Lavoro sabato notturno (+50%)</Text>
+              <Text style={styles.breakdownLabel}>
+                Lavoro sabato notturno ({String(
+                  (() => {
+                    if (standby.workEarnings.saturday_night && standby.workHours.saturday_night > 0 && monthlyAggregated?.settings?.contract?.hourlyRate) {
+                      const hourlyEarned = standby.workEarnings.saturday_night / standby.workHours.saturday_night;
+                      const baseRate = monthlyAggregated.settings.contract.hourlyRate;
+                      const percentage = Math.round((hourlyEarned / baseRate - 1) * 100);
+                      return `+${percentage}% - ${hourlyEarned.toFixed(2).replace('.', ',')}€/h`;
+                    }
+                    return '+56%/+69%';
+                  })()
+                )})
+              </Text>
               <Text style={styles.breakdownValue}>{formatSafeHours(standby.workHours.saturday_night)}</Text>
             </View>
             <Text style={styles.breakdownAmount}>
@@ -1043,7 +1314,19 @@ const DashboardScreen = ({ navigation, route }) => {
         {standby.workHours.night_holiday > 0 && (
           <View style={styles.breakdownItem}>
             <View style={styles.breakdownRow}>
-              <Text style={styles.breakdownLabel}>Lavoro festivo notturno (+60%)</Text>
+              <Text style={styles.breakdownLabel}>
+                Lavoro festivo notturno ({String(
+                  (() => {
+                    if (standby.workEarnings.night_holiday && standby.workHours.night_holiday > 0 && monthlyAggregated?.settings?.contract?.hourlyRate) {
+                      const hourlyEarned = standby.workEarnings.night_holiday / standby.workHours.night_holiday;
+                      const baseRate = monthlyAggregated.settings.contract.hourlyRate;
+                      const percentage = Math.round((hourlyEarned / baseRate - 1) * 100);
+                      return `+${percentage}% - ${hourlyEarned.toFixed(2).replace('.', ',')}€/h`;
+                    }
+                    return '+62%/+76%';
+                  })()
+                )})
+              </Text>
               <Text style={styles.breakdownValue}>{formatSafeHours(standby.workHours.night_holiday)}</Text>
             </View>
             <Text style={styles.breakdownAmount}>
@@ -1056,7 +1339,19 @@ const DashboardScreen = ({ navigation, route }) => {
         {standby.travelHours.ordinary > 0 && (
           <View style={styles.breakdownItem}>
             <View style={styles.breakdownRow}>
-              <Text style={styles.breakdownLabel}>Viaggio diurno</Text>
+              <Text style={styles.breakdownLabel}>
+                Viaggio diurno ({String(
+                  (() => {
+                    if (standby.travelEarnings.ordinary && standby.travelHours.ordinary > 0 && monthlyAggregated?.settings?.contract?.hourlyRate) {
+                      const hourlyEarned = standby.travelEarnings.ordinary / standby.travelHours.ordinary;
+                      const baseRate = monthlyAggregated.settings.contract.hourlyRate;
+                      const percentage = Math.round((hourlyEarned / baseRate - 1) * 100);
+                      return `+${percentage}% - ${hourlyEarned.toFixed(2).replace('.', ',')}€/h`;
+                    }
+                    return 'tariffa base';
+                  })()
+                )})
+              </Text>
               <Text style={styles.breakdownValue}>{formatSafeHours(standby.travelHours.ordinary)}</Text>
             </View>
             <Text style={styles.breakdownAmount}>
@@ -1065,11 +1360,48 @@ const DashboardScreen = ({ navigation, route }) => {
           </View>
         )}
 
-        {/* Viaggio notturno reperibilità */}
+        {/* Viaggio serale reperibilità (18-22h) */}
+        {standby.travelHours.evening > 0 && (
+          <View style={styles.breakdownItem}>
+            <View style={styles.breakdownRow}>
+              <Text style={styles.breakdownLabel}>
+                Viaggio serale ({String(
+                  (() => {
+                    if (standby.travelEarnings.evening && standby.travelHours.evening > 0 && monthlyAggregated?.settings?.contract?.hourlyRate) {
+                      const hourlyEarned = standby.travelEarnings.evening / standby.travelHours.evening;
+                      const baseRate = monthlyAggregated.settings.contract.hourlyRate;
+                      const percentage = Math.round((hourlyEarned / baseRate - 1) * 100);
+                      return `+${percentage}% - ${hourlyEarned.toFixed(2).replace('.', ',')}€/h`;
+                    }
+                    return '+25%';
+                  })()
+                )})
+              </Text>
+              <Text style={styles.breakdownValue}>{formatSafeHours(standby.travelHours.evening)}</Text>
+            </View>
+            <Text style={styles.breakdownAmount}>
+              {formatSafeAmount(standby.travelEarnings.evening)}
+            </Text>
+          </View>
+        )}
+
+        {/* Viaggio notturno reperibilità (22-06h) */}
         {standby.travelHours.night > 0 && (
           <View style={styles.breakdownItem}>
             <View style={styles.breakdownRow}>
-              <Text style={styles.breakdownLabel}>Viaggio notturno (+25%)</Text>
+              <Text style={styles.breakdownLabel}>
+                Viaggio notturno ({String(
+                  (() => {
+                    if (standby.travelEarnings.night && standby.travelHours.night > 0 && monthlyAggregated?.settings?.contract?.hourlyRate) {
+                      const hourlyEarned = standby.travelEarnings.night / standby.travelHours.night;
+                      const baseRate = monthlyAggregated.settings.contract.hourlyRate;
+                      const percentage = Math.round((hourlyEarned / baseRate - 1) * 100);
+                      return `+${percentage}% - ${hourlyEarned.toFixed(2).replace('.', ',')}€/h`;
+                    }
+                    return '+25%';
+                  })()
+                )})
+              </Text>
               <Text style={styles.breakdownValue}>{formatSafeHours(standby.travelHours.night)}</Text>
             </View>
             <Text style={styles.breakdownAmount}>
@@ -1082,7 +1414,19 @@ const DashboardScreen = ({ navigation, route }) => {
         {standby.travelHours.saturday > 0 && (
           <View style={styles.breakdownItem}>
             <View style={styles.breakdownRow}>
-              <Text style={styles.breakdownLabel}>Viaggio sabato (+25%)</Text>
+              <Text style={styles.breakdownLabel}>
+                Viaggio sabato ({String(
+                  (() => {
+                    if (standby.travelEarnings.saturday && standby.travelHours.saturday > 0 && monthlyAggregated?.settings?.contract?.hourlyRate) {
+                      const hourlyEarned = standby.travelEarnings.saturday / standby.travelHours.saturday;
+                      const baseRate = monthlyAggregated.settings.contract.hourlyRate;
+                      const percentage = Math.round((hourlyEarned / baseRate - 1) * 100);
+                      return `+${percentage}% - ${hourlyEarned.toFixed(2).replace('.', ',')}€/h`;
+                    }
+                    return '+25%';
+                  })()
+                )})
+              </Text>
               <Text style={styles.breakdownValue}>{formatSafeHours(standby.travelHours.saturday)}</Text>
             </View>
             <Text style={styles.breakdownAmount}>
@@ -1095,7 +1439,19 @@ const DashboardScreen = ({ navigation, route }) => {
         {standby.travelHours.saturday_night > 0 && (
           <View style={styles.breakdownItem}>
             <View style={styles.breakdownRow}>
-              <Text style={styles.breakdownLabel}>Viaggio sabato notturno (+50%)</Text>
+              <Text style={styles.breakdownLabel}>
+                Viaggio sabato notturno ({String(
+                  (() => {
+                    if (standby.travelEarnings.saturday_night && standby.travelHours.saturday_night > 0 && monthlyAggregated?.settings?.contract?.hourlyRate) {
+                      const hourlyEarned = standby.travelEarnings.saturday_night / standby.travelHours.saturday_night;
+                      const baseRate = monthlyAggregated.settings.contract.hourlyRate;
+                      const percentage = Math.round((hourlyEarned / baseRate - 1) * 100);
+                      return `+${percentage}% - ${hourlyEarned.toFixed(2).replace('.', ',')}€/h`;
+                    }
+                    return '+25%';
+                  })()
+                )})
+              </Text>
               <Text style={styles.breakdownValue}>{formatSafeHours(standby.travelHours.saturday_night)}</Text>
             </View>
             <Text style={styles.breakdownAmount}>
@@ -1108,7 +1464,19 @@ const DashboardScreen = ({ navigation, route }) => {
         {standby.travelHours.holiday > 0 && (
           <View style={styles.breakdownItem}>
             <View style={styles.breakdownRow}>
-              <Text style={styles.breakdownLabel}>Viaggio festivo (+30%)</Text>
+              <Text style={styles.breakdownLabel}>
+                Viaggio festivo ({String(
+                  (() => {
+                    if (standby.travelEarnings.holiday && standby.travelHours.holiday > 0 && monthlyAggregated?.settings?.contract?.hourlyRate) {
+                      const hourlyEarned = standby.travelEarnings.holiday / standby.travelHours.holiday;
+                      const baseRate = monthlyAggregated.settings.contract.hourlyRate;
+                      const percentage = Math.round((hourlyEarned / baseRate - 1) * 100);
+                      return `+${percentage}% - ${hourlyEarned.toFixed(2).replace('.', ',')}€/h`;
+                    }
+                    return '+30%';
+                  })()
+                )})
+              </Text>
               <Text style={styles.breakdownValue}>{formatSafeHours(standby.travelHours.holiday)}</Text>
             </View>
             <Text style={styles.breakdownAmount}>
@@ -1121,7 +1489,19 @@ const DashboardScreen = ({ navigation, route }) => {
         {standby.travelHours.night_holiday > 0 && (
           <View style={styles.breakdownItem}>
             <View style={styles.breakdownRow}>
-              <Text style={styles.breakdownLabel}>Viaggio festivo notturno (+60%)</Text>
+              <Text style={styles.breakdownLabel}>
+                Viaggio festivo notturno ({
+                  (() => {
+                    if (standby.travelEarnings.night_holiday && standby.travelHours.night_holiday > 0 && monthlyAggregated?.settings?.contract?.hourlyRate) {
+                      const hourlyEarned = standby.travelEarnings.night_holiday / standby.travelHours.night_holiday;
+                      const baseRate = monthlyAggregated.settings.contract.hourlyRate;
+                      const percentage = Math.round((hourlyEarned / baseRate - 1) * 100);
+                      return `+${percentage}% - ${hourlyEarned.toFixed(2).replace('.', ',')}€/h`;
+                    }
+                    return '+25%';
+                  })()
+                })
+              </Text>
               <Text style={styles.breakdownValue}>{formatSafeHours(standby.travelHours.night_holiday)}</Text>
             </View>
             <Text style={styles.breakdownAmount}>
@@ -1166,19 +1546,43 @@ const DashboardScreen = ({ navigation, route }) => {
               <Text style={styles.breakdownDetail}>Suddivisione per percentuale:</Text>
               {allowances.travelByPercent['100'].amount > 0 && (
                 <Text style={styles.breakdownSubDetail}>
-                  • 100%: {formatSafeAmount(allowances.travelByPercent['100'].amount)} 
+                  • 100% ({
+                    (() => {
+                      if (monthlyAggregated?.settings?.travelAllowance?.dailyAmount) {
+                        const dailyAmount = monthlyAggregated.settings.travelAllowance.dailyAmount;
+                        return `${dailyAmount.toFixed(2).replace('.', ',')}€/giorno`;
+                      }
+                      return '15,00€/giorno';
+                    })()
+                  }): {formatSafeAmount(allowances.travelByPercent['100'].amount)} 
                   ({allowances.travelByPercent['100'].days} giorni)
                 </Text>
               )}
               {allowances.travelByPercent['78'].amount > 0 && (
                 <Text style={styles.breakdownSubDetail}>
-                  • 78%: {formatSafeAmount(allowances.travelByPercent['78'].amount)} 
+                  • 78% ({
+                    (() => {
+                      if (monthlyAggregated?.settings?.travelAllowance?.dailyAmount) {
+                        const dailyAmount = monthlyAggregated.settings.travelAllowance.dailyAmount * 0.78;
+                        return `${dailyAmount.toFixed(2).replace('.', ',')}€/giorno`;
+                      }
+                      return '11,70€/giorno';
+                    })()
+                  }): {formatSafeAmount(allowances.travelByPercent['78'].amount)} 
                   ({allowances.travelByPercent['78'].days} giorni)
                 </Text>
               )}
               {allowances.travelByPercent['50'].amount > 0 && (
                 <Text style={styles.breakdownSubDetail}>
-                  • 50%: {formatSafeAmount(allowances.travelByPercent['50'].amount)} 
+                  • 50% ({
+                    (() => {
+                      if (monthlyAggregated?.settings?.travelAllowance?.dailyAmount) {
+                        const dailyAmount = monthlyAggregated.settings.travelAllowance.dailyAmount * 0.50;
+                        return `${dailyAmount.toFixed(2).replace('.', ',')}€/giorno`;
+                      }
+                      return '7,50€/giorno';
+                    })()
+                  }): {formatSafeAmount(allowances.travelByPercent['50'].amount)} 
                   ({allowances.travelByPercent['50'].days} giorni)
                 </Text>
               )}
@@ -1199,9 +1603,28 @@ const DashboardScreen = ({ navigation, route }) => {
               <Text style={styles.breakdownLabel}>Indennità reperibilità</Text>
               <Text style={styles.breakdownValue}>{formatSafeAmount(allowances.standby)}</Text>
             </View>
-            <Text style={styles.breakdownDetail}>
-              {allowances.standbyDays || 0} giorni con indennità reperibilità da CCNL
-            </Text>
+            <View style={styles.breakdownSubItems}>
+              {/* Feriale */}
+              {allowances.standbyByType?.feriale?.amount > 0 && (
+                <Text style={styles.breakdownDetail}>
+                  Feriale (7,03€/giorno): €{allowances.standbyByType.feriale.amount.toFixed(2).replace('.', ',')} ({allowances.standbyByType.feriale.days} gg)
+                </Text>
+              )}
+              
+              {/* Sabato */}
+              {allowances.standbyByType?.sabato?.amount > 0 && (
+                <Text style={styles.breakdownDetail}>
+                  Sabato (7,03€/giorno): €{allowances.standbyByType.sabato.amount.toFixed(2).replace('.', ',')} ({allowances.standbyByType.sabato.days} gg)
+                </Text>
+              )}
+              
+              {/* Festivo */}
+              {allowances.standbyByType?.festivo?.amount > 0 && (
+                <Text style={styles.breakdownDetail}>
+                  Festivo (10,63€/giorno): €{allowances.standbyByType.festivo.amount.toFixed(2).replace('.', ',')} ({allowances.standbyByType.festivo.days} gg)
+                </Text>
+              )}
+            </View>
           </View>
         )}
 
@@ -1226,17 +1649,33 @@ const DashboardScreen = ({ navigation, route }) => {
                   <Text style={styles.breakdownSubDetail}>- Pranzo:</Text>
                   {meals.lunch.specific > 0 && (
                     <Text style={styles.breakdownSubDetail}>
-                      {formatSafeAmount(meals.lunch.specific)} (contanti - valore specifico) - {meals.lunch.specificDays} giorni
+                      {formatSafeAmount(meals.lunch.specific)} (contanti specifici) - {meals.lunch.specificDays} giorni
                     </Text>
                   )}
                   {meals.lunch.voucher > 0 && (
                     <Text style={styles.breakdownSubDetail}>
-                      {formatSafeAmount(meals.lunch.voucher)} (buono) - {meals.lunch.voucherDays} giorni
+                      {formatSafeAmount(meals.lunch.voucher)} (buoni {
+                        (() => {
+                          if (monthlyAggregated?.settings?.mealAllowances?.lunch?.voucherAmount && meals.lunch.voucherDays > 0) {
+                            const unitValue = monthlyAggregated.settings.mealAllowances.lunch.voucherAmount;
+                            return `${unitValue.toFixed(2).replace('.', ',')}€/giorno`;
+                          }
+                          return '8,00€/giorno';
+                        })()
+                      }) - {meals.lunch.voucherDays} giorni
                     </Text>
                   )}
                   {meals.lunch.cash > 0 && (
                     <Text style={styles.breakdownSubDetail}>
-                      {formatSafeAmount(meals.lunch.cash)} (contanti) - {meals.lunch.cashDays} giorni
+                      {formatSafeAmount(meals.lunch.cash)} (contanti {
+                        (() => {
+                          if (monthlyAggregated?.settings?.mealAllowances?.lunch?.cashAmount && meals.lunch.cashDays > 0) {
+                            const unitValue = monthlyAggregated.settings.mealAllowances.lunch.cashAmount;
+                            return `${unitValue.toFixed(2).replace('.', ',')}€/giorno`;
+                          }
+                          return '4,00€/giorno';
+                        })()
+                      }) - {meals.lunch.cashDays} giorni
                     </Text>
                   )}
                 </View>
@@ -1248,17 +1687,33 @@ const DashboardScreen = ({ navigation, route }) => {
                   <Text style={styles.breakdownSubDetail}>- Cena:</Text>
                   {meals.dinner.specific > 0 && (
                     <Text style={styles.breakdownSubDetail}>
-                      {formatSafeAmount(meals.dinner.specific)} (contanti - valore specifico) - {meals.dinner.specificDays} giorni
+                      {formatSafeAmount(meals.dinner.specific)} (contanti specifici) - {meals.dinner.specificDays} giorni
                     </Text>
                   )}
                   {meals.dinner.voucher > 0 && (
                     <Text style={styles.breakdownSubDetail}>
-                      {formatSafeAmount(meals.dinner.voucher)} (buono) - {meals.dinner.voucherDays} giorni
+                      {formatSafeAmount(meals.dinner.voucher)} (buoni {
+                        (() => {
+                          if (monthlyAggregated?.settings?.mealAllowances?.dinner?.voucherAmount && meals.dinner.voucherDays > 0) {
+                            const unitValue = monthlyAggregated.settings.mealAllowances.dinner.voucherAmount;
+                            return `${unitValue.toFixed(2).replace('.', ',')}€/giorno`;
+                          }
+                          return '8,00€/giorno';
+                        })()
+                      }) - {meals.dinner.voucherDays} giorni
                     </Text>
                   )}
                   {meals.dinner.cash > 0 && (
                     <Text style={styles.breakdownSubDetail}>
-                      {formatSafeAmount(meals.dinner.cash)} (contanti) - {meals.dinner.cashDays} giorni
+                      {formatSafeAmount(meals.dinner.cash)} (contanti {
+                        (() => {
+                          if (monthlyAggregated?.settings?.mealAllowances?.dinner?.cashAmount && meals.dinner.cashDays > 0) {
+                            const unitValue = monthlyAggregated.settings.mealAllowances.dinner.cashAmount;
+                            return `${unitValue.toFixed(2).replace('.', ',')}€/giorno`;
+                          }
+                          return '4,00€/giorno';
+                        })()
+                      }) - {meals.dinner.cashDays} giorni
                     </Text>
                   )}
                 </View>
@@ -1564,18 +2019,41 @@ const DashboardScreen = ({ navigation, route }) => {
             </View>
           )}
 
-          {/* Altri guadagni se presenti */}
-          {(monthlyAggregated?.travel?.totalEarnings || 0) > 0 && (
+          {/* Indennità (solo trasferte) */}
+          {(monthlyAggregated?.allowances?.travel || 0) > 0 && (
             <View style={styles.earningsItem}>
               <View style={styles.earningsItemHeader}>
-                <View style={[styles.earningsColorBar, { backgroundColor: '#795548' }]} />
-                <Text style={styles.earningsItemLabel}>Viaggi e Trasferte</Text>
+                <View style={[styles.earningsColorBar, { backgroundColor: '#ff9800' }]} />
+                <Text style={styles.earningsItemLabel}>Indennità Trasferta</Text>
                 <Text style={styles.earningsItemPercentage}>
-                  {(analytics?.breakdown?.travelPercentage || 0).toFixed(1)}%
+                  {(analytics?.breakdown?.allowancesPercentage || 0).toFixed(1)}%
                 </Text>
               </View>
               <Text style={styles.earningsItemAmount}>
-                {formatSafeAmount(monthlyAggregated?.travel?.totalEarnings || 0)}
+                {formatSafeAmount(monthlyAggregated?.allowances?.travel || 0)}
+              </Text>
+            </View>
+          )}
+
+          {/* Rimborsi pasti */}
+          {(monthlyAggregated?.allowances?.meal || 0) > 0 && (
+            <View style={styles.earningsItem}>
+              <View style={styles.earningsItemHeader}>
+                <View style={[styles.earningsColorBar, { backgroundColor: '#4caf50' }]} />
+                <Text style={styles.earningsItemLabel}>Rimborsi Pasti</Text>
+                <Text style={styles.earningsItemPercentage}>
+                  {(() => {
+                    // Calcola la percentuale usando la stessa logica del calcolo principale
+                    const totalForPercentages = monthlyAggregated.ordinary.total + 
+                                               monthlyAggregated.standby.totalEarnings + 
+                                               (monthlyAggregated.allowances?.travel || 0) + 
+                                               (monthlyAggregated.allowances?.meal || 0);
+                    return totalForPercentages > 0 ? ((monthlyAggregated.allowances?.meal || 0) / totalForPercentages * 100).toFixed(1) : '0.0';
+                  })()}%
+                </Text>
+              </View>
+              <Text style={styles.earningsItemAmount}>
+                {formatSafeAmount(monthlyAggregated?.allowances?.meal || 0)}
               </Text>
             </View>
           )}
@@ -1583,6 +2061,243 @@ const DashboardScreen = ({ navigation, route }) => {
       </View>
     );
   };
+
+  // Renderizza il riepilogo giornaliero collassabile
+  const renderDailyBreakdown = () => {
+    if (!workEntries || workEntries.length === 0) {
+      return null;
+    }
+
+    try {
+      // Calcola statistiche per il mini-riepilogo usando i dati reali degli entries
+      const standbyOnlyDays = workEntries.filter(entry => {
+        try {
+          const workEntry = createWorkEntryFromData(entry);
+          return workEntry?.isStandbyDay && !workEntry?.workStart1 && !workEntry?.workStart2;
+        } catch (error) {
+          console.error('Errore nel filtrare standbyOnlyDays:', error);
+          return false;
+        }
+      }).length;
+      
+      const workAndStandbyDays = workEntries.filter(entry => {
+        try {
+          const workEntry = createWorkEntryFromData(entry);
+          return workEntry?.isStandbyDay && (workEntry?.workStart1 || workEntry?.workStart2);
+        } catch (error) {
+          console.error('Errore nel filtrare workAndStandbyDays:', error);
+          return false;
+        }
+      }).length;
+
+      const workOnlyDays = workEntries.filter(entry => {
+        try {
+          const workEntry = createWorkEntryFromData(entry);
+          return !workEntry?.isStandbyDay && (workEntry?.workStart1 || workEntry?.workStart2 || workEntry?.isFixedDay);
+        } catch (error) {
+          console.error('Errore nel filtrare workOnlyDays:', error);
+          return false;
+        }
+      }).length;
+
+      // Crea array con i dati reali degli entries
+      const dailyData = workEntries
+        .map(entry => {
+          try {
+            const workEntry = createWorkEntryFromData(entry);
+            if (!workEntry || !entry?.date) {
+              return null; // Skip invalid entries
+            }
+            
+            const dateObj = new Date(entry.date);
+            if (isNaN(dateObj.getTime())) {
+              return null; // Skip invalid dates
+            }
+            
+            const dayOfMonth = dateObj.getDate() || 0;
+            
+            // Calcola ore e guadagni per questo entry con fallback sicuro
+            const breakdown = calculationService?.calculateEarningsBreakdown?.(workEntry, monthlyAggregated?.settings || {}) || {};
+            const dailyHours = (Object.values(breakdown?.ordinary?.hours || {}).reduce((a, b) => (a || 0) + (b || 0), 0) || 0) +
+                              (Object.values(breakdown?.standby?.workHours || {}).reduce((a, b) => (a || 0) + (b || 0), 0) || 0) +
+                              (Object.values(breakdown?.standby?.travelHours || {}).reduce((a, b) => (a || 0) + (b || 0), 0) || 0);
+            const earnings = breakdown?.totalEarnings || 0;
+          
+          // Determina il tipo di giornata basandosi sui dati reali
+          let dayType = 'rest';
+          let typeLabel = 'Riposo';
+          let typeIcon = '⭕';
+          let backgroundColor = '#f8f9fa';
+          
+          if (workEntry?.isFixedDay) {
+            // Giorni fissi (ferie, malattia, riposo compensativo, etc.)
+            if (workEntry?.siteName && String(workEntry.siteName).toLowerCase().includes('ferie')) {
+              dayType = 'vacation';
+              typeLabel = 'Ferie';
+              typeIcon = '🏖️';
+              backgroundColor = '#e8f5e8';
+            } else if (workEntry?.siteName && String(workEntry.siteName).toLowerCase().includes('riposo')) {
+              dayType = 'compensatory';
+              typeLabel = 'Riposo Compensativo';
+              typeIcon = '🛏️';
+              backgroundColor = '#f0f0f0';
+            } else {
+              dayType = 'fixed';
+              typeLabel = 'Giorno Fisso';
+              typeIcon = '📅';
+              backgroundColor = '#e8f5e8';
+            }
+          } else if (workEntry?.isStandbyDay && !workEntry?.workStart1 && !workEntry?.workStart2) {
+            // Solo reperibilità senza lavoro
+            dayType = 'standby-only';
+            typeLabel = 'Solo Reperibilità';
+            typeIcon = '🟡';
+            backgroundColor = '#fff3cd';
+          } else if (workEntry?.isStandbyDay && (workEntry?.workStart1 || workEntry?.workStart2)) {
+            // Lavoro + reperibilità
+            dayType = 'work-standby';
+            typeLabel = 'Lavoro + Reperibilità';
+            typeIcon = '🟠';
+            backgroundColor = '#ffeaa7';
+          } else if (workEntry?.workStart1 || workEntry?.workStart2) {
+            // Solo lavoro ordinario
+            dayType = 'work';
+            typeLabel = 'Lavoro Ordinario';
+            typeIcon = '🔵';
+            backgroundColor = '#d1ecf1';
+          }
+          
+          return {
+            dayOfMonth: dayOfMonth || 0,
+            dateObj,
+            hours: dailyHours || 0,
+            earnings: earnings || 0,
+            entryData: entry,
+            workEntry,
+            dayType: dayType || 'rest',
+            typeLabel: typeLabel || 'N/A',
+            typeIcon: typeIcon || '⭕',
+            backgroundColor: backgroundColor || '#f8f9fa'
+          };
+          
+          } catch (error) {
+            console.error('Errore nel processare entry:', entry?.id, error);
+            return null; // Skip entries che causano errori
+          }
+        })
+        .filter(day => day !== null) // Rimuovi entries invalide
+        .sort((a, b) => (b?.dateObj || new Date()) - (a?.dateObj || new Date())); // Ordina dal più recente al più vecchio
+
+      return (
+        <View style={styles.sectionCard}>
+          <TouchableOpacity 
+            style={styles.collapsibleHeader}
+            onPress={() => setIsDailyBreakdownExpanded(!isDailyBreakdownExpanded)}
+            activeOpacity={0.7}
+          >
+            <View style={styles.collapsibleHeaderContent}>
+              <MaterialCommunityIcons name="calendar-today" size={20} color="#2196f3" />
+              <Text style={styles.collapsibleTitle}>Riepilogo Giornaliero</Text>
+              <MaterialCommunityIcons 
+                name={isDailyBreakdownExpanded ? "chevron-up" : "chevron-down"} 
+                size={20} 
+                color="#666" 
+              />
+            </View>
+            
+            <View style={styles.miniSummary}>
+              <Text style={styles.miniSummaryText}>
+                {workEntries?.length || 0} giorni registrati • {formatSafeHours(dailyData.reduce((total, day) => total + (day?.hours || 0), 0))} totali
+              </Text>
+              <Text style={styles.miniSummaryText}>
+                {formatSafeAmount(dailyData.reduce((total, day) => total + (day?.earnings || 0), 0))} guadagno totale
+              </Text>
+              {(standbyOnlyDays || 0) > 0 && (
+                <Text style={styles.miniSummaryText}>
+                  🟡 {standbyOnlyDays || 0} giorni solo reperibilità
+                </Text>
+              )}
+              {(workAndStandbyDays || 0) > 0 && (
+                <Text style={styles.miniSummaryText}>
+                  🟠 {workAndStandbyDays || 0} giorni lavoro + reperibilità
+                </Text>
+              )}
+              {(workOnlyDays || 0) > 0 && (
+                <Text style={styles.miniSummaryText}>
+                  🔵 {workOnlyDays || 0} giorni lavoro ordinario
+                </Text>
+              )}
+            </View>
+          </TouchableOpacity>
+          
+          {isDailyBreakdownExpanded && (
+            <View style={styles.collapsibleContent}>
+              {dailyData.map((day, index) => (
+                <TouchableOpacity 
+                  key={`${day?.dateObj?.getTime() || index}-${index}`} 
+                  style={[styles.dailyListItem, { backgroundColor: day?.backgroundColor || '#f8f9fa' }]}
+                  onPress={() => navigation.navigate('TimeEntry', { 
+                    screen: 'TimeEntryForm', 
+                    params: { 
+                      isEdit: true, 
+                      entry: day?.entryData,
+                      enableDelete: true 
+                    } 
+                  })}
+                  activeOpacity={0.7}
+                >
+                  <View style={styles.dailyListHeader}>
+                    <View style={styles.dailyListDate}>
+                      <Text style={styles.dailyListDay}>{String(day?.dayOfMonth || 0)}</Text>
+                      <Text style={styles.dailyListDateText}>
+                        {day?.dateObj?.toLocaleDateString?.('it-IT', { weekday: 'short' }) || 'N/A'}
+                      </Text>
+                    </View>
+                    <View style={styles.dailyListType}>
+                      <Text style={styles.dailyListTypeIcon}>{String(day?.typeIcon || '⭕')}</Text>
+                      <Text style={styles.dailyListTypeText}>{String(day?.typeLabel || 'N/A')}</Text>
+                    </View>
+                    <View style={styles.dailyListStats}>
+                      <Text style={styles.dailyListHours}>{formatSafeHours(day?.hours || 0)}</Text>
+                      <Text style={styles.dailyListEarnings}>{formatSafeAmount(day?.earnings || 0)}</Text>
+                    </View>
+                  </View>
+                  
+                  <View style={styles.dailyListDetails}>
+                    {/* Solo informazioni essenziali come richiesto */}
+                    {day?.workEntry?.isStandbyDay && (
+                      <Text style={styles.dailyListDetail}>🟡 Reperibilità</Text>
+                    )}
+                    {day?.workEntry?.completamentoGiornata && day.workEntry.completamentoGiornata !== 'nessuno' && (
+                      <Text style={styles.dailyListDetail}>
+                        Giornata completata con: {String(day.workEntry.completamentoGiornata || '')}
+                      </Text>
+                    )}
+                  </View>
+                </TouchableOpacity>
+              ))}
+              
+              {(dailyData?.length || 0) === 0 && (
+                <View style={styles.emptyDailyList}>
+                  <Text style={styles.emptyDailyText}>Nessuna attività registrata questo mese</Text>
+                </View>
+              )}
+            </View>
+          )}
+        </View>
+      );
+    } catch (error) {
+      console.error('Errore nella renderizzazione del riepilogo giornaliero:', error);
+      return (
+        <View style={styles.sectionCard}>
+          <Text style={styles.sectionTitle}>Riepilogo Giornaliero</Text>
+          <Text style={styles.errorText}>Errore nel caricamento dei dati</Text>
+        </View>
+      );
+    }
+  };
+
+
 
   const renderWorkPatternsSection = () => {
     const analytics = monthlyAggregated?.analytics;
@@ -1688,6 +2403,43 @@ const DashboardScreen = ({ navigation, route }) => {
     );
   };
 
+  const renderCompletionSection = () => {
+    if (completionLoading || !completionData || completionData.totalEntries === 0) return null;
+
+    return (
+      <View style={styles.sectionCard}>
+        <Text style={styles.sectionTitle}>📋 Giorni in Completamento</Text>
+        
+        <View style={styles.breakdownItem}>
+          <View style={styles.breakdownRow}>
+            <Text style={styles.breakdownLabel}>Totale giorni</Text>
+            <Text style={styles.breakdownValue}>{completionData.totalEntries}</Text>
+          </View>
+          <Text style={styles.breakdownDetail}>
+            {completionData.totalCompletionHours.toFixed(1)} ore totali in completamento
+          </Text>
+        </View>
+        
+        {Object.entries(completionData.byType || {}).map(([tipo, data]) => (
+          <View key={tipo} style={styles.breakdownItem}>
+            <View style={styles.breakdownRow}>
+              <Text style={styles.breakdownLabel}>
+                {tipo === 'ferie' ? '🏖️ Ferie' : 
+                 tipo === 'malattia' ? '🏥 Malattia' : 
+                 tipo === 'permesso' ? '📅 Permesso' : 
+                 tipo === 'recupero' ? '⏰ Recupero' : tipo}
+              </Text>
+              <Text style={styles.breakdownValue}>{data.count} giorni</Text>
+            </View>
+            <Text style={styles.breakdownDetail}>
+              {data.totalHours.toFixed(1)} ore ({(data.totalHours / 8).toFixed(1)} giornate equivalenti)
+            </Text>
+          </View>
+        ))}
+      </View>
+    );
+  };
+
   // Debug rimosso per evitare errori di scope con safeSettings
 
   if (loading) {
@@ -1751,6 +2503,8 @@ const DashboardScreen = ({ navigation, route }) => {
             {renderStandbySection()}
             {renderAllowancesSection()}
             {renderFixedDaysSection()}
+            {renderCompletionSection()}
+            {renderDailyBreakdown()}
           </>
         ) : (
           <View style={styles.emptyState}>
@@ -1961,6 +2715,10 @@ const styles = StyleSheet.create({
     color: '#666',
     marginLeft: 8,
     marginTop: 2,
+  },
+  breakdownSubItems: {
+    marginLeft: 8,
+    marginTop: 4,
   },
   breakdownSubDetail: {
     fontSize: 13,
@@ -2218,6 +2976,175 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#333',
     textAlign: 'center',
+  },
+  
+  // Stili per il riepilogo giornaliero collassabile
+  collapsibleHeader: {
+    flexDirection: 'column',
+    padding: 16,
+  },
+  collapsibleHeaderContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  collapsibleTitle: {
+    flex: 1,
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+    marginLeft: 8,
+  },
+  miniSummary: {
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#f0f0f0',
+  },
+  miniSummaryText: {
+    fontSize: 13,
+    color: '#666',
+    marginBottom: 2,
+  },
+  collapsibleContent: {
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+  },
+  // Nuovi stili per lista verticale
+  dailyListItem: {
+    marginBottom: 12,
+    borderRadius: 8,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  dailyListHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  dailyListDate: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  dailyListDay: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  dailyListDateText: {
+    fontSize: 12,
+    color: '#666',
+    textTransform: 'capitalize',
+  },
+  dailyListType: {
+    flex: 2,
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'center',
+  },
+  dailyListTypeIcon: {
+    fontSize: 16,
+    marginRight: 6,
+  },
+  dailyListTypeText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+  },
+  dailyListStats: {
+    flex: 1,
+    alignItems: 'flex-end',
+  },
+  dailyListHours: {
+    fontSize: 14,
+    color: '#2196f3',
+    fontWeight: '600',
+  },
+  dailyListEarnings: {
+    fontSize: 12,
+    color: '#4caf50',
+    fontWeight: '500',
+  },
+  dailyListDetails: {
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#f0f0f0',
+  },
+  dailyListDetail: {
+    fontSize: 12,
+    color: '#666',
+    marginBottom: 2,
+    paddingLeft: 4,
+  },
+  emptyDailyList: {
+    padding: 20,
+    alignItems: 'center',
+  },
+  emptyDailyText: {
+    fontSize: 14,
+    color: '#999',
+    fontStyle: 'italic',
+  },
+  // Vecchi stili mantenuti per compatibilità 
+  dailyScrollView: {
+    maxHeight: 120,
+    marginTop: 12,
+  },
+  dailyScrollContent: {
+    paddingHorizontal: 4,
+  },
+  dailyItem: {
+    borderRadius: 8,
+    padding: 8,
+    marginHorizontal: 4,
+    minWidth: 60,
+    alignItems: 'center',
+    borderWidth: 2,
+  },
+  dailyDate: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 4,
+  },
+  dailyHours: {
+    fontSize: 11,
+    color: '#2196f3',
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  dailyEarnings: {
+    fontSize: 10,
+    color: '#4caf50',
+    fontWeight: '500',
+  },
+  dailyLegend: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-around',
+    marginTop: 12,
+    gap: 8,
+  },
+  legendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  legendColor: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    marginRight: 6,
+  },
+  legendText: {
+    fontSize: 11,
+    color: '#666',
+    fontWeight: '500',
   },
 });
 
