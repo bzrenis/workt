@@ -25,6 +25,7 @@ import { useDatabase } from './src/hooks';
 import DatabaseHealthService from './src/services/DatabaseHealthService';
 import NotificationService from './src/services/NotificationService';
 import DebugSettingsScreen from './src/screens/DebugSettingsScreen';
+import { ThemeProvider } from './src/contexts/ThemeContext';
 
 const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
@@ -91,6 +92,11 @@ function SettingsStack() {
         name="NotificationSettings" 
         component={require('./src/screens/NotificationSettingsScreen').default} 
         options={{ title: 'Notifiche' }}
+      />
+      <Stack.Screen 
+        name="ThemeSettings" 
+        component={require('./src/screens/ThemeSettingsScreen').default} 
+        options={{ title: 'Tema e Aspetto' }}
       />
       <Stack.Screen 
         name="DebugSettings" 
@@ -187,11 +193,13 @@ export default function App() {
   }
 
   return (
-    <SafeAreaProvider>
-      <NavigationContainer>
-        <MainTabs />
-        <StatusBar style="auto" />
-      </NavigationContainer>
-    </SafeAreaProvider>
+    <ThemeProvider>
+      <SafeAreaProvider>
+        <NavigationContainer>
+          <MainTabs />
+          <StatusBar style="auto" />
+        </NavigationContainer>
+      </SafeAreaProvider>
+    </ThemeProvider>
   );
 }

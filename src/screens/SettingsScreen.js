@@ -108,6 +108,13 @@ const SettingsScreen = ({ navigation }) => {
       color: '#FF5722'
     },
     {
+      title: 'Tema e Aspetto',
+      subtitle: 'Dark mode e personalizzazione interfaccia',
+      icon: 'theme-light-dark',
+      screen: 'ThemeSettings',
+      color: '#673AB7'
+    },
+    {
       title: 'Backup e Ripristino',
       subtitle: 'Salvataggio e ripristino dati',
       icon: 'cloud-sync',
