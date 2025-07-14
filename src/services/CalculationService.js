@@ -8,6 +8,7 @@ import {
 import { isItalianHoliday } from '../constants/holidays';
 import { NetEarningsCalculator, calculateQuickNet, calculateDetailedNet, calculateRealNet } from './NetEarningsCalculator';
 import { TimeCalculator } from './TimeCalculator';
+import { createWorkEntryFromData } from '../utils/earningsHelper';
 import { EarningsCalculator } from './EarningsCalculator';
 
 class CalculationService {
@@ -217,6 +218,7 @@ class CalculationService {
       travelPay = travelHours * baseRate * travelCompensationRate;
       
       // Per il lavoro, verifica se completare con diaria o ore effettive
+      // In modalità TRAVEL_SEPARATE, considera SOLO le ore di lavoro per la diaria
       if (workHours >= standardWorkDay) {
         regularPay = dailyRate;
         regularHours = standardWorkDay;
@@ -234,9 +236,35 @@ class CalculationService {
           overtimeHours = extraWorkHours;
         }
       } else {
-        regularPay = baseRate * workHours;
+        // CORREZIONE: paga solo le ore di lavoro in proporzione al dailyRate CCNL
+        // Il viaggio è già pagato separatamente sopra
+        regularPay = dailyRate * (workHours / standardWorkDay);
         regularHours = workHours;
         overtimeHours = 0;
+      }
+    } else if (travelHoursSetting === 'MULTI_SHIFT_OPTIMIZED') {
+      console.log(`[CalculationService] Applicando modalità MULTI_SHIFT_OPTIMIZED`);
+      // MULTI_SHIFT_OPTIMIZED: considera solo primo viaggio andata e ultimo ritorno
+      // Per ora considera tutto il viaggio dato che la logica di ottimizzazione viaggi è in EarningsCalculator
+      const totalRegularHours = workHours + travelHours;
+      
+      if (totalRegularHours >= standardWorkDay) {
+        // Giornata completa: paga giornaliera + eccedenza come viaggio
+        regularPay = dailyRate;
+        regularHours = standardWorkDay;
+        const extraHours = totalRegularHours - standardWorkDay;
+        if (extraHours > 0) {
+          console.log(`[CalculationService] MULTI_SHIFT_OPTIMIZED: ore extra (${extraHours}h) pagate come viaggio`);
+          travelPay = extraHours * baseRate * travelCompensationRate;
+          overtimeHours = 0;
+        }
+      } else {
+        console.log(`[CalculationService] MULTI_SHIFT_OPTIMIZED: totale ore (${totalRegularHours}h) < 8h → calcolo proporzionale CCNL`);
+        // Giornata parziale: calcolo proporzionale della diaria CCNL
+        regularPay = dailyRate * (totalRegularHours / standardWorkDay);
+        regularHours = totalRegularHours;
+        overtimeHours = 0;
+        travelPay = 0; // Nessuna eccedenza da pagare come viaggio
       }
     } else {
       console.log(`[CalculationService] Applicando modalità ${travelHoursSetting} (logica esistente)`);
@@ -272,25 +300,10 @@ class CalculationService {
           }
         }
       } else {
-        console.log(`[CalculationService] Totale ore (${totalRegularHours}h) < giornata standard: calcolo proporzionale`);
-        // Se meno di 8h, paga solo le ore effettive MA rispettando la modalità viaggio
-        if (travelHoursSetting === 'AS_WORK') {
-          console.log(`[CalculationService] Modalità AS_WORK: tutto come lavoro normale`);
-          // Tutto come lavoro normale
-          regularPay = baseRate * totalRegularHours;
-          regularHours = totalRegularHours;
-        } else if (travelHoursSetting === 'TRAVEL_SEPARATE') {
-          console.log(`[CalculationService] Modalità TRAVEL_SEPARATE con <8h: viaggio separato + lavoro normale`);
-          // Viaggio sempre pagato separatamente, lavoro come ore normali
-          travelPay = travelHours * baseRate * travelCompensationRate;
-          regularPay = workHours * baseRate;
-          regularHours = workHours;
-        } else {
-          console.log(`[CalculationService] Altre modalità con <8h: pagamento ore effettive (${travelHoursSetting})`);
-          // Per EXCESS_AS_TRAVEL/EXCESS_AS_OVERTIME con meno di 8h, nessuna eccedenza
-          regularPay = baseRate * totalRegularHours;
-          regularHours = totalRegularHours;
-        }
+        console.log(`[CalculationService] Totale ore (${totalRegularHours}h) < giornata standard: calcolo proporzionale CCNL`);
+        // CORREZIONE: paga sempre in proporzione al dailyRate CCNL
+        regularPay = dailyRate * (totalRegularHours / standardWorkDay);
+        regularHours = totalRegularHours;
         overtimeHours = 0;
       }
     }
@@ -306,7 +319,18 @@ class CalculationService {
         isSunday,
         contract
       });
-      ordinaryBonusPay = totalRegularHours * (ordinaryBonusRate - baseRate);
+      // CORREZIONE: in modalità TRAVEL_SEPARATE usa solo regularHours (solo lavoro)
+      // In modalità MULTI_SHIFT_OPTIMIZED usa regularHours (che include lavoro + viaggio ottimizzato)
+      // In altre modalità usa totalRegularHours (lavoro + viaggio completo)
+      let hoursForBonus;
+      if (travelHoursSetting === 'TRAVEL_SEPARATE') {
+        hoursForBonus = regularHours; // Solo ore di lavoro
+      } else if (travelHoursSetting === 'MULTI_SHIFT_OPTIMIZED') {
+        hoursForBonus = regularHours; // Ore lavoro + viaggio ottimizzato
+      } else {
+        hoursForBonus = typeof totalRegularHours !== 'undefined' ? totalRegularHours : regularHours;
+      }
+      ordinaryBonusPay = hoursForBonus * (ordinaryBonusRate - baseRate);
     }
 
     // --- CALCOLO INTERVENTI DURANTE REPERIBILITÀ ---
@@ -1599,27 +1623,27 @@ class CalculationService {
     }
     
     workEntries.forEach(entry => {
+      // 🔧 PARSING CORRETTO: Usa createWorkEntryFromData come nel TimeEntryScreen
+      const parsedEntry = createWorkEntryFromData(entry, this);
+      
       // Usa calculateEarningsBreakdown per logica consistente con TimeEntryScreen
-      const breakdown = this.calculateEarningsBreakdown(entry, settings);
-      const workHours = this.calculateWorkHours(entry);
-      const travelHours = this.calculateTravelHours(entry);
-      const travelExtraHours = this.calculateExtraTravelHours ? this.calculateExtraTravelHours(entry) : 0;
+      const breakdown = this.calculateEarningsBreakdown(parsedEntry, settings);
       
-      // Usa le ore di reperibilità dal breakdown dettagliato se disponibile
-      let standbyWorkHours = 0;
-      let standbyTravelHours = 0;
+      // 🔧 CORREZIONE: Usa la stessa logica del Dashboard per calcolare le ore
+      // Calcola ore di lavoro dal breakdown (include lavoro normale + straordinari)
+      const workHours = Object.values(breakdown.ordinary?.hours || {}).reduce((sum, hours) => sum + hours, 0);
       
-      if (breakdown.standby && breakdown.standby.workHours && breakdown.standby.travelHours) {
-        // Usa il breakdown dettagliato che gestisce le categorie (ordinary, night, saturday, holiday, etc.)
-        standbyWorkHours = Object.values(breakdown.standby.workHours).reduce((sum, hours) => sum + hours, 0);
-        standbyTravelHours = Object.values(breakdown.standby.travelHours).reduce((sum, hours) => sum + hours, 0);
-        console.log(`[CalculationService] ${entry.date}: Ore reperibilità da breakdown dettagliato - Lavoro: ${standbyWorkHours}h, Viaggio: ${standbyTravelHours}h`);
-      } else {
-        // Fallback alla logica semplice
-        standbyWorkHours = this.calculateStandbyWorkHours(entry);
-        standbyTravelHours = this.calculateStandbyTravelHours(entry);
-        console.log(`[CalculationService] ${entry.date}: Ore reperibilità da calcolo semplice - Lavoro: ${standbyWorkHours}h, Viaggio: ${standbyTravelHours}h`);
-      }
+      // Calcola ore di viaggio dal breakdown 
+      const travelHours = Object.values(breakdown.travel?.hours || {}).reduce((sum, hours) => sum + hours, 0);
+      
+      // Calcola ore straordinarie eccedenti (se disponibili)
+      const travelExtraHours = breakdown.travel?.extraHours || 0;
+      
+      // Usa le ore di reperibilità dal breakdown dettagliato
+      const standbyWorkHours = Object.values(breakdown.standby?.workHours || {}).reduce((sum, hours) => sum + hours, 0);
+      const standbyTravelHours = Object.values(breakdown.standby?.travelHours || {}).reduce((sum, hours) => sum + hours, 0);
+      
+      console.log(`[CalculationService] ${parsedEntry.date}: Ore da breakdown - Lavoro: ${workHours}h, Viaggio: ${travelHours}h, Reperibilità lavoro: ${standbyWorkHours}h, Reperibilità viaggio: ${standbyTravelHours}h`);
       
       // Ore totali e per categoria
       summary.totalHours += workHours + travelHours + standbyWorkHours + standbyTravelHours;
@@ -1639,20 +1663,20 @@ class CalculationService {
       
       // Conteggio giorni per tipo di reperibilità
       // Considera sia il flag manuale (isStandbyDay/standbyAllowance) che le impostazioni
-      const isStandbyDayManual = entry.isStandbyDay === 1 || entry.standbyAllowance === 1;
+      const isStandbyDayManual = parsedEntry.isStandbyDay === 1 || parsedEntry.standbyAllowance === 1;
       const isStandbyDayFromSettings = settings?.standbySettings?.enabled && 
         settings?.standbySettings?.standbyDays && 
-        settings?.standbySettings?.standbyDays[entry.date]?.selected;
+        settings?.standbySettings?.standbyDays[parsedEntry.date]?.selected;
         
       if (isStandbyDayManual || isStandbyDayFromSettings) {
         summary.standbyDays++;
-        console.log(`[CalculationService] Conteggio giorni reperibilità: ${entry.date} conteggiato. Fonte: ${isStandbyDayManual ? 'Flag manuale' : 'Impostazioni'}`);
+        console.log(`[CalculationService] Conteggio giorni reperibilità: ${parsedEntry.date} conteggiato. Fonte: ${isStandbyDayManual ? 'Flag manuale' : 'Impostazioni'}`);
       }
       
       // Giorni ordinari vs festivi/weekend
-      const entryDate = new Date(entry.date);
+      const entryDate = new Date(parsedEntry.date);
       const isWeekend = entryDate.getDay() === 0 || entryDate.getDay() === 6; // domenica = 0, sabato = 6
-      const isHoliday = isItalianHoliday(entry.date);
+      const isHoliday = isItalianHoliday(parsedEntry.date);
       
       if (isWeekend || isHoliday) {
         summary.weekendHolidayDays++;
@@ -1661,7 +1685,7 @@ class CalculationService {
       }
       
       // Conteggio giorni con trasferta
-      if (entry.travelAllowance === 1) {
+      if (parsedEntry.travelAllowance === 1) {
         summary.travelAllowanceDays++;
       }
       
@@ -1670,11 +1694,11 @@ class CalculationService {
       let hasMealCash = false;
       
       // Logica pranzo: se c'è cash specifico, usa solo quello, altrimenti usa voucher dalle impostazioni
-      if (entry.mealLunchCash > 0) {
+      if (parsedEntry.mealLunchCash > 0) {
         summary.lunchCount++;
         hasMealCash = true;
-        summary.mealCashAmount += entry.mealLunchCash;
-      } else if (entry.mealLunchVoucher === 1) {
+        summary.mealCashAmount += parsedEntry.mealLunchCash;
+      } else if (parsedEntry.mealLunchVoucher === 1) {
         summary.lunchCount++;
         hasMealVoucher = true;
         summary.mealVoucherAmount += settings?.mealAllowances?.lunch?.voucherAmount || 0;
@@ -1686,11 +1710,11 @@ class CalculationService {
       }
       
       // Logica cena: stessa logica del pranzo
-      if (entry.mealDinnerCash > 0) {
+      if (parsedEntry.mealDinnerCash > 0) {
         summary.dinnerCount++;
         hasMealCash = true;
-        summary.mealCashAmount += entry.mealDinnerCash;
-      } else if (entry.mealDinnerVoucher === 1) {
+        summary.mealCashAmount += parsedEntry.mealDinnerCash;
+      } else if (parsedEntry.mealDinnerVoucher === 1) {
         summary.dinnerCount++;
         hasMealVoucher = true;
         summary.mealVoucherAmount += settings?.mealAllowances?.dinner?.voucherAmount || 0;
@@ -1720,13 +1744,13 @@ class CalculationService {
       summary.mealAllowances += breakdown.allowances?.meal || 0;
       
       // Determina se è un giorno di reperibilità (da flag manuale o impostazioni)
-      const isStandbyDay = entry.isStandbyDay === 1 || entry.standbyAllowance === 1 ||
+      const isStandbyDay = parsedEntry.isStandbyDay === 1 || parsedEntry.standbyAllowance === 1 ||
         (settings?.standbySettings?.enabled && 
           settings?.standbySettings?.standbyDays && 
-          settings?.standbySettings?.standbyDays[entry.date]?.selected);
+          settings?.standbySettings?.standbyDays[parsedEntry.date]?.selected);
 
       summary.dailyBreakdown.push({
-        date: entry.date,
+        date: parsedEntry.date,
         workHours,
         travelHours,
         standbyWorkHours,
