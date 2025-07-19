@@ -147,11 +147,36 @@ class CalculationService {
     };
   }
 
+  // Helper per ottenere la tariffa oraria corretta (personalizzata o CCNL)
+  getHourlyRate(contract) {
+    if (contract.customRatesEnabled && contract.customHourlyRate) {
+      return contract.customHourlyRate;
+    }
+    return contract.hourlyRate || (contract.monthlySalary / 173);
+  }
+
+  // Helper per ottenere la tariffa giornaliera corretta (personalizzata o CCNL)
+  getDailyRate(contract) {
+    if (contract.customRatesEnabled && contract.customDailyRate) {
+      return contract.customDailyRate;
+    }
+    return contract.dailyRate || (contract.monthlySalary / 26);
+  }
+
   // Calcola la retribuzione giornaliera con tutte le maggiorazioni CCNL
   calculateDailyEarnings(workEntry, settings) {
     const contract = settings.contract || this.defaultContract;
-    const baseRate = contract.hourlyRate || (contract.monthlySalary / 173);
-    const dailyRate = contract.dailyRate || (contract.monthlySalary / 26);
+    
+    // Usa helper per ottenere tariffe corrette (personalizzate o CCNL)
+    const baseRate = this.getHourlyRate(contract);
+    const dailyRate = this.getDailyRate(contract);
+    
+    console.log(`[CalculationService] Tariffe utilizzate - Oraria: €${baseRate}, Giornaliera: €${dailyRate}`, {
+      customRatesEnabled: contract.customRatesEnabled,
+      customHourlyRate: contract.customHourlyRate,
+      customDailyRate: contract.customDailyRate
+    });
+    
     const travelCompensationRate = settings.travelCompensationRate || 1.0;
     const travelHoursSetting = settings.travelHoursSetting || 'EXCESS_AS_TRAVEL';
     
@@ -177,6 +202,17 @@ class CalculationService {
     const isSunday = dateObj.getDay() === 0;
     const isSaturday = dateObj.getDay() === 6;
     const isHoliday = isItalianHoliday(workEntry.date);
+    
+    // NUOVO: Verifica se usare calcolo dettagliato per fasce orarie
+    const useDetailedCalculation = this.shouldUseDetailedTimeSlotCalculation(workEntry);
+    
+    console.log(`[CalculationService] Modalità calcolo: ${useDetailedCalculation ? 'FASCE ORARIE DETTAGLIATE' : 'STANDARD'}`, {
+      data: workEntry.date,
+      startTime: workEntry.startTime,
+      endTime: workEntry.endTime,
+      workHours,
+      travelHours
+    });
     
     // Verifica se il giorno è segnato come reperibile sia tramite calendario impostazioni che flag manuale
     // Log di debug per verificare la data e le impostazioni di reperibilità
@@ -218,15 +254,43 @@ class CalculationService {
     let regularPay = 0;
     let regularHours = 0;
     let travelPay = 0;
-
-    // LOGICA CCNL: gestione modalità viaggio
-    const standardWorkDay = getWorkDayHours();
-    console.log(`[CalculationService] Applicazione modalità viaggio: ${travelHoursSetting}`, {
-      workHours,
-      travelHours,
-      standardWorkDay,
-      totalHours: workHours + travelHours
-    });
+    
+    // NUOVO: Calcolo dettagliato per fasce orarie CCNL
+    if (useDetailedCalculation && workEntry.startTime && workEntry.endTime) {
+      console.log(`[CalculationService] Applicando calcolo dettagliato fasce orarie per ${workEntry.startTime}-${workEntry.endTime}`);
+      
+      // Calcola ore totali per determinare se è straordinario
+      const totalHours = workHours + travelHours;
+      const isOvertimePeriod = totalHours > 8;
+      
+      // Calcola retribuzione lavoro con fasce orarie
+      const workCalculation = this.calculateHourlyRatesByTimeSlots(
+        workEntry.startTime, 
+        workEntry.endTime, 
+        baseRate, 
+        contract, 
+        isOvertimePeriod, 
+        isHoliday, 
+        isSunday
+      );
+      
+      console.log(`[CalculationService] Calcolo lavoro fasce orarie:`, workCalculation);
+      
+      // Se ci sono ore oltre le 8, considera tutto come straordinario
+      if (isOvertimePeriod) {
+        overtimePay = workCalculation.totalEarnings;
+        overtimeHours = workCalculation.totalHours;
+        regularPay = 0;
+        regularHours = 0;
+      } else {
+        regularPay = workCalculation.totalEarnings;
+        regularHours = workCalculation.totalHours;
+      }
+      
+      // Calcola viaggio separatamente (sempre a tariffa standard per ora)
+      travelPay = travelHours * baseRate * travelCompensationRate;
+      
+    } else {
     
     if (travelHoursSetting === 'TRAVEL_SEPARATE') {
       console.log(`[CalculationService] Applicando modalità TRAVEL_SEPARATE`);
@@ -318,6 +382,9 @@ class CalculationService {
         contract
       });
       ordinaryBonusPay = totalRegularHours * (ordinaryBonusRate - baseRate);
+    }
+    
+    // Chiude il blocco else del calcolo standard
     }
 
     // --- CALCOLO INTERVENTI DURANTE REPERIBILITÀ ---
@@ -641,7 +708,7 @@ class CalculationService {
   calculateEarningsBreakdown(workEntry, settings) {
     // Inizializza le strutture di base per il calcolo
     const contract = settings.contract || this.defaultContract;
-    const baseRate = contract.hourlyRate || 16.41;
+    const baseRate = this.getHourlyRate(contract);
     const date = workEntry.date ? new Date(workEntry.date) : new Date();
     const isSaturday = date.getDay() === 6;
     const isSunday = date.getDay() === 0;
@@ -657,7 +724,7 @@ class CalculationService {
       console.log(`[CalculationService] Giorno fisso rilevato (${dayType}) per ${workEntry.date}, applicazione retribuzione giornaliera standard`);
       
       // Per i giorni fissi, viene corrisposta la retribuzione giornaliera standard (senza orari)
-      const dailyRate = contract.dailyRate || 109.19;
+      const dailyRateFixed = this.getDailyRate(contract);
       
       return {
         ordinary: {
@@ -668,11 +735,11 @@ class CalculationService {
             viaggio_extra: 0
           },
           earnings: {
-            giornaliera: dailyRate, // Retribuzione giornaliera standard per giorni fissi
+            giornaliera: dailyRateFixed, // Retribuzione giornaliera standard per giorni fissi
             viaggio_extra: 0,
             lavoro_extra: 0
           },
-          total: dailyRate
+          total: dailyRateFixed
         },
         standby: {
           workHours: {},
@@ -1058,7 +1125,7 @@ class CalculationService {
    */
   calculateStandbyBreakdown(workEntry, settings) {
     const contract = settings.contract || this.defaultContract;
-    const baseRate = contract.hourlyRate;
+    const baseRate = this.getHourlyRate(contract);
     const travelCompensationRate = settings.travelCompensationRate || 1.0;
     const standbySettings = settings.standbySettings || {};
     const standbyDays = standbySettings.standbyDays || {};
@@ -1493,6 +1560,100 @@ class CalculationService {
     return baseRate;
   }
 
+  // Calcola la retribuzione per fasce orarie CCNL dettagliate
+  calculateHourlyRatesByTimeSlots(startTime, endTime, baseRate, contract, isOvertime = false, isHoliday = false, isSunday = false) {
+    const timeSlots = [];
+    
+    // Converti orari in minuti per calcoli più precisi
+    const [startHour, startMin] = startTime.split(':').map(Number);
+    const [endHour, endMin] = endTime.split(':').map(Number);
+    
+    let startMinutes = startHour * 60 + startMin;
+    let endMinutes = endHour * 60 + endMin;
+    
+    // Gestisci il caso di attraversamento della mezzanotte
+    if (endMinutes <= startMinutes) {
+      endMinutes += 24 * 60; // Aggiungi 24 ore
+    }
+    
+    // Fasce orarie CCNL (in minuti)
+    const CCNL_TIME_SLOTS = [
+      { start: 6 * 60, end: 20 * 60, name: 'diurno', multiplier: isOvertime ? (contract?.overtimeRates?.day || 1.2) : 1.0 },
+      { start: 20 * 60, end: 22 * 60, name: 'serale', multiplier: isOvertime ? (contract?.overtimeRates?.nightUntil22 || 1.25) : 1.0 },
+      { start: 22 * 60, end: 24 * 60, name: 'notturno', multiplier: isOvertime ? (contract?.overtimeRates?.nightAfter22 || 1.35) : (contract?.overtimeRates?.nightUntil22 || 1.25) },
+      { start: 0, end: 6 * 60, name: 'notturno', multiplier: isOvertime ? (contract?.overtimeRates?.nightAfter22 || 1.35) : (contract?.overtimeRates?.nightUntil22 || 1.25) }
+    ];
+    
+    // Applica maggiorazioni festive/domenicali se necessario
+    const holidayMultiplier = isHoliday || isSunday ? (contract?.overtimeRates?.holiday || 1.3) : 1.0;
+    
+    let totalEarnings = 0;
+    let totalHours = 0;
+    
+    // Calcola le intersezioni con ogni fascia oraria
+    for (const slot of CCNL_TIME_SLOTS) {
+      let slotStart = slot.start;
+      let slotEnd = slot.end;
+      
+      // Per le fasce che attraversano la mezzanotte, calcola anche il giorno successivo
+      const slotsToCheck = [{ start: slotStart, end: slotEnd }];
+      
+      // Se il lavoro attraversa la mezzanotte, aggiungi le fasce del giorno successivo
+      if (endMinutes > 24 * 60) {
+        slotsToCheck.push({ start: slotStart + 24 * 60, end: slotEnd + 24 * 60 });
+      }
+      
+      for (const currentSlot of slotsToCheck) {
+        // Calcola l'intersezione
+        const intersectionStart = Math.max(startMinutes, currentSlot.start);
+        const intersectionEnd = Math.min(endMinutes, currentSlot.end);
+        
+        if (intersectionStart < intersectionEnd) {
+          const slotMinutes = intersectionEnd - intersectionStart;
+          const slotHours = slotMinutes / 60;
+          
+          // Applica maggiorazione festiva se necessario
+          const finalMultiplier = Math.max(slot.multiplier, holidayMultiplier);
+          const slotRate = baseRate * finalMultiplier;
+          const slotEarnings = slotHours * slotRate;
+          
+          timeSlots.push({
+            name: slot.name,
+            hours: slotHours,
+            rate: slotRate,
+            earnings: slotEarnings,
+            multiplier: finalMultiplier
+          });
+          
+          totalEarnings += slotEarnings;
+          totalHours += slotHours;
+        }
+      }
+    }
+    
+    return { timeSlots, totalEarnings, totalHours };
+  }
+
+  // Determina se usare il calcolo dettagliato per fasce orarie
+  shouldUseDetailedTimeSlotCalculation(workEntry) {
+    // Usa calcolo dettagliato se c'è orario di inizio e fine specifici
+    if (!workEntry.startTime || !workEntry.endTime) {
+      return false;
+    }
+    
+    // Usa calcolo dettagliato per turni notturni o che attraversano più fasce
+    const [startHour] = workEntry.startTime.split(':').map(Number);
+    const [endHour] = workEntry.endTime.split(':').map(Number);
+    
+    // Se il turno attraversa le fasce orarie CCNL (20:00 o 22:00)
+    const crossesTimeSlots = (startHour < 20 && endHour >= 20) || 
+                            (startHour < 22 && endHour >= 22) ||
+                            (startHour >= 20) || 
+                            (endHour <= 6);
+    
+    return crossesTimeSlots;
+  }
+
   // Calculate standby work earnings with night work considerations
   calculateStandbyWorkEarnings(start1, end1, start2, end2, contract, date) {
     let totalEarnings = 0;
@@ -1517,20 +1678,20 @@ class CalculationService {
       const shiftHours = this.minutesToHours(shiftMinutes);
       
       // Gli interventi di reperibilità sono pagati come ore ORDINARIE, non straordinari
-      let rate = contract.hourlyRate;
+      let rate = this.getHourlyRate(contract);
       
       // Applicare maggiorazioni secondo CCNL:
       // 1. Maggiorazione notturna se il turno è notturno
       if ((startHour >= 22 || startHour < 6) || (endHour >= 22 || endHour < 6)) {
-        rate = contract.hourlyRate * (contract.overtimeRates?.night || 1.25); // +25% notturno
+        rate = this.getHourlyRate(contract) * (contract.overtimeRates?.night || 1.25); // +25% notturno
       }
       // 2. Maggiorazione festiva/domenicale 
       else if (isSunday || isHoliday) {
-        rate = contract.hourlyRate * 1.30; // +30% festivo/domenicale
+        rate = this.getHourlyRate(contract) * 1.30; // +30% festivo/domenicale
       }
       // 3. Maggiorazione sabato
       else if (isSaturday) {
-        rate = contract.hourlyRate * (contract.overtimeRates?.saturday || 1.25); // Sabato configurabile
+        rate = this.getHourlyRate(contract) * (contract.overtimeRates?.saturday || 1.25); // Sabato configurabile
       }
       
       totalEarnings += shiftHours * rate;
