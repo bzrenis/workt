@@ -8,17 +8,27 @@ import {
   Switch,
   Alert,
   Platform,
-  SafeAreaView,
-  StatusBar
+  SafeAreaView
 } from 'react-native';
+import { StatusBar } from 'expo-status-bar';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useTheme } from '../contexts/ThemeContext';
-import NotificationService from '../services/NotificationService';
+const NotificationService = require('../services/SuperNotificationService');
 
 const NotificationSettingsScreen = ({ navigation }) => {
   const { theme } = useTheme();
-  const [settings, setSettings] = useState(NotificationService.getDefaultSettings());
+  const styles = createStyles(theme);
+  const [settings, setSettings] = useState({
+    enabled: false,
+    morningTime: '07:30',
+    eveningTime: '18:30',
+    weekendsEnabled: false,
+    workReminder: { enabled: false, morningTime: '07:30', weekendsEnabled: false },
+    timeEntryReminder: { enabled: false, time: '18:30', weekendsEnabled: false },
+    standbyReminder: { enabled: false, notifications: [] },
+    backupReminder: { enabled: false, time: '02:00', frequency: 'weekly' }
+  });
   const [loading, setLoading] = useState(true);
   const [showTimePicker, setShowTimePicker] = useState(false);
   const [timePickerField, setTimePickerField] = useState('');
@@ -29,13 +39,18 @@ const NotificationSettingsScreen = ({ navigation }) => {
     loadSettings();
     checkNotificationPermissions();
     
-    // Setup listener per le notifiche
-    NotificationService.setupNotificationListener();
+    // Setup listener per le notifiche - DISATTIVATO per evitare programmazione automatica
+    // NotificationService.setupNotificationListener();
   }, []);
 
   const checkNotificationPermissions = async () => {
-    const permission = await NotificationService.hasPermissions();
-    setHasPermission(permission);
+    try {
+      const permission = await NotificationService.hasPermissions();
+      setHasPermission(permission);
+    } catch (error) {
+      console.error('❌ Errore verifica permessi notifiche:', error);
+      setHasPermission(false);
+    }
   };
 
   const requestNotificationPermissions = async () => {
@@ -56,9 +71,31 @@ const NotificationSettingsScreen = ({ navigation }) => {
   const loadSettings = async () => {
     try {
       const loadedSettings = await NotificationService.getSettings();
-      setSettings(loadedSettings);
+      
+      // Verifica che loadedSettings sia un oggetto valido
+      if (!loadedSettings || typeof loadedSettings !== 'object') {
+        console.error('❌ Impostazioni caricate non valide');
+        // Usa le impostazioni predefinite
+        setSettings(NotificationService.getDefaultSettings());
+      } else {
+        // Converti le impostazioni dal formato servizio (singolare) a normalizedSettings (plurale)
+        const normalizedSettings = {
+          ...loadedSettings,
+          // Normalizzazione da singolare a plurale per la UI
+          workReminders: loadedSettings.workReminder || loadedSettings.workReminders || { enabled: false, morningTime: '07:30', weekendsEnabled: false },
+          timeEntryReminders: loadedSettings.timeEntryReminder || loadedSettings.timeEntryReminders || { enabled: false, time: '18:30', weekendsEnabled: false },
+          standbyReminders: loadedSettings.standbyReminder || loadedSettings.standbyReminders || { enabled: false, notifications: [] },
+          dailySummary: loadedSettings.dailySummary || { enabled: false, time: '21:00' },
+          overtimeAlerts: loadedSettings.overtimeAlerts || { enabled: false }
+        };
+        
+        // Usa le impostazioni normalizzate
+        setSettings(normalizedSettings);
+      }
     } catch (error) {
-      console.error('Errore nel caricamento impostazioni notifiche:', error);
+      console.error('❌ Errore nel caricamento impostazioni notifiche:', error);
+      // In caso di errore, usa le impostazioni predefinite
+      setSettings(NotificationService.getDefaultSettings());
     } finally {
       setLoading(false);
     }
@@ -66,19 +103,34 @@ const NotificationSettingsScreen = ({ navigation }) => {
 
   const saveSettings = async (newSettings) => {
     try {
-      const success = await NotificationService.saveSettings(newSettings);
+      // Converti le impostazioni da normalizedSettings (plurale) a formato servizio (singolare)
+      const serviceSettings = {
+        ...newSettings,
+        // Normalizzazione da plurale a singolare per il servizio
+        workReminder: newSettings.workReminders,
+        timeEntryReminder: newSettings.timeEntryReminders,
+        standbyReminder: newSettings.standbyReminders
+      };
+      
+      // Rimuovi le chiavi duplicate (plurali) per non confondere il servizio
+      delete serviceSettings.workReminders;
+      delete serviceSettings.timeEntryReminders;
+      delete serviceSettings.standbyReminders;
+      
+      const success = await NotificationService.saveSettings(serviceSettings);
       if (success) {
         setSettings(newSettings);
         
-        // Riprogramma le notifiche con le nuove impostazioni
-        await NotificationService.scheduleNotifications(newSettings);
+        // Riprogramma automaticamente le notifiche con le nuove impostazioni
+        await NotificationService.scheduleNotifications(serviceSettings, true);
+        console.log('✅ Impostazioni salvate e notifiche riprogrammate');
         
-        Alert.alert('Successo', 'Impostazioni salvate e notifiche aggiornate.');
+        Alert.alert('Successo', 'Impostazioni salvate e notifiche riprogrammate automaticamente.');
       } else {
         Alert.alert('Errore', 'Impossibile salvare le impostazioni.');
       }
     } catch (error) {
-      console.error('Errore nel salvataggio impostazioni notifiche:', error);
+      console.error('❌ Errore nel salvataggio impostazioni notifiche:', error);
       Alert.alert('Errore', 'Impossibile salvare le impostazioni.');
     }
   };
@@ -94,6 +146,17 @@ const NotificationSettingsScreen = ({ navigation }) => {
   };
 
   const handleSectionToggle = (section, value) => {
+    // Verifica che la sezione esista prima di aggiornarla
+    if (!settings || !settings[section]) {
+      console.error(`❌ Sezione ${section} non trovata nelle impostazioni`);
+      
+      // Inizializza la sezione se non esiste
+      const newSettings = { ...settings };
+      newSettings[section] = { enabled: value };
+      saveSettings(newSettings);
+      return;
+    }
+    
     const newSettings = {
       ...settings,
       [section]: { ...settings[section], enabled: value }
@@ -106,9 +169,26 @@ const NotificationSettingsScreen = ({ navigation }) => {
     
     let newSettings = { ...settings };
     
+    // Verifica che la sezione esista
+    if (!newSettings[section]) {
+      console.warn(`⚠️ Sezione ${section} non trovata, inizializzazione...`);
+      newSettings[section] = {};
+    }
+    
     // Gestione speciale per notifiche di reperibilità
     if (section === 'standbyReminders' && field.startsWith('notifications.')) {
       const notificationIndex = parseInt(field.split('.')[1]);
+      
+      // Verifica che notifications esista
+      if (!newSettings.standbyReminders.notifications) {
+        newSettings.standbyReminders.notifications = [];
+      }
+      
+      // Verifica che l'elemento all'indice esista
+      if (!newSettings.standbyReminders.notifications[notificationIndex]) {
+        newSettings.standbyReminders.notifications[notificationIndex] = {};
+      }
+      
       newSettings.standbyReminders.notifications[notificationIndex].time = timeString;
     } else {
       // Gestione normale
@@ -134,27 +214,52 @@ const NotificationSettingsScreen = ({ navigation }) => {
     if (!timePickerField) return new Date();
     
     const [section, field] = timePickerField.split('.');
-    let timeString;
+    let timeString = '00:00'; // Default
     
-    if (section === 'standbyReminders' && field.startsWith('notifications.')) {
-      // Caso speciale per standbyReminders.notifications.X
-      const notificationIndex = parseInt(field.split('.')[1]);
-      timeString = settings.standbyReminders.notifications[notificationIndex].time;
-    } else {
-      // Caso normale section.field
-      timeString = settings[section][field];
+    try {
+      // Verifica che la sezione esista
+      if (!settings || !settings[section]) {
+        console.warn(`⚠️ Sezione ${section} non trovata in getCurrentTime`);
+        return new Date();
+      }
+      
+      if (section === 'standbyReminders' && field.startsWith('notifications.')) {
+        // Caso speciale per standbyReminders.notifications.X
+        const notificationIndex = parseInt(field.split('.')[1]);
+        
+        if (settings.standbyReminders.notifications && 
+            settings.standbyReminders.notifications[notificationIndex] &&
+            settings.standbyReminders.notifications[notificationIndex].time) {
+          timeString = settings.standbyReminders.notifications[notificationIndex].time;
+        }
+      } else {
+        // Caso normale section.field
+        if (settings[section] && settings[section][field]) {
+          timeString = settings[section][field];
+        }
+      }
+      
+      // Assicurati che il formato sia corretto
+      if (!timeString || !timeString.includes(':')) {
+        console.warn(`⚠️ Formato orario non valido: ${timeString}`);
+        timeString = '08:00';
+      }
+      
+      const [hours, minutes] = timeString.split(':');
+      const date = new Date();
+      date.setHours(parseInt(hours) || 0, parseInt(minutes) || 0, 0, 0);
+      
+      return date;
+    } catch (error) {
+      console.error('❌ Errore in getCurrentTime:', error);
+      return new Date(); // Valore predefinito in caso di errore
     }
-    
-    const [hours, minutes] = timeString.split(':');
-    const date = new Date();
-    date.setHours(parseInt(hours), parseInt(minutes), 0, 0);
-    return date;
   };
 
   if (loading) {
     return (
       <SafeAreaView style={styles.container}>
-        <StatusBar barStyle="dark-content" backgroundColor="#f5f5f5" />
+        <StatusBar style={theme.dark ? "light" : "dark"} />
         <View style={styles.loadingContainer}>
           <MaterialCommunityIcons name="bell-outline" size={48} color="#ccc" />
           <Text style={styles.loadingText}>Caricamento impostazioni...</Text>
@@ -162,10 +267,45 @@ const NotificationSettingsScreen = ({ navigation }) => {
       </SafeAreaView>
     );
   }
+  
+  // Normalizza i nomi delle proprietà (singolare/plurale) e assicura che tutte le proprietà necessarie esistano
+  const normalizedSettings = { ...settings };
+  
+  // Assicurati che workReminder/workReminders esista e sia normalizzato
+  if (!normalizedSettings.workReminders && normalizedSettings.workReminder) {
+    normalizedSettings.workReminders = { ...normalizedSettings.workReminder };
+  } else if (!normalizedSettings.workReminders) {
+    normalizedSettings.workReminders = { 
+      enabled: false, 
+      morningTime: '07:30',
+      weekendsEnabled: false 
+    };
+  }
+  
+  // Assicurati che timeEntryReminder/timeEntryReminders esista e sia normalizzato
+  if (!normalizedSettings.timeEntryReminders && normalizedSettings.timeEntryReminder) {
+    normalizedSettings.timeEntryReminders = { ...normalizedSettings.timeEntryReminder };
+  } else if (!normalizedSettings.timeEntryReminders) {
+    normalizedSettings.timeEntryReminders = { 
+      enabled: false, 
+      time: '18:30',
+      weekendsEnabled: false 
+    };
+  }
+  
+  // Assicurati che standbyReminder/standbyReminders esista e sia normalizzato
+  if (!normalizedSettings.standbyReminders && normalizedSettings.standbyReminder) {
+    normalizedSettings.standbyReminders = { ...normalizedSettings.standbyReminder };
+  } else if (!normalizedSettings.standbyReminders) {
+    normalizedSettings.standbyReminders = { 
+      enabled: false,
+      notifications: []
+    };
+  }
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor="#f5f5f5" />
+      <StatusBar style={theme.dark ? "light" : "dark"} />
       
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
         {/* Header principale */}
@@ -187,10 +327,10 @@ const NotificationSettingsScreen = ({ navigation }) => {
               </Text>
             </View>
             <Switch
-              value={settings.enabled}
+              value={normalizedSettings.enabled}
               onValueChange={handleMainToggle}
               trackColor={{ false: '#E0E0E0', true: '#C8E6C9' }}
-              thumbColor={settings.enabled ? '#4CAF50' : '#f4f3f4'}
+              thumbColor={normalizedSettings.enabled ? '#4CAF50' : '#f4f3f4'}
             />
           </View>
           
@@ -203,67 +343,9 @@ const NotificationSettingsScreen = ({ navigation }) => {
               <Text style={styles.permissionButtonText}>Richiedi Permessi</Text>
             </TouchableOpacity>
           )}
-          
-          {/* Banner informativo per notifiche in test */}
-          {settings.enabled && (
-            <View style={styles.testBanner}>
-              <MaterialCommunityIcons name="flask" size={20} color="#FF9800" />
-              <View style={styles.testBannerContent}>
-                <Text style={styles.testBannerTitle}>🧪 Notifiche in Test - Versione Migliorata</Text>
-                <Text style={styles.testBannerText}>
-                  Sistema recentemente aggiornato per risolvere il problema delle notifiche multiple. 
-                  Ora utilizza programmazione basata su date assolute invece di trigger settimanali.
-                </Text>
-                <View style={styles.testBannerButtons}>
-                  <TouchableOpacity 
-                    style={styles.testBannerButton}
-                    onPress={() => {
-                      Alert.alert(
-                        '🔧 Correzioni Implementate',
-                        '✅ Risolto: Notifiche multiple immediate\n' +
-                        '✅ Nuovo: Trigger basati su date specifiche\n' +
-                        '✅ Auto-rinnovamento ogni 3 settimane\n' +
-                        '✅ Throttling migliorato (30 min)\n' +
-                        '✅ Logging dettagliato per debug\n\n' +
-                        'Le notifiche dovrebbero ora arrivare agli orari corretti invece che tutte insieme.',
-                        [{ text: 'Capito', style: 'default' }]
-                      );
-                    }}
-                  >
-                    <Text style={styles.testBannerButtonText}>Dettagli Correzioni</Text>
-                    <MaterialCommunityIcons name="information-outline" size={14} color="#F57C00" />
-                  </TouchableOpacity>
-                  
-                  <TouchableOpacity 
-                    style={[styles.testBannerButton, { backgroundColor: '#E8F5E9' }]}
-                    onPress={async () => {
-                      try {
-                        // Test rapido: invia una notifica tra 10 secondi
-                        await NotificationService.scheduleTestNotification(
-                          '🧪 Test Sistema Corretto',
-                          'Se ricevi questa notifica tra 10 secondi, il sistema funziona correttamente!',
-                          10
-                        );
-                        Alert.alert(
-                          '🧪 Test Avviato',
-                          'Notifica di test programmata tra 10 secondi. Se la ricevi, il sistema è funzionante!',
-                          [{ text: 'OK' }]
-                        );
-                      } catch (error) {
-                        Alert.alert('Errore', 'Impossibile avviare il test: ' + error.message);
-                      }
-                    }}
-                  >
-                    <Text style={[styles.testBannerButtonText, { color: '#2E7D32' }]}>Test Rapido</Text>
-                    <MaterialCommunityIcons name="play-circle-outline" size={14} color="#2E7D32" />
-                  </TouchableOpacity>
-                </View>
-              </View>
-            </View>
-          )}
         </View>
 
-        {settings.enabled && (
+        {normalizedSettings.enabled && (
           <>
             {/* Promemoria inizio lavoro */}
             <View style={styles.sectionCard}>
@@ -271,36 +353,36 @@ const NotificationSettingsScreen = ({ navigation }) => {
                 <MaterialCommunityIcons name="alarm" size={24} color="#FF9800" />
                 <Text style={styles.sectionTitle}>Promemoria Inizio Lavoro</Text>
                 <Switch
-                  value={settings.workReminders.enabled}
+                  value={normalizedSettings.workReminders.enabled}
                   onValueChange={(value) => handleSectionToggle('workReminders', value)}
                   trackColor={{ false: '#E0E0E0', true: '#C8E6C9' }}
-                  thumbColor={settings.workReminders.enabled ? '#4CAF50' : '#f4f3f4'}
+                  thumbColor={normalizedSettings.workReminders.enabled ? '#4CAF50' : '#f4f3f4'}
                 />
               </View>
               
-              {settings.workReminders.enabled && (
+              {normalizedSettings.workReminders.enabled && (
                 <View style={styles.sectionContent}>
                   <TouchableOpacity 
                     style={styles.timeSelector}
                     onPress={() => openTimePicker('workReminders', 'morningTime')}
                   >
                     <Text style={styles.timeSelectorLabel}>Orario promemoria</Text>
-                    <Text style={styles.timeSelectorValue}>{settings.workReminders.morningTime}</Text>
+                    <Text style={styles.timeSelectorValue}>{normalizedSettings.workReminders.morningTime}</Text>
                   </TouchableOpacity>
                   
                   <View style={styles.optionRow}>
                     <Text style={styles.optionLabel}>Includi weekend</Text>
                     <Switch
-                      value={settings.workReminders.weekendsEnabled}
+                      value={normalizedSettings.workReminders.weekendsEnabled}
                       onValueChange={(value) => {
                         const newSettings = {
-                          ...settings,
-                          workReminders: { ...settings.workReminders, weekendsEnabled: value }
+                          ...normalizedSettings,
+                          workReminders: { ...normalizedSettings.workReminders, weekendsEnabled: value }
                         };
                         saveSettings(newSettings);
                       }}
                       trackColor={{ false: '#E0E0E0', true: '#C8E6C9' }}
-                      thumbColor={settings.workReminders.weekendsEnabled ? '#4CAF50' : '#f4f3f4'}
+                      thumbColor={normalizedSettings.workReminders.weekendsEnabled ? '#4CAF50' : '#f4f3f4'}
                     />
                   </View>
                 </View>
@@ -313,36 +395,36 @@ const NotificationSettingsScreen = ({ navigation }) => {
                 <MaterialCommunityIcons name="clock-edit" size={24} color="#4CAF50" />
                 <Text style={styles.sectionTitle}>Promemoria Inserimento</Text>
                 <Switch
-                  value={settings.timeEntryReminders.enabled}
+                  value={normalizedSettings.timeEntryReminders.enabled}
                   onValueChange={(value) => handleSectionToggle('timeEntryReminders', value)}
                   trackColor={{ false: '#E0E0E0', true: '#C8E6C9' }}
-                  thumbColor={settings.timeEntryReminders.enabled ? '#4CAF50' : '#f4f3f4'}
+                  thumbColor={normalizedSettings.timeEntryReminders.enabled ? '#4CAF50' : '#f4f3f4'}
                 />
               </View>
               
-              {settings.timeEntryReminders.enabled && (
+              {normalizedSettings.timeEntryReminders.enabled && (
                 <View style={styles.sectionContent}>
                   <TouchableOpacity 
                     style={styles.timeSelector}
                     onPress={() => openTimePicker('timeEntryReminders', 'time')}
                   >
                     <Text style={styles.timeSelectorLabel}>Orario promemoria</Text>
-                    <Text style={styles.timeSelectorValue}>{settings.timeEntryReminders.time}</Text>
+                    <Text style={styles.timeSelectorValue}>{normalizedSettings.timeEntryReminders.time}</Text>
                   </TouchableOpacity>
                   
                   <View style={styles.optionRow}>
                     <Text style={styles.optionLabel}>Includi weekend</Text>
                     <Switch
-                      value={settings.timeEntryReminders.weekendsEnabled}
+                      value={normalizedSettings.timeEntryReminders.weekendsEnabled}
                       onValueChange={(value) => {
                         const newSettings = {
-                          ...settings,
-                          timeEntryReminders: { ...settings.timeEntryReminders, weekendsEnabled: value }
+                          ...normalizedSettings,
+                          timeEntryReminders: { ...normalizedSettings.timeEntryReminders, weekendsEnabled: value }
                         };
                         saveSettings(newSettings);
                       }}
                       trackColor={{ false: '#E0E0E0', true: '#C8E6C9' }}
-                      thumbColor={settings.timeEntryReminders.weekendsEnabled ? '#4CAF50' : '#f4f3f4'}
+                      thumbColor={normalizedSettings.timeEntryReminders.weekendsEnabled ? '#4CAF50' : '#f4f3f4'}
                     />
                   </View>
                 </View>
@@ -350,26 +432,27 @@ const NotificationSettingsScreen = ({ navigation }) => {
             </View>
 
             {/* Riepilogo giornaliero */}
+            {/* Riepilogo giornaliero */}
             <View style={styles.sectionCard}>
               <View style={styles.sectionHeader}>
                 <MaterialCommunityIcons name="chart-line" size={24} color="#2196F3" />
                 <Text style={styles.sectionTitle}>Riepilogo Giornaliero</Text>
                 <Switch
-                  value={settings.dailySummary.enabled}
+                  value={normalizedSettings.dailySummary && normalizedSettings.dailySummary.enabled}
                   onValueChange={(value) => handleSectionToggle('dailySummary', value)}
                   trackColor={{ false: '#E0E0E0', true: '#C8E6C9' }}
-                  thumbColor={settings.dailySummary.enabled ? '#4CAF50' : '#f4f3f4'}
+                  thumbColor={(normalizedSettings.dailySummary && normalizedSettings.dailySummary.enabled) ? '#4CAF50' : '#f4f3f4'}
                 />
               </View>
               
-              {settings.dailySummary.enabled && (
+              {normalizedSettings.dailySummary && normalizedSettings.dailySummary.enabled && (
                 <View style={styles.sectionContent}>
                   <TouchableOpacity 
                     style={styles.timeSelector}
                     onPress={() => openTimePicker('dailySummary', 'time')}
                   >
                     <Text style={styles.timeSelectorLabel}>Orario promemoria</Text>
-                    <Text style={styles.timeSelectorValue}>{settings.dailySummary.time}</Text>
+                    <Text style={styles.timeSelectorValue}>{normalizedSettings.dailySummary.time}</Text>
                   </TouchableOpacity>
                   <Text style={styles.optionDescription}>
                     Ricevi un riepilogo dei tuoi guadagni giornalieri
@@ -384,14 +467,14 @@ const NotificationSettingsScreen = ({ navigation }) => {
                 <MaterialCommunityIcons name="alert-circle" size={24} color="#F44336" />
                 <Text style={styles.sectionTitle}>Avvisi Straordinario</Text>
                 <Switch
-                  value={settings.overtimeAlerts.enabled}
+                  value={normalizedSettings.overtimeAlerts && normalizedSettings.overtimeAlerts.enabled}
                   onValueChange={(value) => handleSectionToggle('overtimeAlerts', value)}
                   trackColor={{ false: '#E0E0E0', true: '#C8E6C9' }}
-                  thumbColor={settings.overtimeAlerts.enabled ? '#4CAF50' : '#f4f3f4'}
+                  thumbColor={(normalizedSettings.overtimeAlerts && normalizedSettings.overtimeAlerts.enabled) ? '#4CAF50' : '#f4f3f4'}
                 />
               </View>
               
-              {settings.overtimeAlerts.enabled && (
+              {normalizedSettings.overtimeAlerts && normalizedSettings.overtimeAlerts.enabled && (
                 <View style={styles.sectionContent}>
                   <Text style={styles.optionDescription}>
                     Ricevi un avviso quando superi le 8 ore giornaliere
@@ -406,21 +489,21 @@ const NotificationSettingsScreen = ({ navigation }) => {
                 <MaterialCommunityIcons name="phone-alert" size={24} color="#9C27B0" />
                 <Text style={styles.sectionTitle}>Promemoria Reperibilità</Text>
                 <Switch
-                  value={settings.standbyReminders.enabled}
+                  value={normalizedSettings.standbyReminders && normalizedSettings.standbyReminders.enabled}
                   onValueChange={(value) => handleSectionToggle('standbyReminders', value)}
                   trackColor={{ false: '#E0E0E0', true: '#C8E6C9' }}
-                  thumbColor={settings.standbyReminders.enabled ? '#4CAF50' : '#f4f3f4'}
+                  thumbColor={(normalizedSettings.standbyReminders && normalizedSettings.standbyReminders.enabled) ? '#4CAF50' : '#f4f3f4'}
                 />
               </View>
               
-              {settings.standbyReminders.enabled && (
+              {normalizedSettings.standbyReminders && normalizedSettings.standbyReminders.enabled && (
                 <View style={styles.sectionContent}>
                   <Text style={styles.optionDescription}>
                     Ricevi promemoria basati sul calendario di reperibilità
                   </Text>
                   
                   {/* Lista notifiche reperibilità configurabili */}
-                  {settings.standbyReminders.notifications?.map((notification, index) => (
+                  {normalizedSettings.standbyReminders.notifications && normalizedSettings.standbyReminders.notifications.map((notification, index) => (
                     <View key={index} style={styles.standbyNotificationItem}>
                       <View style={styles.standbyNotificationHeader}>
                         <Text style={styles.standbyNotificationTitle}>
@@ -431,7 +514,13 @@ const NotificationSettingsScreen = ({ navigation }) => {
                         <Switch
                           value={notification.enabled}
                           onValueChange={(value) => {
-                            const newSettings = { ...settings };
+                            const newSettings = { ...normalizedSettings };
+                            if (!newSettings.standbyReminders.notifications) {
+                              newSettings.standbyReminders.notifications = [];
+                            }
+                            if (!newSettings.standbyReminders.notifications[index]) {
+                              newSettings.standbyReminders.notifications[index] = {};
+                            }
                             newSettings.standbyReminders.notifications[index].enabled = value;
                             saveSettings(newSettings);
                           }}
@@ -445,7 +534,7 @@ const NotificationSettingsScreen = ({ navigation }) => {
                         <View style={styles.standbyNotificationContent}>
                           <TouchableOpacity 
                             style={styles.timeSelector}
-                            onPress={() => openTimePicker('standbyReminders', `notifications.${index}`)}
+                            onPress={() => openStandbyTimePicker(index)}
                           >
                             <Text style={styles.timeSelectorLabel}>Orario</Text>
                             <Text style={styles.timeSelectorValue}>{notification.time}</Text>
@@ -457,54 +546,55 @@ const NotificationSettingsScreen = ({ navigation }) => {
                       )}
                     </View>
                   ))}
-                  
-                  <TouchableOpacity 
-                    style={[styles.testButton, { backgroundColor: '#F3E5F5', marginTop: 12 }]}
-                    onPress={async () => {
-                      const syncCount = await NotificationService.syncStandbyNotificationsWithCalendar();
-                      Alert.alert(
-                        'Sincronizzazione Completata', 
-                        `Trovate e programmate ${syncCount} date di reperibilità future.`,
-                        [{ text: 'OK' }]
-                      );
-                    }}
-                  >
-                    <MaterialCommunityIcons name="sync" size={20} color="#9C27B0" />
-                    <Text style={[styles.testButtonText, { color: '#9C27B0' }]}>Sincronizza con Calendario</Text>
-                  </TouchableOpacity>
                 </View>
               )}
             </View>
+          </>
+        )}
 
-            {/* Test notifica */}
-            <View style={styles.sectionCard}>
+        {/* Pulsante Test Immediato */}
+        {normalizedSettings.enabled && (
+          <View style={styles.sectionCard}>
+            <View style={styles.sectionHeader}>
+              <MaterialCommunityIcons name="test-tube" size={24} color="#FF5722" />
+              <Text style={styles.sectionTitle}>Test Sistema</Text>
+            </View>
+            
+            <View style={styles.sectionContent}>
               <TouchableOpacity 
                 style={styles.testButton}
                 onPress={async () => {
-                  await NotificationService.sendTestNotification();
-                  Alert.alert('Test Inviato', 'Dovresti ricevere una notifica tra pochi secondi.');
+                  try {
+                    Alert.alert(
+                      '🧪 Test Notifiche',
+                      'Vuoi testare il sistema di notifiche aggiornato?\n\nRiceverai una notifica di test tra 5 secondi.',
+                      [
+                        { text: 'Annulla', style: 'cancel' },
+                        { 
+                          text: 'Testa', 
+                          onPress: async () => {
+                            // Test immediato
+                            await NotificationService.scheduleTestNotification();
+                            Alert.alert('✅ Test Avviato', 'Notifica di test programmata per tra 5 secondi!');
+                          }
+                        }
+                      ]
+                    );
+                  } catch (error) {
+                    console.error('❌ Errore test notifiche:', error);
+                    Alert.alert('❌ Errore', 'Impossibile avviare il test.');
+                  }
                 }}
               >
-                <MaterialCommunityIcons name="bell-ring" size={20} color="#2196F3" />
-                <Text style={styles.testButtonText}>Invia Notifica di Test</Text>
+                <MaterialCommunityIcons name="play-circle" size={20} color="#fff" />
+                <Text style={styles.testButtonText}>Testa Notifiche Ora</Text>
               </TouchableOpacity>
               
-              <TouchableOpacity 
-                style={[styles.testButton, { marginTop: 8, backgroundColor: '#FFF3E0' }]}
-                onPress={async () => {
-                  const stats = await NotificationService.getNotificationStats();
-                  Alert.alert(
-                    'Statistiche Notifiche',
-                    `Notifiche programmate: ${stats.totalScheduled}\nPromemoria attivi: ${stats.activeReminders.length}\n\n${stats.activeReminders.join('\n')}`,
-                    [{ text: 'OK' }]
-                  );
-                }}
-              >
-                <MaterialCommunityIcons name="chart-line" size={20} color="#FF9800" />
-                <Text style={[styles.testButtonText, { color: '#FF9800' }]}>Mostra Statistiche</Text>
-              </TouchableOpacity>
+              <Text style={styles.testDescription}>
+                Invia una notifica di test per verificare che le modifiche funzionino correttamente
+              </Text>
             </View>
-          </>
+          </View>
         )}
 
         {/* Info e suggerimenti */}
@@ -515,7 +605,8 @@ const NotificationSettingsScreen = ({ navigation }) => {
             • Le notifiche ti aiutano a mantenere la costanza nell'inserimento degli orari{'\n'}
             • Puoi disabilitare specifici tipi di promemoria{'\n'}
             • I promemoria weekend sono opzionali{'\n'}
-            • Le notifiche rispettano le impostazioni del sistema
+            • Le notifiche rispettano le impostazioni del sistema{'\n'}
+            • Le notifiche vengono programmate automaticamente quando salvi le impostazioni
           </Text>
         </View>
       </ScrollView>
@@ -541,10 +632,10 @@ const NotificationSettingsScreen = ({ navigation }) => {
   );
 };
 
-const styles = StyleSheet.create({
+const createStyles = (theme) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: theme.colors.background,
   },
   scrollView: {
     flex: 1,
@@ -558,10 +649,10 @@ const styles = StyleSheet.create({
   loadingText: {
     marginTop: 16,
     fontSize: 16,
-    color: '#666',
+    color: theme.colors.textSecondary,
   },
   headerCard: {
-    backgroundColor: '#fff',
+    backgroundColor: theme.colors.surface,
     borderRadius: 12,
     padding: 20,
     marginBottom: 16,
@@ -575,18 +666,18 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: '#333',
+    color: theme.colors.text,
     marginTop: 12,
     marginBottom: 8,
   },
   headerSubtitle: {
     fontSize: 14,
-    color: '#666',
+    color: theme.colors.textSecondary,
     textAlign: 'center',
     lineHeight: 20,
   },
   sectionCard: {
-    backgroundColor: '#fff',
+    backgroundColor: theme.dark ? '#1C1C1E' : theme.colors.surface,
     borderRadius: 12,
     padding: 16,
     marginBottom: 12,
@@ -607,26 +698,28 @@ const styles = StyleSheet.create({
   mainToggleTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#333',
+    color: theme.colors.text,
     marginBottom: 4,
   },
   mainToggleSubtitle: {
     fontSize: 14,
-    color: '#666',
+    color: theme.colors.textSecondary,
   },
   permissionButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#E3F2FD',
+    backgroundColor: theme.dark ? 'rgba(0, 122, 255, 0.2)' : '#E3F2FD',
     borderRadius: 8,
     padding: 12,
     marginTop: 12,
+    borderWidth: 1,
+    borderColor: '#007AFF',
   },
   permissionButtonText: {
     marginLeft: 8,
     fontSize: 16,
-    color: '#2196F3',
+    color: '#007AFF',
     fontWeight: '500',
   },
   sectionHeader: {
@@ -639,7 +732,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 16,
     fontWeight: '600',
-    color: '#333',
+    color: theme.colors.text,
     marginLeft: 12,
   },
   sectionContent: {
@@ -649,19 +742,21 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    backgroundColor: '#F5F5F5',
+    backgroundColor: theme.dark ? 'rgba(255, 255, 255, 0.1)' : '#F5F5F5',
     borderRadius: 8,
     padding: 12,
     marginBottom: 12,
+    borderWidth: 1,
+    borderColor: theme.dark ? 'rgba(255, 255, 255, 0.2)' : '#E0E0E0',
   },
   timeSelectorLabel: {
     fontSize: 14,
-    color: '#666',
+    color: theme.colors.textSecondary,
   },
   timeSelectorValue: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#2196F3',
+    color: '#007AFF',
   },
   optionRow: {
     flexDirection: 'row',
@@ -671,29 +766,15 @@ const styles = StyleSheet.create({
   },
   optionLabel: {
     fontSize: 14,
-    color: '#333',
+    color: theme.colors.text,
   },
   optionDescription: {
     fontSize: 12,
-    color: '#666',
+    color: theme.colors.textSecondary,
     fontStyle: 'italic',
   },
-  testButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#E3F2FD',
-    borderRadius: 8,
-    padding: 16,
-  },
-  testButtonText: {
-    marginLeft: 8,
-    fontSize: 16,
-    color: '#2196F3',
-    fontWeight: '600',
-  },
   infoCard: {
-    backgroundColor: '#E8F5E9',
+    backgroundColor: theme.dark ? '#2C2C2E' : '#E8F5E9',
     borderRadius: 12,
     padding: 16,
     marginBottom: 32,
@@ -701,60 +782,65 @@ const styles = StyleSheet.create({
   infoTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#333',
+    color: theme.dark ? '#FFFFFF' : '#2E7D32',
     marginLeft: 8,
     marginBottom: 8,
   },
   infoText: {
     fontSize: 14,
-    color: '#666',
+    color: theme.dark ? '#FFFFFF' : '#2E7D32',
     lineHeight: 20,
   },
-  testBanner: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    backgroundColor: '#FFF3E0',
-    borderLeftWidth: 4,
-    borderLeftColor: '#FF9800',
+  standbyNotificationItem: {
+    backgroundColor: theme.dark ? 'rgba(255, 255, 255, 0.05)' : '#F8F9FA',
     borderRadius: 8,
     padding: 12,
-    marginTop: 12,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: theme.dark ? 'rgba(255, 255, 255, 0.1)' : '#E0E0E0',
   },
-  testBannerContent: {
-    flex: 1,
-    marginLeft: 8,
-  },
-  testBannerTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#E65100',
-    marginBottom: 4,
-  },
-  testBannerText: {
-    fontSize: 12,
-    color: '#BF360C',
-    lineHeight: 16,
+  standbyNotificationHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     marginBottom: 8,
   },
-  testBannerButtons: {
-    flexDirection: 'row',
-    gap: 8,
-    flexWrap: 'wrap',
+  standbyNotificationTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: theme.dark ? '#FFFFFF' : '#333333',
+    flex: 1,
   },
-  testBannerButton: {
+  standbyNotificationContent: {
+    paddingLeft: 8,
+  },
+  standbyNotificationMessage: {
+    fontSize: 12,
+    color: theme.dark ? '#FFFFFF' : '#666666',
+    fontStyle: 'italic',
+    marginTop: 4,
+  },
+  testButton: {
+    backgroundColor: '#FF5722',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#FFE0B2',
-    borderRadius: 6,
-    paddingVertical: 6,
-    paddingHorizontal: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    marginBottom: 8,
   },
-  testBannerButtonText: {
-    fontSize: 11,
-    color: '#F57C00',
+  testButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
     fontWeight: '600',
-    marginRight: 4,
+    marginLeft: 8,
+  },
+  testDescription: {
+    fontSize: 12,
+    color: theme.colors.textSecondary,
+    textAlign: 'center',
+    fontStyle: 'italic',
   },
 });
 

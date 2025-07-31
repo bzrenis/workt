@@ -13,36 +13,40 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import VacationService from '../services/VacationService';
+import { useTheme, lightTheme } from '../contexts/ThemeContext';
 
 // Componenti riutilizzati dal TimeEntryForm per mantenere coerenza visiva
-const ModernCard = ({ children, style }) => (
-  <View style={[styles.modernCard, style]}>
+const ModernCard = ({ children, style, theme }) => (
+  <View style={[createStyles(theme).modernCard, style]}>
     {children}
   </View>
 );
 
-const SectionHeader = ({ title, icon, iconColor }) => (
-  <View style={styles.sectionHeader}>
+const SectionHeader = ({ title, icon, iconColor, theme }) => (
+  <View style={createStyles(theme).sectionHeader}>
     <MaterialCommunityIcons name={icon} size={24} color={iconColor} />
-    <Text style={styles.sectionHeaderTitle}>{title}</Text>
+    <Text style={createStyles(theme).sectionHeaderTitle}>{title}</Text>
   </View>
 );
 
-const InputRow = ({ label, children, icon, required = false }) => (
-  <View style={styles.inputRow}>
-    <View style={styles.inputLabelContainer}>
-      {icon && <MaterialCommunityIcons name={icon} size={20} color="#666" style={styles.inputIcon} />}
-      <Text style={styles.inputLabel}>
-        {label} {required && <Text style={styles.requiredMark}>*</Text>}
+const InputRow = ({ label, children, icon, required = false, theme }) => (
+  <View style={createStyles(theme).inputRow}>
+    <View style={createStyles(theme).inputLabelContainer}>
+      {icon && <MaterialCommunityIcons name={icon} size={20} color={theme.colors.textSecondary} style={createStyles(theme).inputIcon} />}
+      <Text style={createStyles(theme).inputLabel}>
+        {label} {required && <Text style={createStyles(theme).requiredMark}>*</Text>}
       </Text>
     </View>
-    <View style={styles.inputContainer}>
+    <View style={createStyles(theme).inputContainer}>
       {children}
     </View>
   </View>
 );
 
 const VacationSettingsScreen = ({ navigation }) => {
+  const themeContext = useTheme();
+  const theme = themeContext?.theme || lightTheme; // Fallback di sicurezza
+  const styles = createStyles(theme);
   const [settings, setSettings] = useState({
     annualVacationDays: 26,
     carryOverDays: 0,
@@ -227,7 +231,10 @@ const VacationSettingsScreen = ({ navigation }) => {
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor="#f8f9fa" />
+      <StatusBar 
+        barStyle={theme.dark ? "light-content" : "dark-content"} 
+        backgroundColor={theme.colors.background} 
+      />
       
       {/* Header */}
       <View style={styles.header}>
@@ -248,7 +255,7 @@ const VacationSettingsScreen = ({ navigation }) => {
             }
           }}
         >
-          <MaterialCommunityIcons name="arrow-left" size={24} color="#333" />
+          <MaterialCommunityIcons name="arrow-left" size={24} color={theme.colors.text} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Configurazione Ferie e Permessi</Text>
         <TouchableOpacity 
@@ -265,85 +272,87 @@ const VacationSettingsScreen = ({ navigation }) => {
         showsVerticalScrollIndicator={false}
       >
         {/* Ferie Card */}
-        <ModernCard style={styles.cardSpacing}>
+        <ModernCard style={styles.cardSpacing} theme={theme}>
           <SectionHeader 
             title="Configurazione Ferie" 
             icon="beach" 
             iconColor="#4CAF50" 
+            theme={theme}
           />
           <Text style={styles.sectionDescription}>
             Configura i giorni di ferie disponibili secondo il tuo contratto di lavoro
           </Text>
 
-          <InputRow label="Giorni ferie annuali" icon="calendar-clock" required>
+          <InputRow label="Giorni ferie annuali" icon="calendar-clock" required theme={theme}>
             <TextInput
               style={styles.modernInput}
               value={settings.annualVacationDays.toString()}
               onChangeText={v => handleInputChange('annualVacationDays', v)}
               placeholder="26"
-              placeholderTextColor="#999"
+              placeholderTextColor={theme.colors.textSecondary}
               keyboardType="numeric"
             />
           </InputRow>
 
-          <InputRow label="Giorni residui anno precedente" icon="calendar-import">
+          <InputRow label="Giorni residui anno precedente" icon="calendar-import" theme={theme}>
             <TextInput
               style={styles.modernInput}
               value={settings.carryOverDays.toString()}
               onChangeText={v => handleInputChange('carryOverDays', v)}
               placeholder="0"
-              placeholderTextColor="#999"
+              placeholderTextColor={theme.colors.textSecondary}
               keyboardType="numeric"
             />
           </InputRow>
 
-          <InputRow label="Massimo giorni trasferibili" icon="calendar-export">
+          <InputRow label="Massimo giorni trasferibili" icon="calendar-export" theme={theme}>
             <TextInput
               style={styles.modernInput}
               value={settings.maxCarryOverDays.toString()}
               onChangeText={v => handleInputChange('maxCarryOverDays', v)}
               placeholder="5"
-              placeholderTextColor="#999"
+              placeholderTextColor={theme.colors.textSecondary}
               keyboardType="numeric"
             />
           </InputRow>
 
-          <InputRow label="Anno di competenza" icon="calendar-today" required>
+          <InputRow label="Anno di competenza" icon="calendar-today" required theme={theme}>
             <TextInput
               style={styles.modernInput}
               value={settings.currentYear.toString()}
               onChangeText={v => handleInputChange('currentYear', v)}
               placeholder={new Date().getFullYear().toString()}
-              placeholderTextColor="#999"
+              placeholderTextColor={theme.colors.textSecondary}
               keyboardType="numeric"
             />
           </InputRow>
         </ModernCard>
 
         {/* Permessi Card */}
-        <ModernCard style={styles.cardSpacing}>
+        <ModernCard style={styles.cardSpacing} theme={theme}>
           <SectionHeader 
             title="Configurazione Permessi" 
             icon="account-clock" 
             iconColor="#2196F3" 
+            theme={theme}
           />
           <Text style={styles.sectionDescription}>
             Configura le ore di permesso disponibili mensilmente
           </Text>
 
-          <InputRow label="Ore permesso mensili" icon="clock-outline" required>
+          <InputRow label="Ore permesso mensili" icon="clock-outline" required theme={theme}>
             <TextInput
               style={styles.modernInput}
               value={settings.permitsPerMonth.toString()}
               onChangeText={v => handleInputChange('permitsPerMonth', v)}
               placeholder="8"
-              placeholderTextColor="#999"
+              placeholderTextColor={theme.colors.textSecondary}
               keyboardType="numeric"
             />
           </InputRow>
 
           <View style={styles.infoBox}>
-            <MaterialCommunityIcons name="information" size={16} color="#2196F3" />
+            <MaterialCommunityIcons name="information" size={16} color="#1976d2" />
             <Text style={styles.infoText}>
               Totale annuale: {settings.permitsPerMonth * 12} ore ({Math.floor(settings.permitsPerMonth * 12 / 8)} giorni)
             </Text>
@@ -352,7 +361,7 @@ const VacationSettingsScreen = ({ navigation }) => {
           <View style={styles.switchContainer}>
             <View style={styles.switchRow}>
               <View style={styles.switchInfo}>
-                <MaterialCommunityIcons name="bank" size={20} color="#FF9800" />
+                <MaterialCommunityIcons name="bank" size={20} color={theme.colors.textSecondary} />
                 <Text style={styles.switchLabel}>Permessi a banca ore</Text>
                 <Text style={styles.switchDescription}>Accumula permessi non utilizzati</Text>
               </View>
@@ -369,17 +378,18 @@ const VacationSettingsScreen = ({ navigation }) => {
         </ModernCard>
 
         {/* Altre Configurazioni Card */}
-        <ModernCard style={styles.cardSpacing}>
+        <ModernCard style={styles.cardSpacing} theme={theme}>
           <SectionHeader 
             title="Altre Configurazioni" 
             icon="cog" 
             iconColor="#9C27B0" 
+            theme={theme}
           />
 
           <View style={styles.switchContainer}>
             <View style={styles.switchRow}>
               <View style={styles.switchInfo}>
-                <MaterialCommunityIcons name="check-circle" size={20} color="#4CAF50" />
+                <MaterialCommunityIcons name="check-circle" size={20} color={theme.colors.textSecondary} />
                 <Text style={styles.switchLabel}>Auto-approvazione</Text>
                 <Text style={styles.switchDescription}>Approva automaticamente le richieste (uso personale)</Text>
               </View>
@@ -397,7 +407,7 @@ const VacationSettingsScreen = ({ navigation }) => {
           <View style={styles.switchContainer}>
             <View style={styles.switchRow}>
               <View style={styles.switchInfo}>
-                <MaterialCommunityIcons name="calendar-edit" size={20} color="#2196F3" />
+                <MaterialCommunityIcons name="calendar-edit" size={20} color={theme.colors.textSecondary} />
                 <Text style={styles.switchLabel}>Auto-compilazione inserimenti</Text>
                 <Text style={styles.switchDescription}>Compila automaticamente ferie/malattia/riposo nel form</Text>
               </View>
@@ -415,7 +425,7 @@ const VacationSettingsScreen = ({ navigation }) => {
           <View style={styles.switchContainer}>
             <View style={styles.switchRow}>
               <View style={styles.switchInfo}>
-                <MaterialCommunityIcons name="medical-bag" size={20} color="#f44336" />
+                <MaterialCommunityIcons name="medical-bag" size={20} color={theme.colors.textSecondary} />
                 <Text style={styles.switchLabel}>Gestione malattie</Text>
                 <Text style={styles.switchDescription}>Abilita tracking giorni di malattia</Text>
               </View>
@@ -430,24 +440,25 @@ const VacationSettingsScreen = ({ navigation }) => {
             </View>
           </View>
 
-          <InputRow label="Data inizio anno lavorativo" icon="calendar-start">
+          <InputRow label="Data inizio anno lavorativo" icon="calendar-start" theme={theme}>
             <TextInput
               style={styles.modernInput}
               value={settings.startDate}
               onChangeText={v => handleInputChange('startDate', v)}
               placeholder="2025-01-01"
-              placeholderTextColor="#999"
+              placeholderTextColor={theme.colors.textSecondary}
             />
           </InputRow>
         </ModernCard>
 
         {/* Azioni Auto-approvazione */}
         {settings.autoApprovalEnabled && (
-          <ModernCard style={styles.cardSpacing}>
+          <ModernCard style={styles.cardSpacing} theme={theme}>
             <SectionHeader 
               title="Azioni Auto-approvazione" 
               icon="check-circle-outline" 
               iconColor="#4CAF50" 
+              theme={theme}
             />
             
             <View style={styles.actionButtonContainer}>
@@ -466,11 +477,12 @@ const VacationSettingsScreen = ({ navigation }) => {
         )}
 
         {/* Riepilogo Card */}
-        <ModernCard style={styles.cardSpacing}>
+        <ModernCard style={styles.cardSpacing} theme={theme}>
           <SectionHeader 
             title="Riepilogo Configurazione" 
             icon="file-document-outline" 
             iconColor="#607D8B" 
+            theme={theme}
           />
           
           <View style={styles.summaryContainer}>
@@ -534,10 +546,10 @@ const VacationSettingsScreen = ({ navigation }) => {
   );
 };
 
-const styles = StyleSheet.create({
+const createStyles = (theme) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f8f9fa',
+    backgroundColor: theme.colors.background,
   },
   loadingContainer: {
     flex: 1,
@@ -546,7 +558,7 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     fontSize: 16,
-    color: '#666',
+    color: theme.colors.textSecondary,
   },
   header: {
     flexDirection: 'row',
@@ -554,24 +566,24 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingVertical: 12,
-    backgroundColor: 'white',
+    backgroundColor: theme.colors.surface,
     borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
+    borderBottomColor: theme.colors.border,
   },
   backButton: {
     padding: 8,
     borderRadius: 8,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: theme.colors.inputBackground,
   },
   resetButton: {
     padding: 8,
     borderRadius: 8,
-    backgroundColor: '#fff3e0',
+    backgroundColor: theme.dark ? 'rgba(255, 152, 0, 0.15)' : '#fff3e0',
   },
   headerTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#333',
+    color: theme.colors.text,
     flex: 1,
     textAlign: 'center',
     marginHorizontal: 16,
@@ -584,7 +596,7 @@ const styles = StyleSheet.create({
     paddingBottom: 100,
   },
   modernCard: {
-    backgroundColor: 'white',
+    backgroundColor: theme.colors.surface,
     borderRadius: 12,
     padding: 16,
     shadowColor: '#000',
@@ -604,12 +616,12 @@ const styles = StyleSheet.create({
   sectionHeaderTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#333',
+    color: theme.colors.text,
     marginLeft: 8,
   },
   sectionDescription: {
     fontSize: 14,
-    color: '#666',
+    color: theme.colors.textSecondary,
     marginBottom: 16,
     lineHeight: 20,
   },
@@ -627,7 +639,7 @@ const styles = StyleSheet.create({
   inputLabel: {
     fontSize: 16,
     fontWeight: '500',
-    color: '#333',
+    color: theme.colors.text,
   },
   requiredMark: {
     color: '#f44336',
@@ -637,17 +649,17 @@ const styles = StyleSheet.create({
   },
   modernInput: {
     borderWidth: 1,
-    borderColor: '#e0e0e0',
+    borderColor: theme.colors.border,
     borderRadius: 8,
     padding: 12,
     fontSize: 16,
-    backgroundColor: '#fafafa',
-    color: '#333',
+    backgroundColor: theme.colors.inputBackground,
+    color: theme.colors.text,
   },
   infoBox: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#e3f2fd',
+    backgroundColor: theme.dark ? 'rgba(33, 150, 243, 0.15)' : '#e3f2fd',
     padding: 12,
     borderRadius: 8,
     marginTop: 8,
@@ -675,25 +687,25 @@ const styles = StyleSheet.create({
   switchLabel: {
     fontSize: 16,
     fontWeight: '500',
-    color: '#333',
+    color: theme.colors.text,
     marginLeft: 8,
     marginRight: 8,
   },
   switchDescription: {
     fontSize: 12,
-    color: '#666',
+    color: theme.colors.textSecondary,
     flex: 1,
   },
   switch: {
     width: 50,
     height: 28,
     borderRadius: 14,
-    backgroundColor: '#ccc',
+    backgroundColor: theme.colors.border,
     justifyContent: 'center',
     paddingHorizontal: 2,
   },
   switchActive: {
-    backgroundColor: '#4CAF50',
+    backgroundColor: '#007AFF',
   },
   switchThumb: {
     width: 24,
@@ -711,7 +723,7 @@ const styles = StyleSheet.create({
   },
   summaryContainer: {
     borderTopWidth: 1,
-    borderTopColor: '#e0e0e0',
+    borderTopColor: theme.colors.border,
     paddingTop: 16,
   },
   summaryRow: {
@@ -721,12 +733,12 @@ const styles = StyleSheet.create({
   },
   summaryLabel: {
     fontSize: 14,
-    color: '#666',
+    color: theme.colors.textSecondary,
   },
   summaryValue: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#333',
+    color: theme.colors.text,
   },
   floatingButtons: {
     position: 'absolute',
@@ -734,9 +746,9 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     flexDirection: 'row',
-    backgroundColor: 'white',
+    backgroundColor: theme.colors.surface,
     borderTopWidth: 1,
-    borderTopColor: '#e0e0e0',
+    borderTopColor: theme.colors.border,
     paddingHorizontal: 16,
     paddingVertical: 12,
     ...Platform.select({
@@ -756,13 +768,13 @@ const styles = StyleSheet.create({
     marginHorizontal: 4,
   },
   cancelButton: {
-    backgroundColor: '#666',
+    backgroundColor: theme.colors.textSecondary,
   },
   saveButton: {
-    backgroundColor: '#4CAF50',
+    backgroundColor: '#007AFF',
   },
   saveButtonDisabled: {
-    backgroundColor: '#ccc',
+    backgroundColor: theme.colors.border,
   },
   floatingButtonText: {
     color: 'white',
@@ -775,7 +787,7 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
   },
   actionButton: {
-    backgroundColor: '#4CAF50',
+    backgroundColor: '#007AFF',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -797,7 +809,7 @@ const styles = StyleSheet.create({
   },
   actionButtonDescription: {
     fontSize: 14,
-    color: '#666',
+    color: theme.colors.textSecondary,
     textAlign: 'center',
     fontStyle: 'italic',
   },

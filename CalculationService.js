@@ -164,7 +164,7 @@ class CalculationService {
   }
 
   // Calcola la retribuzione giornaliera con tutte le maggiorazioni CCNL
-  calculateDailyEarnings(workEntry, settings) {
+  async calculateDailyEarnings(workEntry, settings) {
     const contract = settings.contract || this.defaultContract;
     
     // Usa helper per ottenere tariffe corrette (personalizzate o CCNL)
@@ -259,32 +259,90 @@ class CalculationService {
     if (useDetailedCalculation && workEntry.startTime && workEntry.endTime) {
       console.log(`[CalculationService] Applicando calcolo dettagliato fasce orarie per ${workEntry.startTime}-${workEntry.endTime}`);
       
-      // Calcola ore totali per determinare se è straordinario
-      const totalHours = workHours + travelHours;
-      const isOvertimePeriod = totalHours > 8;
-      
-      // Calcola retribuzione lavoro con fasce orarie
-      const workCalculation = this.calculateHourlyRatesByTimeSlots(
-        workEntry.startTime, 
-        workEntry.endTime, 
-        baseRate, 
-        contract, 
-        isOvertimePeriod, 
-        isHoliday, 
-        isSunday
-      );
-      
-      console.log(`[CalculationService] Calcolo lavoro fasce orarie:`, workCalculation);
-      
-      // Se ci sono ore oltre le 8, considera tutto come straordinario
-      if (isOvertimePeriod) {
-        overtimePay = workCalculation.totalEarnings;
-        overtimeHours = workCalculation.totalHours;
-        regularPay = 0;
-        regularHours = 0;
-      } else {
-        regularPay = workCalculation.totalEarnings;
-        regularHours = workCalculation.totalHours;
+      // Controlla se è attivo il nuovo sistema di tariffe orarie avanzate
+      try {
+        const HourlyRatesService = require('./src/services/HourlyRatesService');
+        const hourlyRatesEnabled = await HourlyRatesService.isHourlyRatesEnabled();
+        
+        if (hourlyRatesEnabled) {
+          console.log(`[CalculationService] Usando nuovo sistema HourlyRatesService per CCNL compliance`);
+          
+          // Usa il nuovo sistema che calcola le maggiorazioni per fasce orarie
+          const workCalculation = await HourlyRatesService.calculateHourlyRates(
+            workEntry.startTime,
+            workEntry.endTime,
+            baseRate,
+            contract,
+            isHoliday,
+            isSunday
+          );
+          
+          console.log(`[CalculationService] Calcolo HourlyRatesService:`, workCalculation);
+          
+          // Il nuovo sistema distingue automaticamente ore normali e straordinarie
+          regularPay = workCalculation.regularPay || 0;
+          regularHours = workCalculation.regularHours || 0;
+          overtimePay = workCalculation.overtimePay || 0;
+          overtimeHours = workCalculation.overtimeHours || 0;
+          
+        } else {
+          // Sistema legacy - mantiene la logica esistente
+          console.log(`[CalculationService] Usando sistema legacy di calcolo fasce orarie`);
+          
+          // Calcola ore totali per determinare se è straordinario
+          const totalHours = workHours + travelHours;
+          const isOvertimePeriod = totalHours > 8;
+          
+          // Calcola retribuzione lavoro con fasce orarie
+          const workCalculation = await this.calculateHourlyRatesByTimeSlots(
+            workEntry.startTime, 
+            workEntry.endTime, 
+            baseRate, 
+            contract, 
+            isOvertimePeriod, 
+            isHoliday, 
+            isSunday
+          );
+          
+          console.log(`[CalculationService] Calcolo lavoro fasce orarie legacy:`, workCalculation);
+          
+          // Se ci sono ore oltre le 8, considera tutto come straordinario
+          if (isOvertimePeriod) {
+            overtimePay = workCalculation.totalEarnings;
+            overtimeHours = workCalculation.totalHours;
+            regularPay = 0;
+            regularHours = 0;
+          } else {
+            regularPay = workCalculation.totalEarnings;
+            regularHours = workCalculation.totalHours;
+          }
+        }
+      } catch (error) {
+        console.log(`[CalculationService] Errore nel nuovo sistema, fallback al legacy:`, error);
+        
+        // Fallback al sistema legacy in caso di errore
+        const totalHours = workHours + travelHours;
+        const isOvertimePeriod = totalHours > 8;
+        
+        const workCalculation = await this.calculateHourlyRatesByTimeSlots(
+          workEntry.startTime, 
+          workEntry.endTime, 
+          baseRate, 
+          contract, 
+          isOvertimePeriod, 
+          isHoliday, 
+          isSunday
+        );
+        
+        if (isOvertimePeriod) {
+          overtimePay = workCalculation.totalEarnings;
+          overtimeHours = workCalculation.totalHours;
+          regularPay = 0;
+          regularHours = 0;
+        } else {
+          regularPay = workCalculation.totalEarnings;
+          regularHours = workCalculation.totalHours;
+        }
       }
       
       // Calcola viaggio separatamente (sempre a tariffa standard per ora)
@@ -1301,26 +1359,57 @@ class CalculationService {
     // Maggiorazioni CCNL per interventi di reperibilità
     const ccnlRates = contract.overtimeRates || {};
     
-    // Multipliers per LAVORO (includono logica straordinario se supera 8h)
+    // Multipliers per LAVORO secondo CCNL Metalmeccanico PMI (dalle impostazioni app)
     const workMultipliers = {
-      ordinary: shouldApplyOvertimeToStandby ? (ccnlRates.day || 1.2) : 1.0, // Se supera 8h feriali, diventa straordinario
-      evening: shouldApplyOvertimeToStandby ? (ccnlRates.nightUntil22 || 1.25) : (ccnlRates.nightUntil22 || 1.25), // Serale 20:00-22:00 +25%
-      night: shouldApplyOvertimeToStandby ? (ccnlRates.nightAfter22 || 1.35) : 1.25, // Straordinario notturno o ordinario notturno
-      saturday: ccnlRates.saturday || 1.25, // Maggiorazione sabato configurabile
-      saturday_night: (ccnlRates.saturday || 1.25) * 1.25, // Sabato + notturno
-      holiday: shouldApplyOvertimeToStandby ? (ccnlRates.holiday || 1.35) : 1.30, // Straordinario festivo o ordinario festivo
-      night_holiday: shouldApplyOvertimeToStandby ? 1.60 : 1.55 // Maggiorazione composta per straordinario o ordinario
+      // FASCIA DIURNA (06:00-20:00)
+      ordinary: shouldApplyOvertimeToStandby ? (ccnlRates.day || 1.20) : 1.0, // Straordinario diurno +20% o ordinario
+      
+      // FASCIA SERALE (20:00-22:00) 
+      evening: shouldApplyOvertimeToStandby 
+        ? 1.45  // Straordinario serale +45% (dalle impostazioni app)
+        : 1.25, // Ordinario serale +25% (dalle impostazioni app)
+      
+      // FASCIA NOTTURNA (22:00-06:00)
+      night: shouldApplyOvertimeToStandby 
+        ? 1.50  // Straordinario notturno +50% (dalle impostazioni app)
+        : 1.35, // Ordinario notturno +35% (dalle impostazioni app)
+      
+      // SABATO (tutto il giorno)
+      saturday: ccnlRates.saturday || 1.25, // Sabato +25%
+      
+      // SABATO NOTTURNO (sabato 22:00-06:00) 
+      saturday_night: shouldApplyOvertimeToStandby 
+        ? 1.50  // Straordinario notturno +50% (prevale sul sabato)
+        : 1.35, // Ordinario notturno +35% (prevale sul sabato)
+      
+      // FESTIVO/DOMENICA (tutto il giorno)
+      holiday: shouldApplyOvertimeToStandby 
+        ? 1.50  // Straordinario festivo +50% (dalle impostazioni app)
+        : 1.30, // Ordinario festivo +30% (dalle impostazioni app)
+      
+      // FESTIVO/DOMENICA NOTTURNO
+      night_holiday: shouldApplyOvertimeToStandby 
+        ? 1.85  // Straordinario: notturno +50% + festivo +50% (composizione) = ~85%
+        : 1.65  // Ordinario: notturno +35% + festivo +30% (composizione) = ~65%
     };
     
     // Multipliers per VIAGGI (solo maggiorazioni di fascia oraria, MAI straordinari)
+    // CORREZIONE: Rispetta SOLO l'impostazione travelWithBonus delle impostazioni reperibilità
+    const travelWithBonus = standbySettings.travelWithBonus === true;
+    
+    console.log(`[CalculationService] Travel bonus settings for ${workEntry.date}:`, {
+      travelWithBonus,
+      standbySettings: standbySettings
+    });
+    
     const travelMultipliers = {
       ordinary: 1.0, // Viaggi diurni sempre a tariffa base
-      evening: ccnlRates.nightUntil22 || 1.25, // Viaggi serali sempre +25% (fascia oraria)
-      night: 1.25, // Viaggi notturni sempre +25% (fascia oraria, non straordinario)
+      evening: travelWithBonus ? 1.25 : 1.0, // Viaggi serali +25% solo se toggle attivato
+      night: travelWithBonus ? 1.35 : 1.0, // Viaggi notturni +35% solo se toggle attivato
       saturday: 1.0, // Viaggi sabato a tariffa base (solo fascia oraria conta)
-      saturday_night: 1.25, // Viaggi sabato notte +25% (solo fascia notturna)
+      saturday_night: travelWithBonus ? 1.35 : 1.0, // Viaggi sabato notte +35% solo se toggle attivato
       holiday: 1.0, // Viaggi festivi a tariffa base
-      night_holiday: 1.25 // Viaggi festivi notte +25% (solo fascia notturna)
+      night_holiday: travelWithBonus ? 1.35 : 1.0 // Viaggi festivi notte +35% solo se toggle attivato
     };
     
     Object.keys(hours.work).forEach(k => {
@@ -1389,7 +1478,11 @@ class CalculationService {
       travelHours: hours.travel, // Ore viaggio per fascia
       workEarnings: earnings.work, // Guadagni lavoro per fascia
       travelEarnings: earnings.travel, // Guadagni viaggio per fascia
-      totalEarnings // Guadagno totale reperibilità (inclusa indennità)
+      totalEarnings, // Guadagno totale reperibilità (inclusa indennità)
+      // AGGIUNTA: Informazioni per la UI
+      isOvertimeApplied: shouldApplyOvertimeToStandby, // Se le ore di reperibilità sono considerate straordinarie
+      ordinaryTotalHours, // Ore ordinarie già lavorate nel giorno
+      standardWorkDay // Ore standard (8h)
     };
   }
 
@@ -1560,9 +1653,47 @@ class CalculationService {
     return baseRate;
   }
 
+  // Helper per caricare fasce orarie personalizzate
+  static async getCustomTimeSlots() {
+    try {
+      const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+      const customTimeSlotsData = await AsyncStorage.getItem('custom_time_slots');
+      if (customTimeSlotsData) {
+        const slots = JSON.parse(customTimeSlotsData);
+        // Converti le fasce orarie dal formato HH:MM al formato minuti
+        return slots.map(slot => {
+          const [startHour, startMin] = slot.start.split(':').map(Number);
+          const [endHour, endMin] = slot.end.split(':').map(Number);
+          
+          let startMinutes = startHour * 60 + startMin;
+          let endMinutes = endHour * 60 + endMin;
+          
+          // Gestisci attraversamento mezzanotte
+          if (endMinutes <= startMinutes) {
+            endMinutes += 24 * 60;
+          }
+          
+          return {
+            start: startMinutes,
+            end: endMinutes,
+            name: slot.name || slot.id,
+            multiplier: slot.rate || 1.0,
+            id: slot.id
+          };
+        });
+      }
+    } catch (error) {
+      console.warn('Errore caricamento fasce orarie personalizzate:', error);
+    }
+    return [];
+  }
+
   // Calcola la retribuzione per fasce orarie CCNL dettagliate
-  calculateHourlyRatesByTimeSlots(startTime, endTime, baseRate, contract, isOvertime = false, isHoliday = false, isSunday = false) {
+  async calculateHourlyRatesByTimeSlots(startTime, endTime, baseRate, contract, isOvertime = false, isHoliday = false, isSunday = false) {
     const timeSlots = [];
+    
+    // Carica fasce orarie personalizzate
+    const customTimeSlots = await CalculationService.getCustomTimeSlots();
     
     // Converti orari in minuti per calcoli più precisi
     const [startHour, startMin] = startTime.split(':').map(Number);
@@ -1576,13 +1707,21 @@ class CalculationService {
       endMinutes += 24 * 60; // Aggiungi 24 ore
     }
     
-    // Fasce orarie CCNL (in minuti)
-    const CCNL_TIME_SLOTS = [
+    // 🔥 FASCE ORARIE PERSONALIZZABILI: Usa fasce personalizzate se disponibili
+    const TIME_SLOTS = customTimeSlots.length > 0 ? customTimeSlots : [
       { start: 6 * 60, end: 20 * 60, name: 'diurno', multiplier: isOvertime ? (contract?.overtimeRates?.day || 1.2) : 1.0 },
       { start: 20 * 60, end: 22 * 60, name: 'serale', multiplier: isOvertime ? (contract?.overtimeRates?.nightUntil22 || 1.25) : 1.0 },
       { start: 22 * 60, end: 24 * 60, name: 'notturno', multiplier: isOvertime ? (contract?.overtimeRates?.nightAfter22 || 1.35) : (contract?.overtimeRates?.nightUntil22 || 1.25) },
       { start: 0, end: 6 * 60, name: 'notturno', multiplier: isOvertime ? (contract?.overtimeRates?.nightAfter22 || 1.35) : (contract?.overtimeRates?.nightUntil22 || 1.25) }
     ];
+    
+    console.log('🔧 FASCE ORARIE: Usando', customTimeSlots.length > 0 ? 'PERSONALIZZATE' : 'DEFAULT', {
+      customSlotsFound: customTimeSlots.length,
+      totalSlots: TIME_SLOTS.length,
+      startTime,
+      endTime,
+      customSlots: customTimeSlots
+    });
     
     // Applica maggiorazioni festive/domenicali se necessario
     const holidayMultiplier = isHoliday || isSunday ? (contract?.overtimeRates?.holiday || 1.3) : 1.0;
@@ -1591,7 +1730,7 @@ class CalculationService {
     let totalHours = 0;
     
     // Calcola le intersezioni con ogni fascia oraria
-    for (const slot of CCNL_TIME_SLOTS) {
+    for (const slot of TIME_SLOTS) {
       let slotStart = slot.start;
       let slotEnd = slot.end;
       

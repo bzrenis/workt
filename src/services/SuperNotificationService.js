@@ -1,0 +1,572 @@
+// 🚀 SUPER NOTIFICATION SERVICE - Sistema avanzato di notifiche per WorkTracker
+// Versione ottimizzata con gestione robusta dei permessi e programmazione intelligente
+
+let AsyncStorage, Platform, Alert, AppState, Notifications;
+
+// ✅ VERIFICA DISPONIBILITÀ REACT NATIVE
+function checkReactNativeAvailability() {
+  try {
+    AsyncStorage = require('@react-native-async-storage/async-storage').default;
+    const RN = require('react-native');
+    Platform = RN.Platform;
+    Alert = RN.Alert;
+    AppState = RN.AppState;
+    Notifications = require('expo-notifications');
+    return true;
+  } catch (error) {
+    console.warn('⚠️ Imports React Native non disponibili (ambiente Node.js?):', error.message);
+    // Mock per test Node.js
+    AsyncStorage = {
+      getItem: async () => null,
+      setItem: async () => true,
+      removeItem: async () => true,
+    };
+    Platform = { OS: 'android' };
+    Alert = { alert: () => {} };
+    AppState = { currentState: 'active' };
+    Notifications = {
+      setNotificationHandler: () => {},
+      getPermissionsAsync: async () => ({ status: 'granted' }),
+      requestPermissionsAsync: async () => ({ status: 'granted' }),
+      scheduleNotificationAsync: async () => 'mock-id',
+      getAllScheduledNotificationsAsync: async () => [],
+      cancelAllScheduledNotificationsAsync: async () => {},
+      dismissAllNotificationsAsync: async () => {},
+    };
+    return false;
+  }
+}
+
+class SuperNotificationService {
+  constructor() {
+    this.initialized = false;
+    this.isReactNativeEnvironment = checkReactNativeAvailability();
+    this.hasPermission = false;
+    this.databaseService = null; // Import dinamico per evitare loop
+    
+    console.log('🚀 SuperNotificationService inizializzato', this.isReactNativeEnvironment ? '(React Native)' : '(Node.js Mock)');
+  }
+
+  // ✅ INIZIALIZZAZIONE
+  async initialize() {
+    if (this.initialized) return true;
+
+    try {
+      if (this.isReactNativeEnvironment) {
+        // Configura handler notifiche
+        Notifications.setNotificationHandler({
+          handleNotification: async () => ({
+            shouldShowAlert: true,
+            shouldPlaySound: true,
+            shouldSetBadge: false,
+          }),
+        });
+        
+        // Configura canale di notifica per Android con icona personalizzata
+        if (Platform.OS === 'android') {
+          try {
+            await Notifications.setNotificationChannelAsync('default', {
+              name: 'WorkT - Promemoria',
+              importance: Notifications.AndroidImportance.HIGH,
+              vibrationPattern: [0, 250, 250, 250],
+              lightColor: '#1E3A8A',
+              sound: 'default',
+              showBadge: true,
+            });
+            console.log('📱 Canale notifiche Android configurato');
+          } catch (channelError) {
+            console.warn('⚠️ Errore configurazione canale Android:', channelError.message);
+          }
+        }
+        
+        // Verifica permessi
+        this.hasPermission = await this.hasPermissions();
+        
+        console.log('✅ SuperNotificationService inizializzato correttamente');
+      }
+      
+      this.initialized = true;
+      return true;
+    } catch (error) {
+      console.error('❌ Errore inizializzazione SuperNotificationService:', error);
+      return false;
+    }
+  }
+
+  // ✅ CONTROLLO PERMESSI
+  async hasPermissions() {
+    try {
+      const { status } = await Notifications.getPermissionsAsync();
+      return status === 'granted';
+    } catch (error) {
+      console.warn('⚠️ Errore controllo permessi notifiche:', error.message);
+      return false;
+    }
+  }
+
+  // ✅ RICHIESTA PERMESSI
+  async requestPermissions() {
+    try {
+      const { status } = await Notifications.requestPermissionsAsync();
+      this.hasPermission = status === 'granted';
+      return this.hasPermission;
+    } catch (error) {
+      console.warn('⚠️ Errore richiesta permessi notifiche:', error.message);
+      return false;
+    }
+  }
+
+  // ✅ SETUP LISTENER NOTIFICHE (per compatibilità) - DISATTIVATO PER DEBUG
+  setupNotificationListener() {
+    try {
+      if (this.isReactNativeEnvironment && Notifications) {
+        console.log('✅ Listener notifiche configurati (modalità silenziosa)');
+        return { subscription: null, responseSubscription: null };
+      }
+    } catch (error) {
+      console.warn('⚠️ Errore setup listener notifiche:', error.message);
+    }
+  }
+
+  // ✅ IMPOSTAZIONI PREDEFINITE
+  getDefaultSettings() {
+    return {
+      enabled: false,
+      morningTime: '07:30',
+      eveningTime: '18:30',
+      weekendsEnabled: false,
+      workReminder: { enabled: false, morningTime: '07:30', weekendsEnabled: false },
+      timeEntryReminder: { enabled: false, time: '18:30', weekendsEnabled: false },
+      standbyReminder: { enabled: false, notifications: [] },
+      backupReminder: { enabled: false, time: '02:00', frequency: 'daily' }
+    };
+  }
+
+  // ✅ CARICA IMPOSTAZIONI
+  async getSettings() {
+    try {
+      const saved = await AsyncStorage.getItem('superNotificationSettings');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return { ...this.getDefaultSettings(), ...parsed };
+      }
+      return this.getDefaultSettings();
+    } catch (error) {
+      console.error('❌ Errore caricamento impostazioni:', error);
+      return this.getDefaultSettings();
+    }
+  }
+
+  // ✅ SALVA IMPOSTAZIONI
+  async saveSettings(settings) {
+    try {
+      await AsyncStorage.setItem('superNotificationSettings', JSON.stringify(settings));
+      return true;
+    } catch (error) {
+      console.error('❌ Errore salvataggio impostazioni:', error);
+      return false;
+    }
+  }
+
+  // 🚀 PROGRAMMAZIONE NOTIFICHE PRINCIPALE
+  async scheduleNotifications(settings, forceReschedule = false) {
+    if (!this.initialized) await this.initialize();
+    
+    try {
+      if (!settings.enabled || !this.hasPermission) {
+        console.log('⏹️ Notifiche disabilitate o permessi mancanti');
+        return 0;
+      }
+
+      if (forceReschedule) {
+        console.log('🗑️ CANCELLAZIONE ROBUSTA - Rimuovo TUTTE le notifiche');
+        
+        try {
+          const existingNotifications = await Notifications.getAllScheduledNotificationsAsync();
+          console.log(`🔍 DEBUG: Trovate ${existingNotifications.length} notifiche programmate da cancellare`);
+        } catch (debugError) {
+          console.warn('⚠️ Errore debug notifiche esistenti:', debugError.message);
+        }
+        
+        await Notifications.cancelAllScheduledNotificationsAsync();
+        await Notifications.dismissAllNotificationsAsync();
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        console.log('🧹 Notifiche esistenti cancellate');
+      }
+
+      let totalScheduled = 0;
+
+      if (settings.workReminder?.enabled || settings.workReminders?.enabled) {
+        const workSettings = settings.workReminder || settings.workReminders;
+        const count = await this.scheduleMorningReminders(workSettings);
+        totalScheduled += count;
+        console.log(`📅 Programmati ${count} promemoria inizio lavoro`);
+      }
+
+      if (settings.timeEntryReminder?.enabled || settings.timeEntryReminders?.enabled) {
+        const timeSettings = settings.timeEntryReminder || settings.timeEntryReminders;
+        const count = await this.scheduleTimeEntryReminders(timeSettings);
+        totalScheduled += count;
+        console.log(`⏰ Programmati ${count} promemoria inserimento orari`);
+      }
+
+      if (settings.backupReminder?.enabled) {
+        const count = await this.scheduleBackupReminders(settings.backupReminder);
+        totalScheduled += count;
+        console.log(`💾 Programmati ${count} promemoria backup automatico`);
+      }
+
+      console.log(`✅ Totale notifiche programmate: ${totalScheduled}`);
+      await AsyncStorage.setItem('last_notification_schedule', new Date().toISOString());
+      
+      return totalScheduled;
+
+    } catch (error) {
+      console.error('❌ Errore programmazione notifiche:', error);
+      return 0;
+    }
+  }
+
+  // 📅 PROMEMORIA INIZIO LAVORO (3 giorni per evitare spam)
+  async scheduleMorningReminders(settings) {
+    if (!settings.morningTime) {
+      console.error('❌ Orario promemoria mattutino non configurato');
+      return 0;
+    }
+    
+    try {
+      const [hours, minutes] = settings.morningTime.split(':').map(Number);
+      const daysToSchedule = settings.weekendsEnabled ? [0,1,2,3,4,5,6] : [1,2,3,4,5];
+      let scheduledCount = 0;
+      
+      // 🎯 PROGRAMMA PER 3 GIORNI (evita spam di notifiche)
+      for (let day = 0; day <= 3; day++) {
+        const targetDate = new Date();
+        targetDate.setDate(targetDate.getDate() + day);
+        
+        if (!daysToSchedule.includes(targetDate.getDay())) continue;
+        
+        targetDate.setHours(hours, minutes, 0, 0);
+        
+        if (targetDate <= new Date()) continue;
+        
+        const now = new Date();
+        const timeDiff = targetDate.getTime() - now.getTime();
+        
+        if (targetDate.toDateString() === now.toDateString()) {
+          if (timeDiff <= 3600000) { // 1 ora
+            console.log(`⏭️ Saltato promemoria mattutino: stesso giorno troppo vicino (${Math.round(timeDiff/1000/60)}min)`);
+            continue;
+          }
+        }
+        
+        if (timeDiff <= 1800000) { // 30 minuti
+          console.log(`⏭️ Saltato promemoria mattutino: troppo vicino (${Math.round(timeDiff/1000/60)}min) - richiede 30min+`);
+          continue;
+        }
+        
+        console.log(`📅 Programmando promemoria lavoro per: ${targetDate.toLocaleString('it-IT')} (tra ${Math.round(timeDiff/1000/60)} min)`);
+        
+        await Notifications.scheduleNotificationAsync({
+          content: {
+            title: '🌅 Buongiorno! Inizio Lavoro',
+            body: 'È ora di iniziare la giornata lavorativa. Ricordati di registrare l\'orario di inizio.',
+            data: { 
+              type: 'work_reminder', 
+              date: targetDate.toISOString().split('T')[0],
+              timestamp: targetDate.getTime()
+            },
+            sound: Platform.OS === 'android' ? 'default' : true,
+            priority: Platform.OS === 'android' ? 'high' : undefined,
+            color: '#1E3A8A',
+            categoryIdentifier: 'work_reminder',
+            ...(Platform.OS === 'android' && { channelId: 'default' }),
+          },
+          trigger: {
+            type: 'date',
+            date: targetDate,
+          },
+        });
+        
+        scheduledCount++;
+      }
+      
+      return scheduledCount;
+      
+    } catch (error) {
+      console.error('❌ Errore programmazione promemoria mattutini:', error);
+      return 0;
+    }
+  }
+
+  // ⏰ PROMEMORIA INSERIMENTO ORARI (3 giorni per evitare spam)
+  async scheduleTimeEntryReminders(settings) {
+    if (!settings.time && !settings.eveningTime) {
+      console.error('❌ Orario promemoria inserimento orari non configurato');
+      return 0;
+    }
+    
+    try {
+      const timeString = settings.time || settings.eveningTime;
+      const [hours, minutes] = timeString.split(':').map(Number);
+      const daysToSchedule = settings.weekendsEnabled ? [0,1,2,3,4,5,6] : [1,2,3,4,5];
+      let scheduledCount = 0;
+      
+      // 🎯 PROGRAMMA PER 3 GIORNI (evita spam di notifiche)
+      for (let day = 0; day <= 3; day++) {
+        const targetDate = new Date();
+        targetDate.setDate(targetDate.getDate() + day);
+        
+        if (!daysToSchedule.includes(targetDate.getDay())) continue;
+        
+        targetDate.setHours(hours, minutes, 0, 0);
+        
+        if (targetDate <= new Date()) continue;
+        
+        const now = new Date();
+        const timeDiff = targetDate.getTime() - now.getTime();
+        
+        if (targetDate.toDateString() === now.toDateString()) {
+          if (timeDiff <= 3600000) { // 1 ora
+            console.log(`⏭️ Saltato promemoria time entry: stesso giorno troppo vicino (${Math.round(timeDiff/1000/60)}min)`);
+            continue;
+          }
+        }
+        
+        if (timeDiff <= 1800000) { // 30 minuti
+          console.log(`⏭️ Saltato promemoria time entry: troppo vicino (${Math.round(timeDiff/1000/60)}min) - richiede 30min+`);
+          continue;
+        }
+        
+        console.log(`📅 Programmando time entry per: ${targetDate.toLocaleString('it-IT')} (tra ${Math.round(timeDiff/1000/60)} min)`);
+        
+        await Notifications.scheduleNotificationAsync({
+          content: {
+            title: '⏰ Promemoria Inserimento Orari',
+            body: 'Ricordati di inserire le ore di lavoro di oggi prima di finire.',
+            data: { 
+              type: 'time_entry_reminder', 
+              date: targetDate.toISOString().split('T')[0],
+              timestamp: targetDate.getTime()
+            },
+            sound: Platform.OS === 'android' ? 'default' : true,
+            priority: Platform.OS === 'android' ? 'high' : undefined,
+            color: '#1E3A8A',
+            categoryIdentifier: 'time_entry_reminder',
+            ...(Platform.OS === 'android' && { channelId: 'default' }),
+          },
+          trigger: {
+            type: 'date',
+            date: targetDate,
+          },
+        });
+        
+        scheduledCount++;
+      }
+      
+      return scheduledCount;
+      
+    } catch (error) {
+      console.error('❌ Errore programmazione promemoria inserimento:', error);
+      return 0;
+    }
+  }
+
+  // 💾 BACKUP AUTOMATICO - Programmazione promemoria backup ogni 24 ore
+  async scheduleBackupReminders(settings) {
+    if (!settings.enabled) return 0;
+
+    try {
+      const [hours, minutes] = settings.time.split(':');
+      let scheduledCount = 0;
+      const now = new Date();
+      
+      // 🎯 PROGRAMMA BACKUP OGNI 24 ORE per i prossimi 7 giorni
+      for (let day = 0; day < 7; day++) {
+        const targetDate = new Date(now);
+        
+        // Ogni giorno alla stessa ora
+        targetDate.setDate(now.getDate() + day);
+        targetDate.setHours(parseInt(hours), parseInt(minutes), 0, 0);
+        
+        const timeDiff = targetDate.getTime() - now.getTime();
+        if (timeDiff <= 1800000) { // 30 minuti
+          console.log(`⏭️ Saltato backup: troppo vicino (${Math.round(timeDiff/1000/60)}min)`);
+          continue;
+        }
+        
+        console.log(`💾 Programmando backup automatico GIORNALIERO per: ${targetDate.toLocaleString('it-IT')}`);
+        
+        await Notifications.scheduleNotificationAsync({
+          content: {
+            title: '💾 Backup Automatico Giornaliero WorkT',
+            body: 'È ora di creare il backup giornaliero dei tuoi dati lavorativi. Tap per aprire.',
+            data: { 
+              type: 'backup_reminder',
+              timestamp: targetDate.getTime(),
+              day: day,
+              frequency: 'daily'
+            },
+            sound: Platform.OS === 'android' ? 'default' : true,
+            priority: Platform.OS === 'android' ? 'high' : undefined,
+            color: '#1E3A8A',
+            categoryIdentifier: 'backup_reminder',
+            ...(Platform.OS === 'android' && { channelId: 'default' }),
+          },
+          trigger: {
+            type: 'date',
+            date: targetDate,
+          },
+        });
+        
+        scheduledCount++;
+      }
+      
+      return scheduledCount;
+      
+    } catch (error) {
+      console.error('❌ Errore programmazione backup automatico:', error);
+      return 0;
+    }
+  }
+
+  // 🧪 TEST NOTIFICA IMMEDIATA
+  async scheduleTestNotification() {
+    try {
+      if (!this.hasPermission) {
+        console.warn('⚠️ Permessi notifiche mancanti per test');
+        return false;
+      }
+
+      const testTime = new Date();
+      testTime.setSeconds(testTime.getSeconds() + 5);
+      
+      console.log(`🧪 Programmando notifica di test per: ${testTime.toLocaleTimeString('it-IT')}`);
+      
+      await Notifications.scheduleNotificationAsync({
+        content: {
+          title: '🧪 Test Notifica SuperService',
+          body: `Test completato alle ${new Date().toLocaleTimeString('it-IT')}. Le modifiche funzionano correttamente!`,
+          data: { 
+            type: 'test_notification',
+            timestamp: testTime.getTime(),
+            testId: Math.random().toString(36).substr(2, 9)
+          },
+          sound: Platform.OS === 'android' ? 'default' : true,
+          priority: Platform.OS === 'android' ? 'high' : undefined,
+          color: '#1E3A8A',
+          categoryIdentifier: 'test_notification',
+          ...(Platform.OS === 'android' && { channelId: 'default' }),
+        },
+        trigger: {
+          type: 'date',
+          date: testTime,
+        },
+      });
+      
+      console.log('✅ Notifica di test programmata con successo');
+      return true;
+      
+    } catch (error) {
+      console.error('❌ Errore programmazione notifica di test:', error);
+      return false;
+    }
+  }
+
+  // 📊 STATISTICHE
+  async getNotificationStats() {
+    try {
+      if (!this.hasPermission) {
+        return { error: 'Permessi mancanti' };
+      }
+      
+      const scheduledNotifications = await Notifications.getAllScheduledNotificationsAsync();
+      const lastSchedule = await AsyncStorage.getItem('last_notification_schedule');
+      
+      const byType = {};
+      scheduledNotifications.forEach(notification => {
+        const type = notification.content.data?.type || 'unknown';
+        byType[type] = (byType[type] || 0) + 1;
+      });
+      
+      return {
+        total: scheduledNotifications.length,
+        byType,
+        lastSchedule: lastSchedule ? new Date(lastSchedule) : null,
+        isSystemActive: scheduledNotifications.length > 0
+      };
+      
+    } catch (error) {
+      console.error('❌ Errore statistiche notifiche:', error);
+      return { error: error.message };
+    }
+  }
+
+  // 🗑️ PULIZIA
+  async cancelAllNotifications() {
+    try {
+      await Notifications.cancelAllScheduledNotificationsAsync();
+      await Notifications.dismissAllNotificationsAsync();
+      return true;
+    } catch (error) {
+      console.error('❌ Errore cancellazione notifiche:', error);
+      return false;
+    }
+  }
+
+  // OTTIENI NOTIFICHE PROGRAMMATE
+  async getScheduledNotifications() {
+    try {
+      if (!this.isReactNativeEnvironment || !Notifications) {
+        return [];
+      }
+      
+      const scheduled = await Notifications.getAllScheduledNotificationsAsync();
+      return scheduled;
+    } catch (error) {
+      console.error('❌ Errore ottenimento notifiche programmate:', error);
+      return [];
+    }
+  }
+
+  // 🔄 RIPROGRAMMAZIONE FORZATA
+  async forceReschedule() {
+    console.log('🔄 Riprogrammazione forzata di tutte le notifiche...');
+    const settings = await this.getSettings();
+    return await this.scheduleNotifications(settings, true);
+  }
+
+  // 🔍 CONTROLLO E RECOVERY NOTIFICHE MANCATE
+  async checkAndRecoverMissedNotifications() {
+    try {
+      console.log('🔍 Verifica notifiche perse...');
+      
+      const scheduled = await this.getScheduledNotifications();
+      
+      if (scheduled.length === 0) {
+        console.log('ℹ️ Nessuna notifica programmata. Usa Impostazioni → Notifiche per attivarle manualmente.');
+        return { recovered: false, reason: 'no_auto_scheduling' };
+      }
+      
+      console.log(`✅ Nessuna notifica persa trovata`);
+      return { recovered: false, scheduled: scheduled.length };
+      
+    } catch (error) {
+      console.error('❌ Errore verifica notifiche perse:', error);
+      return { error: error.message };
+    }
+  }
+}
+
+// ✅ EXPORT CORRETTO PER COMPATIBILITY COMPLETA
+const superNotificationInstance = new SuperNotificationService();
+
+// Export CommonJS (per App.js che usa require)
+module.exports = superNotificationInstance;
+
+// Export ES6 default (per import ES6)
+module.exports.default = superNotificationInstance;
+
+// Export named per compatibilità
+module.exports.SuperNotificationService = SuperNotificationService;

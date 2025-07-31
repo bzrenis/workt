@@ -18,9 +18,9 @@ import { isWeekend } from '../utils';
 import { isItalianHoliday } from '../constants/holidays';
 import { CCNL_CONTRACTS } from '../constants';
 import { Picker } from '@react-native-picker/picker';
-import * as Notifications from 'expo-notifications';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import NotificationService from '../services/NotificationService';
+import NotificationService from '../services/FixedNotificationService';
+import { useTheme } from '../contexts/ThemeContext';
 
 // Configurazione locale italiana per il calendario
 LocaleConfig.locales['it'] = {
@@ -39,6 +39,8 @@ LocaleConfig.locales['it'] = {
 LocaleConfig.defaultLocale = 'it';
 
 const StandbySettingsScreen = ({ navigation }) => {
+  const { theme } = useTheme();
+  const styles = createStyles(theme);
   const { settings, updatePartialSettings, isLoading } = useSettings();
   const [formData, setFormData] = useState({
     enabled: false,
@@ -123,47 +125,29 @@ const StandbySettingsScreen = ({ navigation }) => {
   }, [settings]);
 
   useEffect(() => {
-    // Richiedi permessi notifiche all'avvio
-    (async () => {
-      await Notifications.requestPermissionsAsync();
-    })();
-
-    // Programma notifica automatica per i giorni di reperibilità
+    // Programma notifica automatica per i giorni di reperibilità usando il nostro sistema Enhanced
     const today = new Date();
     const todayStr = today.toISOString().slice(0, 10);
     if (formData.enabled && standbyDays && standbyDays[todayStr]?.selected) {
-      Notifications.scheduleNotificationAsync({
-        content: {
-          title: 'Reperibilità',
-          body: 'Oggi sei in reperibilità. Conferma la tua disponibilità!',
-          sound: true,
-          data: { type: 'standby-confirm', date: todayStr }
-        },
-        trigger: null // immediata all'apertura, oppure { hour: 7, minute: 0, repeats: false } per le 7:00
-      });
+      // Usa il sistema Alert per notificare immediatamente
+      Alert.alert(
+        'Reperibilità',
+        'Oggi sei in reperibilità. Conferma la tua disponibilità!',
+        [
+          {
+            text: 'Annulla',
+            style: 'cancel'
+          },
+          {
+            text: 'Conferma',
+            onPress: async () => {
+              await AsyncStorage.setItem(`standby_confirmed_${todayStr}`, 'true');
+              Alert.alert('Conferma reperibilità', 'Hai confermato la tua disponibilità per oggi.');
+            }
+          }
+        ]
+      );
     }
-
-    // Listener per risposta alla notifica
-    const subscription = Notifications.addNotificationResponseReceivedListener(async response => {
-      const data = response.notification.request.content.data;
-      if (data?.type === 'standby-confirm' && data?.date) {
-        await AsyncStorage.setItem(`standby_confirmed_${data.date}`, 'true');
-        Alert.alert('Conferma reperibilità', 'Hai confermato la tua disponibilità per oggi.');
-      }
-    });
-
-    // Listener per notifica ricevuta mentre l'app è aperta
-    const foregroundSub = Notifications.addNotificationReceivedListener(async notification => {
-      const data = notification.request.content.data;
-      if (data?.type === 'standby-confirm' && data?.date) {
-        Alert.alert('Reperibilità', 'Oggi sei in reperibilità. Conferma la tua disponibilità!');
-      }
-    });
-
-    return () => {
-      subscription.remove();
-      foregroundSub.remove();
-    };
   }, [formData.enabled, standbyDays]);
 
   // Funzione per generare tutti i giorni del mese corrente
@@ -190,13 +174,29 @@ const StandbySettingsScreen = ({ navigation }) => {
           marked[date] = {
             marked: true,
             dotColor: '#F44336',
-            customStyles: { container: { backgroundColor: '#FFEBEE' } }
+            customStyles: { 
+              container: { 
+                backgroundColor: theme.name === 'dark' ? 'rgba(244, 67, 54, 0.2)' : '#FFEBEE',
+                borderRadius: 6
+              },
+              text: {
+                color: theme.colors.text
+              }
+            }
           };
         } else if (isWk) {
           marked[date] = {
             marked: true,
             dotColor: '#FF9800',
-            customStyles: { container: { backgroundColor: '#FFF3E0' } }
+            customStyles: { 
+              container: { 
+                backgroundColor: theme.name === 'dark' ? 'rgba(255, 152, 0, 0.2)' : '#FFF3E0',
+                borderRadius: 6
+              },
+              text: {
+                color: theme.colors.text
+              }
+            }
           };
         }
       } else {
@@ -205,9 +205,10 @@ const StandbySettingsScreen = ({ navigation }) => {
           selected: true,
           customStyles: {
             container: {
-              backgroundColor: '#1565c0', // blu intenso
-              borderWidth: 3,
-              borderColor: '#1976d2',
+              backgroundColor: '#007AFF',
+              borderWidth: 2,
+              borderColor: '#007AFF',
+              borderRadius: 6,
               elevation: 2,
             },
             text: {
@@ -218,9 +219,11 @@ const StandbySettingsScreen = ({ navigation }) => {
         };
         // Se anche festivo/weekend, aggiungi alone
         if (isHol) {
-          marked[date].customStyles.container.boxShadow = '0 0 0 2px #F44336';
+          marked[date].customStyles.container.borderColor = '#F44336';
+          marked[date].customStyles.container.borderWidth = 3;
         } else if (isWk) {
-          marked[date].customStyles.container.boxShadow = '0 0 0 2px #FF9800';
+          marked[date].customStyles.container.borderColor = '#FF9800';
+          marked[date].customStyles.container.borderWidth = 3;
         }
       }
     });
@@ -287,7 +290,7 @@ const StandbySettingsScreen = ({ navigation }) => {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#2196F3" />
+          <ActivityIndicator size="large" color="#007AFF" />
         </View>
       </SafeAreaView>
     );
@@ -309,7 +312,7 @@ const StandbySettingsScreen = ({ navigation }) => {
             <Switch
               value={formData.enabled}
               onValueChange={(value) => setFormData(prev => ({ ...prev, enabled: value }))}
-              trackColor={{ false: '#ccc', true: '#2196F3' }}
+              trackColor={{ false: theme.colors.border, true: '#007AFF' }}
               thumbColor={formData.enabled ? '#fff' : '#f4f3f4'}
             />
           </View>
@@ -327,6 +330,7 @@ const StandbySettingsScreen = ({ navigation }) => {
                       value={formData.startHour}
                       onChangeText={(value) => setFormData(prev => ({ ...prev, startHour: value }))}
                       placeholder="18"
+                      placeholderTextColor={theme.colors.textSecondary}
                       keyboardType="numeric"
                       maxLength={2}
                     />
@@ -341,6 +345,7 @@ const StandbySettingsScreen = ({ navigation }) => {
                       value={formData.endHour}
                       onChangeText={(value) => setFormData(prev => ({ ...prev, endHour: value }))}
                       placeholder="8"
+                      placeholderTextColor={theme.colors.textSecondary}
                       keyboardType="numeric"
                       maxLength={2}
                     />
@@ -360,7 +365,7 @@ const StandbySettingsScreen = ({ navigation }) => {
                   <Switch
                     value={formData.includeWeekends}
                     onValueChange={(value) => setFormData(prev => ({ ...prev, includeWeekends: value }))}
-                    trackColor={{ false: '#ccc', true: '#2196F3' }}
+                    trackColor={{ false: theme.colors.border, true: '#007AFF' }}
                     thumbColor={formData.includeWeekends ? '#fff' : '#f4f3f4'}
                   />
                 </View>
@@ -370,7 +375,7 @@ const StandbySettingsScreen = ({ navigation }) => {
                   <Switch
                     value={formData.includeHolidays}
                     onValueChange={(value) => setFormData(prev => ({ ...prev, includeHolidays: value }))}
-                    trackColor={{ false: '#ccc', true: '#2196F3' }}
+                    trackColor={{ false: theme.colors.border, true: '#007AFF' }}
                     thumbColor={formData.includeHolidays ? '#fff' : '#f4f3f4'}
                   />
                 </View>
@@ -407,7 +412,7 @@ const StandbySettingsScreen = ({ navigation }) => {
                       setSaturdayAsRest(value);
                       setFormData(prev => ({ ...prev, saturdayAsRest: value }));
                     }}
-                    trackColor={{ false: '#ccc', true: '#2196F3' }}
+                    trackColor={{ false: theme.colors.border, true: theme.colors.primary }}
                     thumbColor={saturdayAsRest ? '#fff' : '#f4f3f4'}
                   />
                 </View>
@@ -417,7 +422,7 @@ const StandbySettingsScreen = ({ navigation }) => {
                   <Switch
                     value={formData.travelWithBonus}
                     onValueChange={(value) => setFormData(prev => ({ ...prev, travelWithBonus: value }))}
-                    trackColor={{ false: '#ccc', true: '#1976d2' }}
+                    trackColor={{ false: theme.colors.border, true: '#007AFF' }}
                     thumbColor={formData.travelWithBonus ? '#fff' : '#f4f3f4'}
                   />
                 </View>
@@ -433,7 +438,7 @@ const StandbySettingsScreen = ({ navigation }) => {
                     if (newStandbyDays[day.dateString]) {
                       delete newStandbyDays[day.dateString];
                     } else {
-                      newStandbyDays[day.dateString] = { selected: true, selectedColor: '#1976d2' };
+                      newStandbyDays[day.dateString] = { selected: true, selectedColor: '#007AFF' };
                     }
                     
                     // Aggiorna stato locale
@@ -463,12 +468,27 @@ const StandbySettingsScreen = ({ navigation }) => {
                   enableSwipeMonths={true}
                   markingType="custom"
                   theme={{
-                    todayTextColor: '#1976d2',
-                    selectedDayBackgroundColor: '#1976d2',
-                    arrowColor: '#1976d2',
+                    backgroundColor: theme.colors.card,
+                    calendarBackground: theme.colors.card,
+                    textSectionTitleColor: theme.colors.text,
+                    textSectionTitleDisabledColor: theme.colors.textSecondary,
+                    selectedDayBackgroundColor: '#007AFF',
+                    selectedDayTextColor: '#ffffff',
+                    todayTextColor: '#007AFF',
+                    dayTextColor: theme.colors.text,
+                    textDisabledColor: theme.colors.textSecondary,
+                    dotColor: '#007AFF',
+                    selectedDotColor: '#ffffff',
+                    arrowColor: '#007AFF',
+                    disabledArrowColor: theme.colors.textSecondary,
+                    monthTextColor: theme.colors.text,
+                    indicatorColor: '#007AFF',
                     textDayFontWeight: '500',
                     textMonthFontWeight: 'bold',
                     textDayHeaderFontWeight: 'bold',
+                    textDayFontSize: 16,
+                    textMonthFontSize: 16,
+                    textDayHeaderFontSize: 13,
                   }}
                 />
                 <Text style={styles.inputHelp}>Tocca i giorni sul calendario per attivare/disattivare la reperibilità.</Text>
@@ -476,7 +496,7 @@ const StandbySettingsScreen = ({ navigation }) => {
 
               <View style={styles.infoContainer}>
                 <View style={styles.infoHeader}>
-                  <Ionicons name="information-circle" size={20} color="#2196F3" />
+                  <Ionicons name="information-circle" size={20} color="#007AFF" />
                   <Text style={styles.infoTitle}>Come funziona</Text>
                 </View>
                 <Text style={styles.infoText}>
@@ -487,40 +507,58 @@ const StandbySettingsScreen = ({ navigation }) => {
                   • Gli interventi durante la reperibilità sono calcolati con le maggiorazioni CCNL (straordinario, notturno, festivo){"\n"}
                   • I viaggi in reperibilità seguono le impostazioni del contratto CCNL
                 </Text>
-                <View style={{marginTop:10,backgroundColor:'#fffde7',borderRadius:8,padding:10}}>
-                  <Text style={{fontWeight:'bold',color:'#ef6c00'}}>Esempi pratici:</Text>
-                  <Text style={{color:'#333',marginTop:4,fontSize:13}}>
+                <View style={{
+                  marginTop:10,
+                  backgroundColor: theme.colors.surface,
+                  borderRadius:8,
+                  padding:10,
+                  borderLeftWidth: 3,
+                  borderLeftColor: '#FF9800'
+                }}>
+                  <Text style={{fontWeight:'bold',color:'#FF9800'}}>Esempi pratici:</Text>
+                  <Text style={{color: theme.colors.text,marginTop:4,fontSize:13}}>
                     {`• Seleziona i giorni di reperibilità dal calendario (es: sabato e domenica)
 • Imposta l'indennità giornaliera secondo il tuo CCNL (es: 15€/giorno)
 • Orari tipici: dalle 18:00 alle 08:00 del giorno dopo
 • Se effettui un intervento in reperibilità (es: chiamata notturna), l'app calcola automaticamente la maggiorazione notturna e l'indennità`}
                   </Text>
-                  <Text style={{color:'#333',marginTop:4,fontSize:13}}>
+                  <Text style={{color: theme.colors.text,marginTop:4,fontSize:13}}>
                     {`• I giorni festivi e i weekend sono evidenziati automaticamente nel calendario`}
                   </Text>
                 </View>
               </View>
 
-              <View style={{marginBottom:20,backgroundColor:'#fff',borderRadius:14,padding:16,shadowColor:'#000',shadowOpacity:0.07,shadowRadius:8,elevation:2,borderWidth:1,borderColor:'#e3eafc'}}>
+              <View style={{
+                marginBottom:20,
+                backgroundColor: theme.colors.card,
+                borderRadius:14,
+                padding:16,
+                shadowColor: theme.colors.shadow,
+                shadowOpacity:0.07,
+                shadowRadius:8,
+                elevation:2,
+                borderWidth:1,
+                borderColor: theme.colors.border
+              }}>
                 <View style={{flexDirection:'row',alignItems:'center',marginBottom:10}}>
-                  <Ionicons name="cash-outline" size={22} color="#1976d2" style={{marginRight:8}} />
-                  <Text style={{fontWeight:'bold',fontSize:17,color:'#1976d2'}}>Indennità reperibilità CCNL 2024</Text>
+                  <Ionicons name="cash-outline" size={22} color="#007AFF" style={{marginRight:8}} />
+                  <Text style={{fontWeight:'bold',fontSize:17,color: theme.colors.text}}>Indennità reperibilità CCNL 2024</Text>
                 </View>
                 <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center',marginBottom:6}}>
-                  <Text style={{fontSize:15}}>Feriale (16h)</Text>
-                  <Text style={{fontWeight:'bold',fontSize:15,color:'#1976d2'}}>€4,22</Text>
+                  <Text style={{fontSize:15,color: theme.colors.text}}>Feriale (16h)</Text>
+                  <Text style={{fontWeight:'bold',fontSize:15,color:'#007AFF'}}>€4,22</Text>
                 </View>
                 <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center',marginBottom:6}}>
-                  <Text style={{fontSize:15}}>Feriale (24h)</Text>
-                  <Text style={{fontWeight:'bold',fontSize:15,color:'#1976d2'}}>€7,03</Text>
+                  <Text style={{fontSize:15,color: theme.colors.text}}>Feriale (24h)</Text>
+                  <Text style={{fontWeight:'bold',fontSize:15,color:'#007AFF'}}>€7,03</Text>
                 </View>
                 <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center',marginBottom:6}}>
-                  <Text style={{fontSize:15}}>Festivo/libero (24h)</Text>
-                  <Text style={{fontWeight:'bold',fontSize:15,color:'#d32f2f'}}>€10,63</Text>
+                  <Text style={{fontSize:15,color: theme.colors.text}}>Festivo/libero (24h)</Text>
+                  <Text style={{fontWeight:'bold',fontSize:15,color:'#007AFF'}}>€10,63</Text>
                 </View>
                 <View style={{flexDirection:'row',alignItems:'center',marginTop:10}}>
-                  <Ionicons name="information-circle-outline" size={16} color="#1976d2" style={{marginRight:4}} />
-                  <Text style={{fontSize:12,color:'#666',flex:1}}>
+                  <Ionicons name="information-circle-outline" size={16} color="#007AFF" style={{marginRight:4}} />
+                  <Text style={{fontSize:12,color: theme.colors.textSecondary,flex:1}}>
                     Fonte: CCNL Metalmeccanico PMI Confapi, art. 23, aggiornamento 2024. Il sabato è feriale salvo sia il tuo giorno di riposo settimanale.
                   </Text>
                 </View>
@@ -529,7 +567,7 @@ const StandbySettingsScreen = ({ navigation }) => {
               <View style={styles.inputGroup}>
                 <Text style={styles.inputLabel}>Indennità Personalizzata</Text>
                 <View style={{marginBottom:8}}>
-                  <Text style={{fontSize:14,fontWeight:'bold',color:'#1976d2'}}>Feriale (16h)</Text>
+                  <Text style={{fontSize:14,fontWeight:'bold',color: theme.colors.text}}>Feriale (16h)</Text>
                   <View style={styles.inputContainer}>
                     <TextInput
                       style={styles.textInput}
@@ -537,6 +575,7 @@ const StandbySettingsScreen = ({ navigation }) => {
                       onChangeText={(value) => setFormData(prev => ({ ...prev, customFeriale16: value }))
                       }
                       placeholder="4.22"
+                      placeholderTextColor={theme.colors.textSecondary}
                       keyboardType="numeric"
                       returnKeyType="next"
                     />
@@ -544,7 +583,7 @@ const StandbySettingsScreen = ({ navigation }) => {
                   </View>
                 </View>
                 <View style={{marginBottom:8}}>
-                  <Text style={{fontSize:14,fontWeight:'bold',color:'#1976d2'}}>Feriale (24h)</Text>
+                  <Text style={{fontSize:14,fontWeight:'bold',color: theme.colors.text}}>Feriale (24h)</Text>
                   <View style={styles.inputContainer}>
                     <TextInput
                       style={styles.textInput}
@@ -552,6 +591,7 @@ const StandbySettingsScreen = ({ navigation }) => {
                       onChangeText={(value) => setFormData(prev => ({ ...prev, customFeriale24: value }))
                       }
                       placeholder="7.03"
+                      placeholderTextColor={theme.colors.textSecondary}
                       keyboardType="numeric"
                       returnKeyType="next"
                     />
@@ -559,7 +599,7 @@ const StandbySettingsScreen = ({ navigation }) => {
                   </View>
                 </View>
                 <View style={{marginBottom:8}}>
-                  <Text style={{fontSize:14,fontWeight:'bold',color:'#d32f2f'}}>Festivo/Libero (24h)</Text>
+                  <Text style={{fontSize:14,fontWeight:'bold',color: theme.colors.text}}>Festivo/Libero (24h)</Text>
                   <View style={styles.inputContainer}>
                     <TextInput
                       style={styles.textInput}
@@ -567,6 +607,7 @@ const StandbySettingsScreen = ({ navigation }) => {
                       onChangeText={(value) => setFormData(prev => ({ ...prev, customFestivo: value }))
                       }
                       placeholder="10.63"
+                      placeholderTextColor={theme.colors.textSecondary}
                       keyboardType="numeric"
                       returnKeyType="next"
                     />
@@ -589,10 +630,10 @@ const StandbySettingsScreen = ({ navigation }) => {
   );
 };
 
-const styles = StyleSheet.create({
+const createStyles = (theme) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: theme.colors.background,
   },
   scrollView: {
     flex: 1,
@@ -603,24 +644,24 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   header: {
-    backgroundColor: 'white',
+    backgroundColor: theme.colors.card,
     padding: 20,
     borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
+    borderBottomColor: theme.colors.border,
   },
   headerTitle: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: '#333',
+    color: theme.colors.text,
     marginBottom: 8,
   },
   headerSubtitle: {
     fontSize: 16,
-    color: '#666',
+    color: theme.colors.textSecondary,
     lineHeight: 22,
   },
   formContainer: {
-    backgroundColor: 'white',
+    backgroundColor: theme.colors.card,
     margin: 15,
     padding: 20,
     borderRadius: 12,
@@ -637,12 +678,12 @@ const styles = StyleSheet.create({
     marginBottom: 20,
     paddingBottom: 15,
     borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
+    borderBottomColor: theme.colors.border,
   },
   enableLabel: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#333',
+    color: theme.colors.text,
   },
   inputGroup: {
     marginBottom: 20,
@@ -650,37 +691,37 @@ const styles = StyleSheet.create({
   inputLabel: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#333',
+    color: theme.colors.text,
     marginBottom: 8,
   },
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#ddd',
+    borderColor: theme.colors.border,
     borderRadius: 8,
-    backgroundColor: '#fff',
+    backgroundColor: theme.colors.card,
   },
   textInput: {
     flex: 1,
     padding: 12,
     fontSize: 16,
-    color: '#333',
+    color: theme.colors.text,
   },
   inputSuffix: {
     paddingRight: 12,
     fontSize: 16,
-    color: '#666',
+    color: theme.colors.textSecondary,
   },
   inputHelp: {
     fontSize: 12,
-    color: '#999',
+    color: theme.colors.textDisabled,
     marginTop: 5,
   },
   sectionTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#333',
+    color: theme.colors.text,
     marginBottom: 15,
   },
   timeContainer: {
@@ -696,29 +737,29 @@ const styles = StyleSheet.create({
   },
   timeLabel: {
     fontSize: 14,
-    color: '#666',
+    color: theme.colors.textSecondary,
     marginBottom: 5,
   },
   timeInput: {
     borderWidth: 1,
-    borderColor: '#ddd',
+    borderColor: theme.colors.border,
     borderRadius: 8,
-    backgroundColor: '#fff',
+    backgroundColor: theme.colors.card,
     padding: 12,
     fontSize: 16,
-    color: '#333',
+    color: theme.colors.text,
     textAlign: 'center',
     width: 60,
   },
   timeSeparator: {
     fontSize: 16,
-    color: '#666',
+    color: theme.colors.textSecondary,
     marginHorizontal: 15,
     marginBottom: 12,
   },
   timeHelp: {
     fontSize: 12,
-    color: '#999',
+    color: theme.colors.textDisabled,
     fontStyle: 'italic',
   },
   optionsContainer: {
@@ -730,11 +771,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
+    borderBottomColor: theme.colors.border,
   },
   optionLabel: {
     fontSize: 16,
-    color: '#333',
+    color: theme.colors.text,
     flex: 1,
   },
   toggleButton: {
@@ -742,27 +783,29 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: '#2196F3',
+    borderColor: theme.colors.border,
     marginHorizontal: 4,
-    backgroundColor: 'transparent',
+    backgroundColor: theme.colors.card,
   },
   toggleButtonActive: {
-    backgroundColor: '#2196F3',
+    borderColor: '#007AFF',
+    backgroundColor: theme.name === 'dark' ? 'rgba(0, 122, 255, 0.15)' : '#f0f7ff',
   },
   toggleButtonText: {
     fontSize: 14,
-    color: '#2196F3',
+    color: theme.colors.text,
     fontWeight: '500',
   },
   toggleButtonTextActive: {
-    color: 'white',
+    color: '#007AFF',
+    fontWeight: '600',
   },
   infoContainer: {
-    backgroundColor: '#f8f9fa',
+    backgroundColor: theme.colors.background,
     padding: 15,
     borderRadius: 8,
     borderLeftWidth: 3,
-    borderLeftColor: '#2196F3',
+    borderLeftColor: '#007AFF',
   },
   infoHeader: {
     flexDirection: 'row',
@@ -772,16 +815,16 @@ const styles = StyleSheet.create({
   infoTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#333',
+    color: theme.colors.text,
     marginLeft: 8,
   },
   infoText: {
     fontSize: 14,
-    color: '#666',
+    color: theme.colors.textSecondary,
     lineHeight: 20,
   },
   saveButton: {
-    backgroundColor: '#2196F3',
+    backgroundColor: '#007AFF',
     margin: 15,
     padding: 15,
     borderRadius: 12,

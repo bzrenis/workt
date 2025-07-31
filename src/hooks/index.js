@@ -204,7 +204,7 @@ export const useWorkEntries = (year, month, showAllEntries = false) => {
   const addEntry = async (workEntry) => {
     try {
       const settings = await DatabaseService.getSetting('appSettings', DEFAULT_SETTINGS);
-      const earnings = calculationService.calculateDailyEarnings(workEntry, settings);
+      const earnings = await calculationService.calculateDailyEarnings(workEntry, settings);
       
       const entryWithEarnings = {
         ...workEntry,
@@ -223,7 +223,7 @@ export const useWorkEntries = (year, month, showAllEntries = false) => {
   const updateEntry = async (id, workEntry) => {
     try {
       const settings = await DatabaseService.getSetting('appSettings', DEFAULT_SETTINGS);
-      const earnings = calculationService.calculateDailyEarnings(workEntry, settings);
+      const earnings = await calculationService.calculateDailyEarnings(workEntry, settings);
       
       const entryWithEarnings = {
         ...workEntry,
@@ -276,13 +276,37 @@ export const useSettings = () => {
 
     try {
       setIsLoading(true);
-      console.log('🔍 HOOK - loadSettings: Caricamento da database...');
+      console.log('� HOOK - loadSettings: Caricamento da database... forceLoad:', forceLoad);
+      
+      // 🚨 RESTORE FIX: Se forceLoad è true, ignora completamente AsyncStorage
+      if (forceLoad) {
+        console.log('🚨 HOOK - Reload forzato, ignorando AsyncStorage');
+      } else {
+        // Verifica se abbiamo settings in cache
+        try {
+          const cachedSettings = await AsyncStorage.getItem('settings');
+          if (cachedSettings) {
+            const parsed = JSON.parse(cachedSettings);
+            console.log('🚨 HOOK - Settings trovati in cache, usando quelli');
+            setSettings(parsed);
+            setIsLoading(false);
+            return;
+          }
+        } catch (cacheError) {
+          console.log('🚨 HOOK - Errore lettura cache:', cacheError.message);
+        }
+      }
       
       const appSettings = await DatabaseService.getSetting('appSettings', DEFAULT_SETTINGS);
       
+      // 🚨 DEBUG CONTRATTO dal database
+      const contractType = appSettings.contract_type || 'unknown';
+      const dailyRate = appSettings.daily_rate || 'non trovato';
+      console.log('🚨 HOOK - Database contratto:', contractType, 'tariffa:', dailyRate);
+      
       // Sincronizza anche AsyncStorage per le notifiche
       await AsyncStorage.setItem('settings', JSON.stringify(appSettings));
-      console.log('🔄 HOOK - Settings sincronizzate in AsyncStorage');
+      console.log('� HOOK - Settings sincronizzate in AsyncStorage');
       
       console.log('🔍 HOOK - loadSettings: Dati caricati dal database');
       if (appSettings?.netCalculation) {
@@ -316,6 +340,22 @@ export const useSettings = () => {
 
   useEffect(() => {
     loadSettings(true);
+    
+    // 🚨 RESTORE FIX: Listener per ricaricamenti forzati dopo ripristino
+    const interval = setInterval(async () => {
+      try {
+        const cacheSettings = await AsyncStorage.getItem('settings');
+        if (!cacheSettings && settings && Object.keys(settings).length > 0) {
+          // Cache è stata pulita ma abbiamo ancora impostazioni caricate - ricarica
+          console.log('🔄 HOOK - Cache pulita rilevata, forzando reload...');
+          loadSettings(true);
+        }
+      } catch (error) {
+        // Ignora errori di controllo cache
+      }
+    }, 2000); // Controlla ogni 2 secondi
+
+    return () => clearInterval(interval);
   }, []);
 
   const updateSettings = async (newSettings) => {

@@ -399,6 +399,164 @@ class AlternativeNotificationService {
       return { success: false, reason: error.message };
     }
   }
+
+  // Programma riepilogo giornaliero con JavaScript Timer
+  async scheduleAlternativeDailySummary(settings) {
+    if (!settings.enabled) return 0;
+
+    const [hours, minutes] = settings.time.split(':');
+    let scheduledCount = 0;
+    
+    const now = new Date();
+    
+    // Programma per i prossimi 7 giorni (sistema alternativo più leggero)
+    for (let day = 1; day <= 7; day++) {
+      const targetDate = new Date(now);
+      targetDate.setDate(now.getDate() + day);
+      targetDate.setHours(parseInt(hours), parseInt(minutes), 0, 0);
+      
+      // Verifica che la data sia nel futuro
+      if (targetDate <= now) continue;
+      
+      const delayMs = targetDate.getTime() - now.getTime();
+      const notificationId = `daily_summary_${targetDate.getTime()}`;
+      
+      const timer = setTimeout(() => {
+        this.showAlternativeNotification(
+          '📊 Riepilogo Giornaliero',
+          'Controlla il tuo riepilogo guadagni di oggi.',
+          { type: 'daily_summary', date: targetDate.toISOString().split('T')[0] }
+        );
+        this.activeTimers.delete(notificationId);
+      }, delayMs);
+      
+      this.activeTimers.set(notificationId, {
+        timer,
+        scheduledFor: targetDate,
+        title: '📊 Riepilogo Giornaliero',
+        type: 'daily_summary'
+      });
+      
+      scheduledCount++;
+      console.log(`  ✅ Timer riepilogo attivato per ${targetDate.toLocaleDateString('it-IT')} alle ${hours}:${minutes}`);
+    }
+    
+    return scheduledCount;
+  }
+
+  // Programma promemoria reperibilità con JavaScript Timer
+  async scheduleAlternativeStandbyReminders(standbyDates, settings) {
+    console.log('📞 === PROGRAMMAZIONE REPERIBILITÀ JAVASCRIPT ===');
+    console.log(`📅 Date reperibilità ricevute: ${standbyDates.length}`);
+    
+    if (!settings.enabled) {
+      console.log('📞 Promemoria reperibilità disabilitati');
+      return 0;
+    }
+
+    const activeNotifications = settings.notifications?.filter(n => n.enabled) || [];
+    
+    if (activeNotifications.length === 0) {
+      console.log('📞 Nessun promemoria reperibilità attivo');
+      return 0;
+    }
+
+    let scheduledCount = 0;
+    const now = new Date();
+
+    for (const dateStr of standbyDates) {
+      const standbyDate = new Date(dateStr + 'T00:00:00');
+      
+      // Formatta la data per i messaggi
+      const standbyDateFormatted = standbyDate.toLocaleDateString('it-IT', {
+        weekday: 'long',
+        day: 'numeric',
+        month: 'long'
+      });
+
+      console.log(`📞 Programmando promemoria per ${standbyDateFormatted} (${dateStr})`);
+
+      for (const notification of activeNotifications) {
+        const [hours, minutes] = notification.time.split(':');
+        const reminderDate = new Date(standbyDate);
+        reminderDate.setDate(reminderDate.getDate() - notification.daysInAdvance);
+        reminderDate.setHours(parseInt(hours), parseInt(minutes), 0, 0);
+
+        // Solo se la data del promemoria è nel futuro
+        if (reminderDate > now) {
+          const delayMs = reminderDate.getTime() - now.getTime();
+          
+          const title = this.getStandbyReminderTitle(notification.daysInAdvance);
+          const body = this.getStandbyReminderBody(notification.daysInAdvance, standbyDateFormatted, notification.message);
+          
+          const notificationId = `standby_reminder_${dateStr}_${notification.daysInAdvance}`;
+          
+          console.log(`📞 Timer reperibilità: ${title} per ${reminderDate.toISOString()}`);
+          console.log(`📞 Delay: ${Math.round(delayMs / (1000 * 60))} minuti`);
+          
+          const timer = setTimeout(() => {
+            this.showAlternativeNotification(
+              title,
+              body,
+              { 
+                type: 'standby_reminder',
+                standbyDate: dateStr,
+                daysInAdvance: notification.daysInAdvance
+              }
+            );
+            this.activeTimers.delete(notificationId);
+          }, delayMs);
+          
+          this.activeTimers.set(notificationId, {
+            timer,
+            scheduledFor: reminderDate,
+            title: title,
+            type: 'standby_reminder'
+          });
+          
+          scheduledCount++;
+          console.log(`  ✅ Timer reperibilità attivato: ${title} per ${reminderDate.toLocaleDateString('it-IT')} alle ${hours}:${minutes}`);
+        } else {
+          console.log(`  ⏭️ Saltato promemoria nel passato: ${reminderDate.toISOString()}`);
+        }
+      }
+    }
+
+    console.log(`✅ Programmati ${scheduledCount} timer JavaScript per reperibilità`);
+    return scheduledCount;
+  }
+
+  // Helper per generare titoli dinamici reperibilità
+  getStandbyReminderTitle(daysInAdvance) {
+    switch (daysInAdvance) {
+      case 0:
+        return '📞 Reperibilità OGGI';
+      case 1:
+        return '📞 Reperibilità DOMANI';
+      case 2:
+        return '📞 Reperibilità tra 2 giorni';
+      default:
+        return `📞 Reperibilità tra ${daysInAdvance} giorni`;
+    }
+  }
+
+  // Helper per generare messaggi dinamici reperibilità
+  getStandbyReminderBody(daysInAdvance, dateFormatted, customMessage) {
+    if (customMessage) {
+      return customMessage;
+    }
+
+    switch (daysInAdvance) {
+      case 0:
+        return `Oggi (${dateFormatted}) sei in reperibilità. Tieni il telefono sempre a portata di mano!`;
+      case 1:
+        return `Domani (${dateFormatted}) sei in reperibilità. Assicurati di essere disponibile!`;
+      case 2:
+        return `Dopodomani (${dateFormatted}) sarai in reperibilità. Preparati per essere disponibile!`;
+      default:
+        return `Il ${dateFormatted} sarai in reperibilità. Non dimenticartelo!`;
+    }
+  }
 }
 
 export default AlternativeNotificationService;

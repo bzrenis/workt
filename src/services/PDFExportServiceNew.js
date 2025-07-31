@@ -176,10 +176,18 @@ class PDFExportServiceNew {
 
     const rows = entries.map(entry => {
       try {
-        // Calcola breakdown se disponibile
-        let breakdown = null;
-        if (calculationService && settings) {
+        // Debug: log dell'entry ricevuta
+        console.log('🔍 PDF Service - Processing entry:', entry.date, 'has breakdown:', !!entry.breakdown);
+        if (entry.breakdown) {
+          console.log('🔍 PDF Service - Breakdown totalEarnings:', entry.breakdown.totalEarnings);
+          console.log('🔍 PDF Service - Breakdown ordinary hours:', entry.breakdown.ordinary?.hours);
+        }
+        
+        // Usa il breakdown già calcolato dal PDFExportScreen, altrimenti calcola nuovo
+        let breakdown = entry.breakdown;
+        if (!breakdown && calculationService && settings) {
           try {
+            console.log('🔄 PDF Service - Calculating new breakdown for:', entry.date);
             breakdown = calculationService.calculateEarningsBreakdown(entry, settings);
           } catch (calcError) {
             console.error(`Errore calcolo per entry ${entry.date}:`, calcError);

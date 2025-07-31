@@ -10,23 +10,24 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { useTheme, lightTheme } from '../contexts/ThemeContext';
 import VacationService from '../services/VacationService';
 
 // Componenti riutilizzati dal TimeEntryForm per mantenere coerenza visiva
-const ModernCard = ({ children, style }) => (
-  <View style={[styles.modernCard, style]}>
+const ModernCard = ({ children, style, theme }) => (
+  <View style={[createStyles(theme).modernCard, style]}>
     {children}
   </View>
 );
 
-const SectionHeader = ({ title, icon, iconColor }) => (
-  <View style={styles.sectionHeader}>
+const SectionHeader = ({ title, icon, iconColor, theme }) => (
+  <View style={createStyles(theme).sectionHeader}>
     <MaterialCommunityIcons name={icon} size={24} color={iconColor} />
-    <Text style={styles.sectionHeaderTitle}>{title}</Text>
+    <Text style={createStyles(theme).sectionHeaderTitle}>{title}</Text>
   </View>
 );
 
-const VacationCard = ({ request, onEdit, onDelete }) => {
+const VacationCard = ({ request, onEdit, onDelete, theme }) => {
   const getStatusColor = (status) => {
     switch (status) {
       case 'approved': return '#4CAF50';
@@ -61,51 +62,51 @@ const VacationCard = ({ request, onEdit, onDelete }) => {
   };
 
   return (
-    <ModernCard style={styles.requestCard}>
-      <View style={styles.requestHeader}>
-        <View style={styles.requestTypeContainer}>
+    <ModernCard style={createStyles(theme).requestCard} theme={theme}>
+      <View style={createStyles(theme).requestHeader}>
+        <View style={createStyles(theme).requestTypeContainer}>
           <MaterialCommunityIcons 
             name={request.type === 'vacation' ? 'beach' : 
                   request.type === 'sick_leave' ? 'medical-bag' :
                   request.type === 'personal_leave' ? 'account-clock' : 'calendar-check'} 
             size={20} 
-            color="#2196F3" 
+            color={theme.colors.textSecondary} 
           />
-          <Text style={styles.requestType}>{getTypeText(request.type)}</Text>
+          <Text style={createStyles(theme).requestType}>{getTypeText(request.type)}</Text>
         </View>
-        <View style={[styles.statusBadge, { backgroundColor: getStatusColor(request.status) }]}>
-          <Text style={styles.statusText}>{getStatusText(request.status)}</Text>
+        <View style={[createStyles(theme).statusBadge, { backgroundColor: getStatusColor(request.status) }]}>
+          <Text style={createStyles(theme).statusText}>{getStatusText(request.status)}</Text>
         </View>
       </View>
 
-      <View style={styles.requestDetails}>
-        <Text style={styles.requestPeriod}>
+      <View style={createStyles(theme).requestDetails}>
+        <Text style={createStyles(theme).requestPeriod}>
           {formatDate(request.startDate)} - {formatDate(request.endDate)}
         </Text>
-        <Text style={styles.requestDays}>
+        <Text style={createStyles(theme).requestDays}>
           {request.totalDays} {request.totalDays === 1 ? 'giorno' : 'giorni'}
         </Text>
         {request.reason && (
-          <Text style={styles.requestReason} numberOfLines={2}>
+          <Text style={createStyles(theme).requestReason} numberOfLines={2}>
             {request.reason}
           </Text>
         )}
       </View>
 
-      <View style={styles.requestActions}>
+      <View style={createStyles(theme).requestActions}>
         <TouchableOpacity 
-          style={[styles.actionButton, styles.editButton]}
+          style={[createStyles(theme).actionButton, createStyles(theme).editButton]}
           onPress={() => onEdit(request)}
         >
           <MaterialCommunityIcons name="pencil" size={16} color="#2196F3" />
-          <Text style={[styles.actionButtonText, { color: '#2196F3' }]}>Modifica</Text>
+          <Text style={[createStyles(theme).actionButtonText, { color: '#2196F3' }]}>Modifica</Text>
         </TouchableOpacity>
         <TouchableOpacity 
-          style={[styles.actionButton, styles.deleteButton]}
+          style={[createStyles(theme).actionButton, createStyles(theme).deleteButton]}
           onPress={() => onDelete(request)}
         >
           <MaterialCommunityIcons name="delete" size={16} color="#f44336" />
-          <Text style={[styles.actionButtonText, { color: '#f44336' }]}>Elimina</Text>
+          <Text style={[createStyles(theme).actionButtonText, { color: '#f44336' }]}>Elimina</Text>
         </TouchableOpacity>
       </View>
     </ModernCard>
@@ -113,6 +114,9 @@ const VacationCard = ({ request, onEdit, onDelete }) => {
 };
 
 const VacationManagementScreen = ({ navigation, route }) => {
+  const themeContext = useTheme();
+  const theme = themeContext?.theme || lightTheme; // Fallback di sicurezza
+  const styles = createStyles(theme);
   const [requests, setRequests] = useState([]);
   const [summary, setSummary] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -209,7 +213,7 @@ const VacationManagementScreen = ({ navigation, route }) => {
             style={styles.backButton}
             onPress={() => navigation.goBack()}
           >
-            <MaterialCommunityIcons name="arrow-left" size={24} color="#333" />
+            <MaterialCommunityIcons name="arrow-left" size={24} color={theme.colors.text} />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Ferie e Permessi</Text>
           <TouchableOpacity 
@@ -222,11 +226,12 @@ const VacationManagementScreen = ({ navigation, route }) => {
 
         {/* Riepilogo Annuale */}
         {summary && (
-          <ModernCard style={styles.cardSpacing}>
+          <ModernCard style={styles.cardSpacing} theme={theme}>
             <SectionHeader 
               title="Riepilogo Annuale" 
               icon="calendar-account" 
               iconColor="#E91E63" 
+              theme={theme}
             />
             
             <View style={styles.summaryGrid}>
@@ -251,11 +256,12 @@ const VacationManagementScreen = ({ navigation, route }) => {
         )}
 
         {/* Azioni Rapide */}
-        <ModernCard style={styles.cardSpacing}>
+        <ModernCard style={styles.cardSpacing} theme={theme}>
           <SectionHeader 
             title="Azioni Rapide" 
             icon="lightning-bolt" 
             iconColor="#FF9800" 
+            theme={theme}
           />
           
           <TouchableOpacity 
@@ -268,16 +274,17 @@ const VacationManagementScreen = ({ navigation, route }) => {
         </ModernCard>
 
         {/* Lista Richieste */}
-        <ModernCard style={styles.cardSpacing}>
+        <ModernCard style={styles.cardSpacing} theme={theme}>
           <SectionHeader 
             title="Richieste Recenti" 
             icon="history" 
             iconColor="#2196F3" 
+            theme={theme}
           />
           
           {requests.length === 0 ? (
             <View style={styles.emptyState}>
-              <MaterialCommunityIcons name="calendar-remove" size={64} color="#ccc" />
+              <MaterialCommunityIcons name="calendar-remove" size={64} color={theme.colors.border} />
               <Text style={styles.emptyStateText}>Nessuna richiesta trovata</Text>
               <Text style={styles.emptyStateSubtext}>
                 Tocca "Nuova Richiesta" per iniziare
@@ -290,6 +297,7 @@ const VacationManagementScreen = ({ navigation, route }) => {
                 request={request}
                 onEdit={handleEdit}
                 onDelete={handleDelete}
+                theme={theme}
               />
             ))
           )}
@@ -299,10 +307,10 @@ const VacationManagementScreen = ({ navigation, route }) => {
   );
 };
 
-const styles = StyleSheet.create({
+const createStyles = (theme) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f8f9fa',
+    backgroundColor: theme.colors.background,
   },
   scrollView: {
     flex: 1,
@@ -315,7 +323,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 12,
-    backgroundColor: '#f8f9fa',
+    backgroundColor: theme.colors.background,
   },
   backButton: {
     padding: 8,
@@ -325,7 +333,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 20,
     fontWeight: '600',
-    color: '#333',
+    color: theme.colors.text,
     textAlign: 'center',
   },
   headerSpacer: {
@@ -334,14 +342,14 @@ const styles = StyleSheet.create({
   configButton: {
     padding: 8,
     borderRadius: 8,
-    backgroundColor: '#e3f2fd',
+    backgroundColor: theme.dark ? 'rgba(33, 150, 243, 0.15)' : '#e3f2fd',
   },
   cardSpacing: {
     marginHorizontal: 16,
     marginBottom: 16,
   },
   modernCard: {
-    backgroundColor: 'white',
+    backgroundColor: theme.colors.surface,
     borderRadius: 12,
     padding: 16,
     shadowColor: '#000',
@@ -358,7 +366,7 @@ const styles = StyleSheet.create({
   sectionHeaderTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#333',
+    color: theme.colors.text,
     marginLeft: 8,
   },
   summaryGrid: {
@@ -368,7 +376,7 @@ const styles = StyleSheet.create({
   },
   summaryItem: {
     width: '48%',
-    backgroundColor: '#f8f9fa',
+    backgroundColor: theme.colors.inputBackground,
     borderRadius: 8,
     padding: 16,
     alignItems: 'center',
@@ -382,7 +390,7 @@ const styles = StyleSheet.create({
   },
   summaryLabel: {
     fontSize: 12,
-    color: '#666',
+    color: theme.colors.textSecondary,
     textAlign: 'center',
   },
   newRequestButton: {
@@ -417,7 +425,7 @@ const styles = StyleSheet.create({
   requestType: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#333',
+    color: theme.colors.text,
     marginLeft: 8,
   },
   statusBadge: {
@@ -436,17 +444,17 @@ const styles = StyleSheet.create({
   requestPeriod: {
     fontSize: 14,
     fontWeight: '500',
-    color: '#333',
+    color: theme.colors.text,
     marginBottom: 4,
   },
   requestDays: {
     fontSize: 14,
-    color: '#666',
+    color: theme.colors.textSecondary,
     marginBottom: 4,
   },
   requestReason: {
     fontSize: 14,
-    color: '#666',
+    color: theme.colors.textSecondary,
     fontStyle: 'italic',
   },
   requestActions: {
@@ -462,10 +470,10 @@ const styles = StyleSheet.create({
     marginLeft: 8,
   },
   editButton: {
-    backgroundColor: '#e3f2fd',
+    backgroundColor: theme.dark ? 'rgba(33, 150, 243, 0.15)' : '#e3f2fd',
   },
   deleteButton: {
-    backgroundColor: '#ffebee',
+    backgroundColor: theme.dark ? 'rgba(244, 67, 54, 0.15)' : '#ffebee',
   },
   actionButtonText: {
     fontSize: 12,
@@ -479,13 +487,13 @@ const styles = StyleSheet.create({
   emptyStateText: {
     fontSize: 18,
     fontWeight: '500',
-    color: '#666',
+    color: theme.colors.textSecondary,
     marginTop: 16,
     marginBottom: 8,
   },
   emptyStateSubtext: {
     fontSize: 14,
-    color: '#999',
+    color: theme.colors.textSecondary,
     textAlign: 'center',
   },
 });

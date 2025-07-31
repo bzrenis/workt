@@ -36,18 +36,24 @@ export class TimeCalculator {
   calculateWorkHours(workEntry) {
     let totalWorkMinutes = 0;
     
+    // Support both camelCase and snake_case formats
+    const workStart1 = workEntry.workStart1 || workEntry.work_start_1;
+    const workEnd1 = workEntry.workEnd1 || workEntry.work_end_1;
+    const workStart2 = workEntry.workStart2 || workEntry.work_start_2;
+    const workEnd2 = workEntry.workEnd2 || workEntry.work_end_2;
+    
     // First work shift
-    if (workEntry.workStart1 && workEntry.workEnd1) {
-      const minutes = this.calculateTimeDifference(workEntry.workStart1, workEntry.workEnd1);
+    if (workStart1 && workEnd1) {
+      const minutes = this.calculateTimeDifference(workStart1, workEnd1);
       totalWorkMinutes += minutes;
-      console.log(`[TimeCalculator] Main shift 1: ${workEntry.workStart1}-${workEntry.workEnd1} = ${minutes/60}h`);
+      console.log(`[TimeCalculator] Main shift 1: ${workStart1}-${workEnd1} = ${minutes/60}h`);
     }
     
     // Second work shift
-    if (workEntry.workStart2 && workEntry.workEnd2) {
-      const minutes = this.calculateTimeDifference(workEntry.workStart2, workEntry.workEnd2);
+    if (workStart2 && workEnd2) {
+      const minutes = this.calculateTimeDifference(workStart2, workEnd2);
       totalWorkMinutes += minutes;
-      console.log(`[TimeCalculator] Main shift 2: ${workEntry.workStart2}-${workEntry.workEnd2} = ${minutes/60}h`);
+      console.log(`[TimeCalculator] Main shift 2: ${workStart2}-${workEnd2} = ${minutes/60}h`);
     }
 
     // Additional work shifts from viaggi array
@@ -78,17 +84,23 @@ export class TimeCalculator {
   calculateTravelHours(workEntry) {
     let totalTravelMinutes = 0;
     
+    // Support both camelCase and snake_case formats
+    const departureCompany = workEntry.departureCompany || workEntry.departure_company;
+    const arrivalSite = workEntry.arrivalSite || workEntry.arrival_site;
+    const departureReturn = workEntry.departureReturn || workEntry.departure_return;
+    const arrivalCompany = workEntry.arrivalCompany || workEntry.arrival_company;
+    
     // Main entry travel
-    if (workEntry.departureCompany && workEntry.arrivalSite) {
-      const minutes = this.calculateTimeDifference(workEntry.departureCompany, workEntry.arrivalSite);
+    if (departureCompany && arrivalSite) {
+      const minutes = this.calculateTimeDifference(departureCompany, arrivalSite);
       totalTravelMinutes += minutes;
-      console.log(`[TimeCalculator] Main travel outbound: ${workEntry.departureCompany}-${workEntry.arrivalSite} = ${minutes/60}h`);
+      console.log(`[TimeCalculator] Main travel outbound: ${departureCompany}-${arrivalSite} = ${minutes/60}h`);
     }
     
-    if (workEntry.departureReturn && workEntry.arrivalCompany) {
-      const minutes = this.calculateTimeDifference(workEntry.departureReturn, workEntry.arrivalCompany);
+    if (departureReturn && arrivalCompany) {
+      const minutes = this.calculateTimeDifference(departureReturn, arrivalCompany);
       totalTravelMinutes += minutes;
-      console.log(`[TimeCalculator] Main travel return: ${workEntry.departureReturn}-${workEntry.arrivalCompany} = ${minutes/60}h`);
+      console.log(`[TimeCalculator] Main travel return: ${departureReturn}-${arrivalCompany} = ${minutes/60}h`);
     }
 
     // Additional travel from viaggi array
@@ -121,11 +133,17 @@ export class TimeCalculator {
     
     console.log(`[TimeCalculator] 🎯 CALCULATING TYPED TRAVEL HOURS for MULTI_SHIFT_OPTIMIZED mode`);
     
+    // Support both camelCase and snake_case formats for main entry
+    const departureCompany = workEntry.departureCompany || workEntry.departure_company;
+    const arrivalSite = workEntry.arrivalSite || workEntry.arrival_site;
+    const departureReturn = workEntry.departureReturn || workEntry.departure_return;
+    const arrivalCompany = workEntry.arrivalCompany || workEntry.arrival_company;
+    
     // 1. VIAGGI ESTERNI - Solo primo viaggio (partenza azienda) del turno principale
-    if (workEntry.departureCompany && workEntry.arrivalSite) {
-      const minutes = this.calculateTimeDifference(workEntry.departureCompany, workEntry.arrivalSite);
+    if (departureCompany && arrivalSite) {
+      const minutes = this.calculateTimeDifference(departureCompany, arrivalSite);
       externalTravelMinutes += minutes;
-      console.log(`[TimeCalculator] 🚗 EXTERNAL travel (main outbound): ${workEntry.departureCompany}-${workEntry.arrivalSite} = ${minutes/60}h`);
+      console.log(`[TimeCalculator] 🚗 EXTERNAL travel (main outbound): ${departureCompany}-${arrivalSite} = ${minutes/60}h`);
     }
     
     // 2. VIAGGI ESTERNI - Solo ultimo viaggio (arrivo azienda) dell'ultimo turno
@@ -133,10 +151,10 @@ export class TimeCalculator {
     let lastReturnTravel = null;
     
     // Controlla se il turno principale ha viaggio di ritorno
-    if (workEntry.departureReturn && workEntry.arrivalCompany) {
+    if (departureReturn && arrivalCompany) {
       lastReturnTravel = {
-        departure: workEntry.departureReturn,
-        arrival: workEntry.arrivalCompany,
+        departure: departureReturn,
+        arrival: arrivalCompany,
         source: 'main'
       };
     }
@@ -166,11 +184,11 @@ export class TimeCalculator {
     // 3. VIAGGI INTERNI - Tutti gli altri viaggi (tra turni)
     
     // Viaggi di ritorno del turno principale (se non è l'ultimo)
-    if (workEntry.departureReturn && workEntry.arrivalCompany && 
+    if (departureReturn && arrivalCompany && 
         (!lastReturnTravel || lastReturnTravel.source !== 'main')) {
-      const minutes = this.calculateTimeDifference(workEntry.departureReturn, workEntry.arrivalCompany);
+      const minutes = this.calculateTimeDifference(departureReturn, arrivalCompany);
       internalTravelMinutes += minutes;
-      console.log(`[TimeCalculator] 🔄 INTERNAL travel (main return): ${workEntry.departureReturn}-${workEntry.arrivalCompany} = ${minutes/60}h`);
+      console.log(`[TimeCalculator] 🔄 INTERNAL travel (main return): ${departureReturn}-${arrivalCompany} = ${minutes/60}h`);
     }
     
     // Viaggi di tutti i turni aggiuntivi (eccetto l'ultimo viaggio di ritorno se è quello finale)

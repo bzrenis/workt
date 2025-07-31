@@ -19,6 +19,25 @@ export const formatDate = (date, format = 'dd/MM/yyyy') => {
   }
 };
 
+// Funzione di utilità per convertire stringhe numeriche con virgola o punto in float
+export const parseNumericValue = (value, defaultValue = 0) => {
+  if (value === null || value === undefined || value === '') {
+    return defaultValue;
+  }
+  
+  // Converte in stringa se non lo è già
+  const stringValue = String(value);
+  
+  // Sostituisce virgola con punto per il parsing
+  const cleanValue = stringValue.replace(',', '.');
+  
+  // Parsing del valore
+  const numValue = parseFloat(cleanValue);
+  
+  // Ritorna il valore di default se il parsing fallisce
+  return isNaN(numValue) ? defaultValue : numValue;
+};
+
 export const formatTime = (time) => {
   if (!time) return '';
   // Ensure format HH:MM

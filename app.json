@@ -2,7 +2,7 @@
   "expo": {
     "name": "WorkT - Tracker Ore Lavoro",
     "slug": "workt",
-    "version": "1.0.6",
+    "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -23,8 +23,10 @@
       "infoPlist": {
         "UIBackgroundModes": [
           "background-processing",
-          "background-fetch"
-        ]
+          "background-fetch",
+          "remote-notification"
+        ],
+        "NSUserNotificationsUsageDescription": "Questa app utilizza le notifiche per ricordarti di inserire gli orari di lavoro e per avvisarti dei turni di reperibilità."
       }
     },
     "android": {
@@ -34,37 +36,42 @@
       },
       "edgeToEdgeEnabled": true,
       "package": "com.example.workt",
-      "versionCode": 6,
       "permissions": [
         "WRITE_EXTERNAL_STORAGE",
         "READ_EXTERNAL_STORAGE",
-        "WRITE_EXTERNAL_STORAGE",
-        "READ_EXTERNAL_STORAGE",
         "android.permission.SCHEDULE_EXACT_ALARM",
+        "android.permission.USE_EXACT_ALARM",
         "android.permission.WAKE_LOCK",
-        "android.permission.RECEIVE_BOOT_COMPLETED"
+        "android.permission.RECEIVE_BOOT_COMPLETED",
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.VIBRATE",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"
       ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
+    "notification": {
+      "icon": "./assets/icon.png",
+      "color": "#1E3A8A",
+      "androidMode": "default",
+      "androidCollapsedTitle": "Nuove notifiche WorkT",
+      "iosDisplayInForeground": true
+    },
     "plugins": [
       "expo-sqlite",
-      [
-        "expo-document-picker",
-        {
-          "iCloudContainerEnvironment": "Production"
-        }
-      ],
       [
         "expo-notifications",
         {
           "icon": "./assets/icon.png",
-          "color": "#1E3A8A",
-          "defaultChannel": "default",
-          "sounds": [
-            "./assets/notification.wav"
-          ]
+          "color": "#1E3A8A"
+        }
+      ],
+      [
+        "expo-document-picker",
+        {
+          "iCloudContainerEnvironment": "Production"
         }
       ]
     ],
@@ -73,7 +80,7 @@
         "projectId": "1f702228-d42b-4572-83f9-cc863b1f4afa"
       }
     },
-    "runtimeVersion": "1.0.2",
+    "runtimeVersion": "1.0.0",
     "updates": {
       "url": "https://u.expo.dev/1f702228-d42b-4572-83f9-cc863b1f4afa",
       "requestHeaders": {

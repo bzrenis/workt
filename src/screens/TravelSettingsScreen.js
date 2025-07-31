@@ -11,11 +11,22 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useSettings } from '../hooks';
+import { useTheme } from '../contexts/ThemeContext';
 
 const TravelSettingsScreen = ({ navigation }) => {
   const { settings, updatePartialSettings, isLoading } = useSettings();
+  const { theme } = useTheme();
   const [selectedOption, setSelectedOption] = useState('TRAVEL_RATE_EXCESS');
   const [multiShiftTravelAsWork, setMultiShiftTravelAsWork] = useState(false);
+  
+  // Impostazioni per giorni speciali
+  const [specialDaySettings, setSpecialDaySettings] = useState({
+    saturday: 'FIXED_RATE',
+    sunday: 'FIXED_RATE', 
+    holiday: 'FIXED_RATE'
+  });
+
+  const styles = createStyles(theme);
 
   useEffect(() => {
     if (settings.travelHoursSetting) {
@@ -23,6 +34,14 @@ const TravelSettingsScreen = ({ navigation }) => {
     }
     if (settings.multiShiftTravelAsWork !== undefined) {
       setMultiShiftTravelAsWork(settings.multiShiftTravelAsWork);
+    }
+    // Carica impostazioni giorni speciali
+    if (settings.specialDayTravelSettings) {
+      setSpecialDaySettings({
+        saturday: settings.specialDayTravelSettings.saturday || 'FIXED_RATE',
+        sunday: settings.specialDayTravelSettings.sunday || 'FIXED_RATE',
+        holiday: settings.specialDayTravelSettings.holiday || 'FIXED_RATE'
+      });
     }
   }, [settings]);
 
@@ -48,17 +67,38 @@ const TravelSettingsScreen = ({ navigation }) => {
     }
   ];
 
+  const specialDayOptions = [
+    {
+      id: 'FIXED_RATE',
+      title: '💰 Tariffa fissa',
+      description: 'Le ore di viaggio sono pagate con la tariffa viaggio standard (come nei giorni feriali)',
+      isDefault: true
+    },
+    {
+      id: 'WORK_RATE',
+      title: '⚙️ Come ore di lavoro',
+      description: 'Le ore di viaggio sono pagate come ore di lavoro con le maggiorazioni del giorno speciale'
+    },
+    {
+      id: 'PERCENTAGE_BONUS',
+      title: '📈 Percentuale maggiorata',
+      description: 'Le ore di viaggio mantengono la tariffa viaggio ma con la maggiorazione del giorno speciale'
+    }
+  ];
+
   const handleSave = async () => {
     try {
       console.log('🚀 TravelSettingsScreen - Salvando nuove impostazioni viaggio:', {
         travelHoursSetting: selectedOption,
         multiShiftTravelAsWork: multiShiftTravelAsWork,
+        specialDayTravelSettings: specialDaySettings,
         settingsCorrente: settings.travelHoursSetting
       });
       
       await updatePartialSettings({
         travelHoursSetting: selectedOption,
-        multiShiftTravelAsWork: multiShiftTravelAsWork
+        multiShiftTravelAsWork: multiShiftTravelAsWork,
+        specialDayTravelSettings: specialDaySettings
       });
 
       console.log('✅ TravelSettingsScreen - Nuove impostazioni salvate con successo');
@@ -72,6 +112,52 @@ const TravelSettingsScreen = ({ navigation }) => {
     }
   };
 
+  const handleSpecialDayChange = (dayType, value) => {
+    setSpecialDaySettings(prev => ({
+      ...prev,
+      [dayType]: value
+    }));
+  };
+
+  const renderSpecialDayOption = (dayType, dayLabel, emoji) => (
+    <View key={dayType} style={styles.specialDayContainer}>
+      <Text style={styles.specialDayTitle}>{emoji} {dayLabel}</Text>
+      {specialDayOptions.map(option => (
+        <TouchableOpacity
+          key={option.id}
+          style={[
+            styles.specialDayOption,
+            specialDaySettings[dayType] === option.id && styles.selectedSpecialDayOption
+          ]}
+          onPress={() => handleSpecialDayChange(dayType, option.id)}
+        >
+          <View style={styles.specialDayOptionHeader}>
+            <View style={[
+              styles.radioButton,
+              specialDaySettings[dayType] === option.id && styles.radioButtonSelected
+            ]}>
+              {specialDaySettings[dayType] === option.id && (
+                <View style={styles.radioButtonInner} />
+              )}
+            </View>
+            <Text style={[
+              styles.specialDayOptionTitle,
+              specialDaySettings[dayType] === option.id && styles.selectedSpecialDayText
+            ]}>
+              {option.title}
+            </Text>
+            {option.isDefault && (
+              <View style={styles.defaultBadge}>
+                <Text style={styles.defaultText}>DEFAULT</Text>
+              </View>
+            )}
+          </View>
+          <Text style={styles.specialDayOptionDescription}>{option.description}</Text>
+        </TouchableOpacity>
+      ))}
+    </View>
+  );
+
   const renderOption = (option) => (
     <TouchableOpacity
       key={option.id}
@@ -83,12 +169,18 @@ const TravelSettingsScreen = ({ navigation }) => {
       onPress={() => setSelectedOption(option.id)}
     >
       <View style={styles.optionHeader}>
-        <View style={styles.optionRadio}>
+        <View style={[
+          styles.optionRadio,
+          selectedOption === option.id && styles.optionRadioSelected
+        ]}>
           {selectedOption === option.id && (
-            <View style={styles.optionRadioSelected} />
+            <View style={styles.optionRadioInner} />
           )}
         </View>
-        <Text style={styles.optionTitle}>{option.title}</Text>
+        <Text style={[
+          styles.optionTitle,
+          selectedOption === option.id && styles.selectedText
+        ]}>{option.title}</Text>
         {option.isRecommended && (
           <View style={styles.recommendedBadge}>
             <Text style={styles.recommendedText}>CONSIGLIATA</Text>
@@ -109,7 +201,7 @@ const TravelSettingsScreen = ({ navigation }) => {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#2196F3" />
+          <ActivityIndicator size="large" color={theme.colors.primary} />
         </View>
       </SafeAreaView>
     );
@@ -127,7 +219,7 @@ const TravelSettingsScreen = ({ navigation }) => {
 
         <View style={styles.infoContainer}>
           <View style={styles.infoHeader}>
-            <Ionicons name="information-circle" size={24} color="#2196F3" />
+            <Ionicons name="information-circle" size={24} color={theme.colors.primary} />
             <Text style={styles.infoTitle}>Come funziona</Text>
           </View>
           <Text style={styles.infoText}>
@@ -178,29 +270,44 @@ const TravelSettingsScreen = ({ navigation }) => {
           </TouchableOpacity>
         </View>
 
+        {/* Sezione Giorni Speciali */}
+        <View style={styles.specialDaysContainer}>
+          <Text style={styles.sectionTitle}>Pagamento Viaggi - Giorni Speciali</Text>
+          <View style={styles.specialDaysInfo}>
+            <Ionicons name="calendar" size={20} color={theme.colors.primary} />
+            <Text style={styles.specialDaysInfoText}>
+              Configura come vengono pagate le ore di viaggio nei giorni speciali
+            </Text>
+          </View>
+          
+          {renderSpecialDayOption('saturday', 'Sabato', '📅')}
+          {renderSpecialDayOption('sunday', 'Domenica', '🙏')}
+          {renderSpecialDayOption('holiday', 'Festivi', '🎉')}
+        </View>
+
         <View style={styles.detailsContainer}>
           <Text style={styles.detailsTitle}>Dettagli Calcolo</Text>
           <View style={styles.detailsContent}>
             <View style={styles.detailRow}>
-              <Ionicons name="time" size={20} color="#666" />
+              <Ionicons name="time" size={20} color={theme.colors.textSecondary} />
               <Text style={styles.detailText}>
                 Giornata lavorativa standard: 8 ore
               </Text>
             </View>
             <View style={styles.detailRow}>
-              <Ionicons name="calculator" size={20} color="#666" />
+              <Ionicons name="calculator" size={20} color={theme.colors.textSecondary} />
               <Text style={styles.detailText}>
                 Retribuzione viaggio: {Math.round((settings.travelCompensationRate || 1) * 100)}% della retribuzione oraria
               </Text>
             </View>
             <View style={styles.detailRow}>
-              <Ionicons name="trending-up" size={20} color="#666" />
+              <Ionicons name="trending-up" size={20} color={theme.colors.textSecondary} />
               <Text style={styles.detailText}>
                 Straordinari: +20% retribuzione oraria (giorno), +25% (sera), +35% (notte)
               </Text>
             </View>
             <View style={styles.detailRow}>
-              <Ionicons name="card" size={20} color="#666" />
+              <Ionicons name="card" size={20} color={theme.colors.textSecondary} />
               <Text style={styles.detailText}>
                 Retribuzione giornaliera: €{(settings.contract?.dailyRate || 107.69).toFixed(2)}
               </Text>
@@ -216,10 +323,10 @@ const TravelSettingsScreen = ({ navigation }) => {
   );
 };
 
-const styles = StyleSheet.create({
+const createStyles = (theme) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: theme.colors.background,
   },
   scrollView: {
     flex: 1,
@@ -230,28 +337,28 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   header: {
-    backgroundColor: 'white',
+    backgroundColor: theme.colors.card,
     padding: 20,
     borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
+    borderBottomColor: theme.colors.border,
   },
   headerTitle: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: '#333',
+    color: theme.colors.text,
     marginBottom: 8,
   },
   headerSubtitle: {
     fontSize: 16,
-    color: '#666',
+    color: theme.colors.textSecondary,
     lineHeight: 22,
   },
   infoContainer: {
-    backgroundColor: 'white',
+    backgroundColor: theme.colors.card,
     margin: 15,
     padding: 20,
     borderRadius: 12,
-    shadowColor: '#000',
+    shadowColor: theme.colors.shadow,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
@@ -265,12 +372,12 @@ const styles = StyleSheet.create({
   infoTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#333',
+    color: theme.colors.text,
     marginLeft: 10,
   },
   infoText: {
     fontSize: 14,
-    color: '#666',
+    color: theme.colors.textSecondary,
     lineHeight: 20,
   },
   optionsContainer: {
@@ -280,26 +387,26 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 20,
     fontWeight: '700',
-    color: '#333',
+    color: theme.colors.text,
     marginBottom: 15,
     marginTop: 5,
   },
   optionCard: {
-    backgroundColor: 'white',
+    backgroundColor: theme.colors.card,
     borderRadius: 12,
     padding: 15,
     marginBottom: 10,
-    shadowColor: '#000',
+    shadowColor: theme.colors.shadow,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
     borderWidth: 2,
-    borderColor: 'transparent',
+    borderColor: theme.colors.border,
   },
   selectedOption: {
-    borderColor: '#2196F3',
-    backgroundColor: '#f3f9ff',
+    borderColor: '#007AFF',
+    backgroundColor: theme.name === 'dark' ? 'rgba(0, 122, 255, 0.15)' : '#f0f7ff',
   },
   recommendedOption: {
     borderColor: '#4CAF50',
@@ -314,22 +421,28 @@ const styles = StyleSheet.create({
     height: 20,
     borderRadius: 10,
     borderWidth: 2,
-    borderColor: '#2196F3',
+    borderColor: theme.colors.textSecondary,
     marginRight: 12,
     justifyContent: 'center',
     alignItems: 'center',
   },
   optionRadioSelected: {
+    borderColor: '#007AFF',
+  },
+  optionRadioInner: {
     width: 10,
     height: 10,
     borderRadius: 5,
-    backgroundColor: '#2196F3',
+    backgroundColor: '#007AFF',
   },
   optionTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#333',
+    color: theme.colors.text,
     flex: 1,
+  },
+  selectedText: {
+    color: '#007AFF',
   },
   recommendedBadge: {
     backgroundColor: '#4CAF50',
@@ -348,20 +461,20 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   multiShiftCard: {
-    backgroundColor: 'white',
+    backgroundColor: theme.colors.card,
     borderRadius: 12,
     padding: 15,
-    shadowColor: '#000',
+    shadowColor: theme.colors.shadow,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
     borderWidth: 2,
-    borderColor: '#e0e0e0',
+    borderColor: theme.colors.border,
   },
   selectedMultiShift: {
     borderColor: '#FF9800',
-    backgroundColor: '#fff8f0',
+    backgroundColor: theme.name === 'dark' ? 'rgba(255, 152, 0, 0.15)' : '#fff8f0',
   },
   multiShiftHeader: {
     flexDirection: 'row',
@@ -385,45 +498,45 @@ const styles = StyleSheet.create({
   multiShiftTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#333',
+    color: theme.colors.text,
     flex: 1,
   },
   multiShiftDescription: {
     fontSize: 14,
-    color: '#666',
+    color: theme.colors.textSecondary,
     lineHeight: 20,
     marginBottom: 10,
   },
   optionDescription: {
     fontSize: 14,
-    color: '#666',
+    color: theme.colors.textSecondary,
     lineHeight: 20,
     marginBottom: 10,
   },
   exampleContainer: {
-    backgroundColor: '#f8f9fa',
+    backgroundColor: theme.colors.surface,
     padding: 10,
     borderRadius: 8,
     borderLeftWidth: 3,
-    borderLeftColor: '#2196F3',
+    borderLeftColor: theme.colors.primary,
   },
   exampleLabel: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#666',
+    color: theme.colors.textSecondary,
     marginBottom: 5,
   },
   exampleText: {
     fontSize: 13,
-    color: '#333',
+    color: theme.colors.text,
     fontStyle: 'italic',
   },
   detailsContainer: {
-    backgroundColor: 'white',
+    backgroundColor: theme.colors.card,
     margin: 15,
     padding: 20,
     borderRadius: 12,
-    shadowColor: '#000',
+    shadowColor: theme.colors.shadow,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
@@ -432,7 +545,7 @@ const styles = StyleSheet.create({
   detailsTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#333',
+    color: theme.colors.text,
     marginBottom: 15,
   },
   detailsContent: {
@@ -444,12 +557,12 @@ const styles = StyleSheet.create({
   },
   detailText: {
     fontSize: 14,
-    color: '#666',
+    color: theme.colors.textSecondary,
     marginLeft: 10,
     flex: 1,
   },
   saveButton: {
-    backgroundColor: '#2196F3',
+    backgroundColor: theme.colors.primary,
     margin: 15,
     padding: 15,
     borderRadius: 12,
@@ -458,6 +571,103 @@ const styles = StyleSheet.create({
   saveButtonText: {
     color: 'white',
     fontSize: 18,
+    fontWeight: '600',
+  },
+  // Stili per giorni speciali
+  specialDaysContainer: {
+    paddingHorizontal: 15,
+    marginBottom: 20,
+  },
+  specialDaysInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: theme.colors.card,
+    padding: 15,
+    borderRadius: 8,
+    marginBottom: 15,
+  },
+  specialDaysInfoText: {
+    fontSize: 14,
+    color: theme.colors.text,
+    marginLeft: 10,
+    flex: 1,
+  },
+  specialDayContainer: {
+    backgroundColor: theme.colors.card,
+    borderRadius: 12,
+    padding: 15,
+    marginBottom: 15,
+    shadowColor: theme.colors.shadow,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  specialDayTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: theme.colors.text,
+    marginBottom: 10,
+  },
+  specialDayOption: {
+    backgroundColor: theme.colors.background,
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  },
+  selectedSpecialDayOption: {
+    borderColor: theme.colors.primary,
+    backgroundColor: theme.colors.primary + '10',
+  },
+  specialDayOptionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 5,
+  },
+  radioButton: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 2,
+    borderColor: theme.colors.border,
+    marginRight: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  radioButtonSelected: {
+    borderColor: theme.colors.primary,
+  },
+  radioButtonInner: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: theme.colors.primary,
+  },
+  specialDayOptionTitle: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: theme.colors.text,
+    flex: 1,
+  },
+  selectedSpecialDayText: {
+    color: theme.colors.primary,
+  },
+  specialDayOptionDescription: {
+    fontSize: 14,
+    color: theme.colors.textSecondary,
+    lineHeight: 18,
+  },
+  defaultBadge: {
+    backgroundColor: theme.colors.primary,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  defaultText: {
+    color: 'white',
+    fontSize: 10,
     fontWeight: '600',
   },
 });

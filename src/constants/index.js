@@ -1,37 +1,203 @@
 // CCNL Contract Constants and Calculations
+
 export const CCNL_CONTRACTS = {
+  METALMECCANICO_PMI_L1: {
+    name: 'CCNL Metalmeccanico PMI - Livello 1',
+    code: 'METAL_PMI_L1',
+    monthlySalary: 1417.36,
+    dailyRate: 54.52, // 1417.36 / 26
+    hourlyRate: 8.19, // 1417.36 / 173
+    workingDaysPerMonth: 26,
+    workingHoursPerDay: 8,
+    overtimeRates: { 
+      day: 1.2, 
+      nightUntil22: 1.25, 
+      nightAfter22: 1.35, 
+      saturday: 1.25, 
+      holiday: 1.3,
+      // Maggiorazioni personalizzate per straordinario
+      overtimeNightUntil22: 1.45, // Straordinario serale (20:00-22:00) +45%
+      overtimeNightAfter22: 1.5   // Straordinario notturno (dopo le 22) +50%
+    },
+    nightWorkStart: 22, nightWorkEnd: 6,
+    lastUpdated: '2025-07-23',
+    source: 'CCNL Metalmeccanico PMI - Livello 1'
+  },
+  METALMECCANICO_PMI_L2: {
+    name: 'CCNL Metalmeccanico PMI - Livello 2',
+    code: 'METAL_PMI_L2',
+    monthlySalary: 1565.32,
+    dailyRate: 60.20,
+    hourlyRate: 9.05,
+    workingDaysPerMonth: 26,
+    workingHoursPerDay: 8,
+    overtimeRates: { 
+      day: 1.2, 
+      nightUntil22: 1.25, 
+      nightAfter22: 1.35, 
+      saturday: 1.25, 
+      holiday: 1.3,
+      // Maggiorazioni personalizzate per straordinario
+      overtimeNightUntil22: 1.45, // Straordinario serale (20:00-22:00) +45%
+      overtimeNightAfter22: 1.5   // Straordinario notturno (dopo le 22) +50%
+    },
+    nightWorkStart: 22, nightWorkEnd: 6,
+    lastUpdated: '2025-07-23',
+    source: 'CCNL Metalmeccanico PMI - Livello 2'
+  },
+  METALMECCANICO_PMI_L3: {
+    name: 'CCNL Metalmeccanico PMI - Livello 3',
+    code: 'METAL_PMI_L3',
+    monthlySalary: 1736.76,
+    dailyRate: 66.80,
+    hourlyRate: 10.04,
+    workingDaysPerMonth: 26,
+    workingHoursPerDay: 8,
+    overtimeRates: { 
+      day: 1.2, 
+      nightUntil22: 1.25, 
+      nightAfter22: 1.35, 
+      saturday: 1.25, 
+      holiday: 1.3,
+      // Maggiorazioni personalizzate per straordinario
+      overtimeNightUntil22: 1.45, // Straordinario serale (20:00-22:00) +45%
+      overtimeNightAfter22: 1.5   // Straordinario notturno (dopo le 22) +50%
+    },
+    nightWorkStart: 22, nightWorkEnd: 6,
+    lastUpdated: '2025-07-23',
+    source: 'CCNL Metalmeccanico PMI - Livello 3'
+  },
+  METALMECCANICO_PMI_L4: {
+    name: 'CCNL Metalmeccanico PMI - Livello 4',
+    code: 'METAL_PMI_L4',
+    monthlySalary: 1812.06,
+    dailyRate: 69.70,
+    hourlyRate: 10.48,
+    workingDaysPerMonth: 26,
+    workingHoursPerDay: 8,
+    overtimeRates: { 
+      day: 1.2, 
+      nightUntil22: 1.25, 
+      nightAfter22: 1.35, 
+      saturday: 1.25, 
+      holiday: 1.3,
+      // Maggiorazioni personalizzate per straordinario
+      overtimeNightUntil22: 1.45, // Straordinario serale (20:00-22:00) +45%
+      overtimeNightAfter22: 1.5   // Straordinario notturno (dopo le 22) +50%
+    },
+    nightWorkStart: 22, nightWorkEnd: 6,
+    lastUpdated: '2025-07-23',
+    source: 'CCNL Metalmeccanico PMI - Livello 4'
+  },
   METALMECCANICO_PMI_L5: {
-    name: 'CCNL Metalmeccanico PMI - Livello 5 (Operaio Qualificato)',
+    name: 'CCNL Metalmeccanico PMI - Livello 5',
     code: 'METAL_PMI_L5',
-    description: 'Operaio qualificato - Progressione da Livello 3 a Livello 5',    careerProgression: {
-      startLevel: 3, // Livello di partenza
-      currentLevel: 5, // Livello attuale (SUPERIORE)
-      nextLevel: 6, // Prossimo obiettivo (Tecnico)
-      progression: '🎉 AVANZAMENTO: Livello 3 → Livello 5 (+2 livelli!)',
-      achievement: 'Da Operaio Comune a Operaio Qualificato Specializzato'
+    monthlySalary: 1941.07,
+    dailyRate: 74.66,
+    hourlyRate: 11.22,
+    workingDaysPerMonth: 26,
+    workingHoursPerDay: 8,
+    overtimeRates: { 
+      day: 1.2, 
+      nightUntil22: 1.25, 
+      nightAfter22: 1.35, 
+      saturday: 1.25, 
+      holiday: 1.3,
+      // Maggiorazioni personalizzate per straordinario
+      overtimeNightUntil22: 1.45, // Straordinario serale (20:00-22:00) +45%
+      overtimeNightAfter22: 1.5   // Straordinario notturno (dopo le 22) +50%
     },
-    monthlySalary: 2800.00, // CCNL Metalmeccanico PMI Livello 5 base
-    dailyRate: 110.23, // Aggiornato per conformità calcoli CCNL
-    hourlyRate: 16.15, // CCNL Metalmeccanico PMI Livello 5 base
-    workingDaysPerMonth: 26, // Standard per calcolo giornaliero
-    workingHoursPerDay: 8, // Standard CCNL
-    overtimeRates: {
-      day: 1.2, // +20% Straordinario diurno (06:00-20:00)
-      nightUntil22: 1.25, // +25% Straordinario serale (20:00-22:00)
-      nightAfter22: 1.35, // +35% Straordinario notturno (22:00-06:00)
-      saturday: 1.25, // +25% Sabato (conforme CCNL)
-      holiday: 1.3, // +30% Festivo/Domenica (già presente, per chiarezza)
-    },
-    nightWorkStart: 22, // 22:00
-    nightWorkEnd: 6, // 06:00
-    contractDetails: {
-      company: 'Azienda di Esempio',
-      employee: 'Dipendente',
-      qualification: 'Operaio Qualificato (Livello 5)',
-      experienceLevel: 'Intermedio-Avanzato'
-    },
-    lastUpdated: '2025-06-20', // Data ultima verifica
+    nightWorkStart: 22, nightWorkEnd: 6,
+    lastUpdated: '2025-07-23',
     source: 'CCNL Metalmeccanico PMI - Livello 5'
+  },
+  METALMECCANICO_PMI_L6: {
+    name: 'CCNL Metalmeccanico PMI - Livello 6',
+    code: 'METAL_PMI_L6',
+    monthlySalary: 2081.18,
+    dailyRate: 80.05,
+    hourlyRate: 12.03,
+    workingDaysPerMonth: 26,
+    workingHoursPerDay: 8,
+    overtimeRates: { 
+      day: 1.2, 
+      nightUntil22: 1.25, 
+      nightAfter22: 1.35, 
+      saturday: 1.25, 
+      holiday: 1.3,
+      // Maggiorazioni personalizzate per straordinario
+      overtimeNightUntil22: 1.45, // Straordinario serale (20:00-22:00) +45%
+      overtimeNightAfter22: 1.5   // Straordinario notturno (dopo le 22) +50%
+    },
+    nightWorkStart: 22, nightWorkEnd: 6,
+    lastUpdated: '2025-07-23',
+    source: 'CCNL Metalmeccanico PMI - Livello 6'
+  },
+  METALMECCANICO_PMI_L7: {
+    name: 'CCNL Metalmeccanico PMI - Livello 7',
+    code: 'METAL_PMI_L7',
+    monthlySalary: 2232.77,
+    dailyRate: 85.88,
+    hourlyRate: 12.90,
+    workingDaysPerMonth: 26,
+    workingHoursPerDay: 8,
+    overtimeRates: { 
+      day: 1.2, 
+      nightUntil22: 1.25, 
+      nightAfter22: 1.35, 
+      saturday: 1.25, 
+      holiday: 1.3,
+      // Maggiorazioni personalizzate per straordinario
+      overtimeNightUntil22: 1.45, // Straordinario serale (20:00-22:00) +45%
+      overtimeNightAfter22: 1.5   // Straordinario notturno (dopo le 22) +50%
+    },
+    nightWorkStart: 22, nightWorkEnd: 6,
+    lastUpdated: '2025-07-23',
+    source: 'CCNL Metalmeccanico PMI - Livello 7'
+  },
+  METALMECCANICO_PMI_L8: {
+    name: 'CCNL Metalmeccanico PMI - Livello 8',
+    code: 'METAL_PMI_L8',
+    monthlySalary: 2428.09,
+    dailyRate: 93.39,
+    hourlyRate: 14.04,
+    workingDaysPerMonth: 26,
+    workingHoursPerDay: 8,
+    overtimeRates: { 
+      day: 1.2, 
+      nightUntil22: 1.25, 
+      nightAfter22: 1.35, 
+      saturday: 1.25, 
+      holiday: 1.3,
+      // Maggiorazioni personalizzate per straordinario
+      overtimeNightUntil22: 1.45, // Straordinario serale (20:00-22:00) +45%
+      overtimeNightAfter22: 1.5   // Straordinario notturno (dopo le 22) +50%
+    },
+    nightWorkStart: 22, nightWorkEnd: 6,
+    lastUpdated: '2025-07-23',
+    source: 'CCNL Metalmeccanico PMI - Livello 8'
+  },
+  METALMECCANICO_PMI_L9: {
+    name: 'CCNL Metalmeccanico PMI - Livello 9',
+    code: 'METAL_PMI_L9',
+    monthlySalary: 2700.29,
+    dailyRate: 103.86,
+    hourlyRate: 15.61,
+    workingDaysPerMonth: 26,
+    workingHoursPerDay: 8,
+    overtimeRates: { 
+      day: 1.2, 
+      nightUntil22: 1.25, 
+      nightAfter22: 1.35, 
+      saturday: 1.25, 
+      holiday: 1.3,
+      // Maggiorazioni personalizzate per straordinario
+      overtimeNightUntil22: 1.45, // Straordinario serale (20:00-22:00) +45%
+      overtimeNightAfter22: 1.5   // Straordinario notturno (dopo le 22) +50%
+    },
+    nightWorkStart: 22, nightWorkEnd: 6,
+    lastUpdated: '2025-07-23',
+    source: 'CCNL Metalmeccanico PMI - Livello 9'
   },
 };
 

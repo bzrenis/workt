@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -10,10 +10,12 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSettings } from '../hooks';
+import { useTheme } from '../contexts/ThemeContext';
 import RealPayslipCalculator from '../services/RealPayslipCalculator';
 
 const NetCalculationSettingsScreen = ({ navigation }) => {
   const { settings, updateSettings, refreshSettings } = useSettings();
+  const { theme } = useTheme();
   const [method, setMethod] = useState(settings?.netCalculation?.method || 'irpef');
   const [customPercentage, setCustomPercentage] = useState(
     String(settings?.netCalculation?.customDeductionRate || 32)
@@ -21,7 +23,10 @@ const NetCalculationSettingsScreen = ({ navigation }) => {
   const [useActualAmount, setUseActualAmount] = useState(
     settings?.netCalculation?.useActualAmount ?? false
   );
-  const [previewAmount] = useState(2800.00); // Esempio per preview
+  // Usa la retribuzione mensile dalle impostazioni contratto
+  const previewAmount = useMemo(() => {
+    return settings?.contract?.monthlySalary ? Number(settings.contract.monthlySalary) : 2800.00;
+  }, [settings?.contract?.monthlySalary]);
 
   // Debug caricamento impostazioni
   React.useEffect(() => {
@@ -119,31 +124,38 @@ const NetCalculationSettingsScreen = ({ navigation }) => {
   const preview = getPreviewCalculation();
 
   return (
-    <View style={styles.container}>
-      <ScrollView style={styles.scrollContainer}>
+    <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
+      <ScrollView style={[styles.scrollContainer, { backgroundColor: theme.colors.background }]}>
         {/* Header */}
-        <View style={styles.header}>
+        <View style={[styles.header, { backgroundColor: theme.colors.surface, borderBottomColor: theme.colors.border }]}>
           <TouchableOpacity onPress={() => navigation.goBack()}>
-            <Ionicons name="arrow-back" size={24} color="#007AFF" />
+            <Ionicons name="arrow-back" size={24} color={theme.colors.primary} />
           </TouchableOpacity>
-          <Text style={styles.title}>Calcolo Netto</Text>
+          <Text style={[styles.title, { color: theme.colors.text }]}>Calcolo Netto</Text>
           <View style={{ width: 24 }} />
         </View>
 
       {/* Descrizione */}
-      <View style={styles.section}>
-        <Text style={styles.description}>
+      <View style={[styles.section, { backgroundColor: theme.colors.card }]}>
+        <Text style={[styles.description, { color: theme.colors.textSecondary }]}>
           Scegli come calcolare il netto dello stipendio nella dashboard
         </Text>
       </View>
 
       {/* Metodi di calcolo */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Metodo di Calcolo</Text>
+      <View style={[styles.section, { backgroundColor: theme.colors.card }]}>
+        <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Metodo di Calcolo</Text>
         
         {/* Opzione IRPEF */}
         <TouchableOpacity
-          style={[styles.option, method === 'irpef' && styles.selectedOption]}
+          style={[
+            styles.option, 
+            { backgroundColor: theme.colors.card, borderColor: theme.colors.border },
+            method === 'irpef' && { 
+              borderColor: '#007AFF', 
+              backgroundColor: theme.name === 'dark' ? 'rgba(0, 122, 255, 0.15)' : '#f0f7ff'
+            }
+          ]}
           onPress={() => setMethod('irpef')}
         >
           <View style={styles.optionContent}>
@@ -151,27 +163,38 @@ const NetCalculationSettingsScreen = ({ navigation }) => {
               <Ionicons 
                 name="calculator" 
                 size={24} 
-                color={method === 'irpef' ? '#007AFF' : '#666'} 
+                color={method === 'irpef' ? '#007AFF' : (theme.name === 'dark' ? '#888' : '#666')} 
               />
-              <Text style={[styles.optionTitle, method === 'irpef' && styles.selectedText]}>
+              <Text style={[
+                styles.optionTitle, 
+                { color: theme.colors.text },
+                method === 'irpef' && { color: '#007AFF', fontWeight: '600' }
+              ]}>
                 Aliquote IRPEF Reali
               </Text>
             </View>
-            <Text style={styles.optionDescription}>
+            <Text style={[styles.optionDescription, { color: theme.colors.textSecondary }]}>
               Calcolo basato su aliquote IRPEF 2025, contributi INPS e addizionali regionali/comunali
             </Text>
             <View style={styles.features}>
-              <Text style={styles.feature}>• Aliquote IRPEF a scaglioni (23%, 35%, 43%)</Text>
-              <Text style={styles.feature}>• Contributi INPS 9.87%</Text>
-              <Text style={styles.feature}>• Addizionali regionali/comunali ~2.5%</Text>
-              <Text style={styles.feature}>• Detrazioni standard automatiche</Text>
+              <Text style={[styles.feature, { color: theme.colors.textSecondary }]}>• Aliquote IRPEF a scaglioni (23%, 35%, 43%)</Text>
+              <Text style={[styles.feature, { color: theme.colors.textSecondary }]}>• Contributi INPS 9.87%</Text>
+              <Text style={[styles.feature, { color: theme.colors.textSecondary }]}>• Addizionali regionali/comunali ~2.5%</Text>
+              <Text style={[styles.feature, { color: theme.colors.textSecondary }]}>• Detrazioni standard automatiche</Text>
             </View>
           </View>
         </TouchableOpacity>
 
         {/* Opzione Personalizzata */}
         <TouchableOpacity
-          style={[styles.option, method === 'custom' && styles.selectedOption]}
+          style={[
+            styles.option, 
+            { backgroundColor: theme.colors.card, borderColor: theme.colors.border },
+            method === 'custom' && { 
+              borderColor: '#007AFF', 
+              backgroundColor: theme.name === 'dark' ? 'rgba(0, 122, 255, 0.15)' : '#f0f7ff'
+            }
+          ]}
           onPress={() => setMethod('custom')}
         >
           <View style={styles.optionContent}>
@@ -179,13 +202,17 @@ const NetCalculationSettingsScreen = ({ navigation }) => {
               <Ionicons 
                 name="settings" 
                 size={24} 
-                color={method === 'custom' ? '#007AFF' : '#666'} 
+                color={method === 'custom' ? '#007AFF' : (theme.name === 'dark' ? '#888' : '#666')} 
               />
-              <Text style={[styles.optionTitle, method === 'custom' && styles.selectedText]}>
+              <Text style={[
+                styles.optionTitle, 
+                { color: theme.colors.text },
+                method === 'custom' && { color: '#007AFF', fontWeight: '600' }
+              ]}>
                 Percentuale Personalizzata
               </Text>
             </View>
-            <Text style={styles.optionDescription}>
+            <Text style={[styles.optionDescription, { color: theme.colors.textSecondary }]}>
               Usa una percentuale fissa di trattenute basata sui tuoi dati reali
             </Text>
           </View>
@@ -193,17 +220,18 @@ const NetCalculationSettingsScreen = ({ navigation }) => {
 
         {/* Input percentuale personalizzata */}
         {method === 'custom' && (
-          <View style={styles.customInput}>
-            <Text style={styles.inputLabel}>Percentuale Trattenute (%)</Text>
+          <View style={[styles.customInput, { backgroundColor: theme.colors.surface }]}>
+            <Text style={[styles.inputLabel, { color: theme.colors.text }]}>Percentuale Trattenute (%)</Text>
             <TextInput
-              style={styles.textInput}
+              style={[styles.textInput, { color: theme.colors.text, backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}
               value={customPercentage}
               onChangeText={setCustomPercentage}
               keyboardType="numeric"
               placeholder="25"
+              placeholderTextColor={theme.colors.textSecondary}
               maxLength={5}
             />
-            <Text style={styles.inputHelp}>
+            <Text style={[styles.inputHelp, { color: theme.colors.textSecondary }]}>
               Esempio: se dal lordo €2,839 ricevi netto €2,122, la percentuale è circa 25%
             </Text>
           </View>
@@ -211,11 +239,18 @@ const NetCalculationSettingsScreen = ({ navigation }) => {
       </View>
 
       {/* Modalità di calcolo */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Base di Calcolo</Text>
+      <View style={[styles.section, { backgroundColor: theme.colors.card }]}>
+        <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Base di Calcolo</Text>
         
         <TouchableOpacity
-          style={[styles.option, !useActualAmount && styles.selectedOption]}
+          style={[
+            styles.option, 
+            { backgroundColor: theme.colors.card, borderColor: theme.colors.border },
+            !useActualAmount && { 
+              borderColor: '#007AFF', 
+              backgroundColor: theme.name === 'dark' ? 'rgba(0, 122, 255, 0.15)' : '#f0f7ff'
+            }
+          ]}
           onPress={() => setUseActualAmount(false)}
         >
           <View style={styles.optionContent}>
@@ -223,20 +258,31 @@ const NetCalculationSettingsScreen = ({ navigation }) => {
               <Ionicons 
                 name="trending-up" 
                 size={24} 
-                color={!useActualAmount ? '#007AFF' : '#666'} 
+                color={!useActualAmount ? '#007AFF' : (theme.name === 'dark' ? '#888' : '#666')} 
               />
-              <Text style={[styles.optionTitle, !useActualAmount && styles.selectedText]}>
+              <Text style={[
+                styles.optionTitle, 
+                { color: theme.colors.text },
+                !useActualAmount && { color: '#007AFF', fontWeight: '600' }
+              ]}>
                 Stima Annuale (Consigliato)
               </Text>
             </View>
-            <Text style={styles.optionDescription}>
+            <Text style={[styles.optionDescription, { color: theme.colors.textSecondary }]}>
               Per guadagni bassi, calcola basandosi sullo stipendio base annuale per maggiore accuratezza
             </Text>
           </View>
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={[styles.option, useActualAmount && styles.selectedOption]}
+          style={[
+            styles.option, 
+            { backgroundColor: theme.colors.card, borderColor: theme.colors.border },
+            useActualAmount && { 
+              borderColor: '#007AFF', 
+              backgroundColor: theme.name === 'dark' ? 'rgba(0, 122, 255, 0.15)' : '#f0f7ff'
+            }
+          ]}
           onPress={() => setUseActualAmount(true)}
         >
           <View style={styles.optionContent}>
@@ -244,13 +290,17 @@ const NetCalculationSettingsScreen = ({ navigation }) => {
               <Ionicons 
                 name="calculator" 
                 size={24} 
-                color={useActualAmount ? '#007AFF' : '#666'} 
+                color={useActualAmount ? '#007AFF' : (theme.name === 'dark' ? '#888' : '#666')} 
               />
-              <Text style={[styles.optionTitle, useActualAmount && styles.selectedText]}>
+              <Text style={[
+                styles.optionTitle, 
+                { color: theme.colors.text },
+                useActualAmount && { color: '#007AFF', fontWeight: '600' }
+              ]}>
                 Cifra Presente
               </Text>
             </View>
-            <Text style={styles.optionDescription}>
+            <Text style={[styles.optionDescription, { color: theme.colors.textSecondary }]}>
               Calcola sempre sulla cifra mensile effettiva, anche se molto bassa
             </Text>
           </View>
@@ -258,44 +308,44 @@ const NetCalculationSettingsScreen = ({ navigation }) => {
       </View>
 
       {/* Preview */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Anteprima</Text>
-        <View style={styles.preview}>
+      <View style={[styles.section, { backgroundColor: theme.colors.card }]}>
+        <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Anteprima</Text>
+        <View style={[styles.preview, { backgroundColor: theme.colors.surface }]}>
           <View style={styles.previewRow}>
-            <Text style={styles.previewLabel}>Stipendio Lordo:</Text>
-            <Text style={styles.previewValue}>€{previewAmount.toFixed(2)}</Text>
+            <Text style={[styles.previewLabel, { color: theme.colors.textSecondary }]}>Stipendio Lordo:</Text>
+            <Text style={[styles.previewValue, { color: theme.colors.text }]}>€{previewAmount.toFixed(2)}</Text>
           </View>
           <View style={styles.previewRow}>
-            <Text style={styles.previewLabel}>Trattenute:</Text>
-            <Text style={styles.previewValue}>
+            <Text style={[styles.previewLabel, { color: theme.colors.textSecondary }]}>Trattenute:</Text>
+            <Text style={[styles.previewValue, { color: theme.colors.text }]}>
               €{preview.totalDeductions.toFixed(2)} ({(preview.deductionRate * 100).toFixed(1)}%)
             </Text>
           </View>
-          <View style={[styles.previewRow, styles.netRow]}>
-            <Text style={styles.netLabel}>Stipendio Netto:</Text>
-            <Text style={styles.netValue}>€{preview.net.toFixed(2)}</Text>
+          <View style={[styles.previewRow, styles.netRow, { borderTopColor: theme.colors.border }]}>
+            <Text style={[styles.netLabel, { color: theme.colors.text }]}>Stipendio Netto:</Text>
+            <Text style={[styles.netValue, { color: theme.colors.income }]}>€{preview.net.toFixed(2)}</Text>
           </View>
         </View>
       </View>
 
       {/* Info IRPEF */}
       {method === 'irpef' && (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Dettagli Calcolo IRPEF</Text>
-          <View style={styles.infoBox}>
-            <Text style={styles.infoText}>
+        <View style={[styles.section, { backgroundColor: theme.colors.card }]}>
+          <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Dettagli Calcolo IRPEF</Text>
+          <View style={[styles.infoBox, { backgroundColor: theme.colors.surface }]}>
+            <Text style={[styles.infoText, { color: theme.colors.textSecondary }]}>
               Il calcolo utilizza le aliquote IRPEF ufficiali 2025:
             </Text>
-            <Text style={styles.bracket}>• 0-28.000€: 23%</Text>
-            <Text style={styles.bracket}>• 28.000-50.000€: 35%</Text>
-            <Text style={styles.bracket}>• Oltre 50.000€: 43%</Text>
-            <Text style={styles.infoText}>
+            <Text style={[styles.bracket, { color: theme.colors.primary }]}>• 0-28.000€: 23%</Text>
+            <Text style={[styles.bracket, { color: theme.colors.primary }]}>• 28.000-50.000€: 35%</Text>
+            <Text style={[styles.bracket, { color: theme.colors.primary }]}>• Oltre 50.000€: 43%</Text>
+            <Text style={[styles.infoText, { color: theme.colors.textSecondary }]}>
               + Contributi INPS dipendente (9.87%)
             </Text>
-            <Text style={styles.infoText}>
+            <Text style={[styles.infoText, { color: theme.colors.textSecondary }]}>
               + Addizionali regionali/comunali (~2.5%)
             </Text>
-            <Text style={styles.infoText}>
+            <Text style={[styles.infoText, { color: theme.colors.textSecondary }]}>
               - Detrazioni lavoro dipendente
             </Text>
           </View>
@@ -304,9 +354,9 @@ const NetCalculationSettingsScreen = ({ navigation }) => {
       </ScrollView>
       
       {/* Pulsante Salva in basso */}
-      <View style={styles.bottomSection}>
-        <TouchableOpacity style={styles.saveButton} onPress={handleSave}>
-          <Text style={styles.saveButtonText}>Salva Impostazioni</Text>
+      <View style={[styles.bottomSection, { backgroundColor: theme.colors.surface, borderTopColor: theme.colors.border }]}>
+        <TouchableOpacity style={[styles.saveButton, { backgroundColor: theme.colors.primary }]} onPress={handleSave}>
+          <Text style={[styles.saveButtonText, { color: '#FFFFFF' }]}>Salva Impostazioni</Text>
         </TouchableOpacity>
       </View>
     </View>

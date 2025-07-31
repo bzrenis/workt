@@ -13,9 +13,12 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useSettings } from '../hooks';
+import { useTheme } from '../contexts/ThemeContext';
 
 const MealSettingsScreen = ({ navigation }) => {
   const { settings, updatePartialSettings, isLoading } = useSettings();
+  const { theme } = useTheme();
+  const styles = createStyles(theme);
   const [formData, setFormData] = useState({
     lunch: {
       voucherAmount: '',
@@ -100,21 +103,23 @@ const MealSettingsScreen = ({ navigation }) => {
         <Text style={styles.mealTitle}>{title}</Text>
         {/* Orari personalizzabili */}
         <View style={{flexDirection:'row',alignItems:'center',marginLeft:8}}>
-          <Text style={{fontSize:13,color:'#666'}}>Orario:</Text>
+          <Text style={{fontSize:13,color: theme.colors.textSecondary}}>Orario:</Text>
           <TextInput
             style={[styles.textInput,{width:60,marginHorizontal:4,padding:4,fontSize:13}]}
             value={formData[type].startHour}
             onChangeText={value => setFormData(prev => ({...prev,[type]:{...prev[type],startHour:value}}))}
             placeholder={type==='lunch'?'12:00':'19:00'}
+            placeholderTextColor={theme.colors.textSecondary}
             keyboardType="numeric"
             maxLength={5}
           />
-          <Text style={{fontSize:13,color:'#666'}}> - </Text>
+          <Text style={{fontSize:13,color: theme.colors.textSecondary}}> - </Text>
           <TextInput
             style={[styles.textInput,{width:60,marginHorizontal:4,padding:4,fontSize:13}]}
             value={formData[type].endHour}
             onChangeText={value => setFormData(prev => ({...prev,[type]:{...prev[type],endHour:value}}))}
             placeholder={type==='lunch'?'14:00':'21:00'}
+            placeholderTextColor={theme.colors.textSecondary}
             keyboardType="numeric"
             maxLength={5}
           />
@@ -133,6 +138,7 @@ const MealSettingsScreen = ({ navigation }) => {
                 [type]: { ...prev[type], voucherAmount: value }
               }))}
               placeholder="0.00"
+              placeholderTextColor={theme.colors.textSecondary}
               keyboardType="numeric"
               returnKeyType="next"
             />
@@ -151,6 +157,7 @@ const MealSettingsScreen = ({ navigation }) => {
                 [type]: { ...prev[type], cashAmount: value }
               }))}
               placeholder="0.00"
+              placeholderTextColor={theme.colors.textSecondary}
               keyboardType="numeric"
               returnKeyType="next"
             />
@@ -167,7 +174,7 @@ const MealSettingsScreen = ({ navigation }) => {
             ...prev,
             [type]: { ...prev[type], autoActivate: value }
           }))}
-          trackColor={{ false: '#ccc', true: '#2196F3' }}
+          trackColor={{ false: theme.colors.border, true: '#007AFF' }}
           thumbColor={formData[type].autoActivate ? '#fff' : '#f4f3f4'}
         />
       </View>
@@ -175,11 +182,11 @@ const MealSettingsScreen = ({ navigation }) => {
       {/* Toggle inserimento manuale cash solo per cena */}
       {type === 'dinner' && (
         <View style={{flexDirection:'row',alignItems:'center',marginBottom:8}}>
-          <Text style={{fontSize:15,color:'#333',flex:1}}>Permetti inserimento manuale rimborso cash</Text>
+          <Text style={{fontSize:15,color: theme.colors.text,flex:1}}>Permetti inserimento manuale rimborso cash</Text>
           <Switch
             value={formData.dinner.allowManualCash}
             onValueChange={value => setFormData(prev => ({...prev,dinner:{...prev.dinner,allowManualCash:value}}))}
-            trackColor={{ false: '#ccc', true: '#2196F3' }}
+            trackColor={{ false: theme.colors.border, true: '#007AFF' }}
             thumbColor={formData.dinner.allowManualCash ? '#fff' : '#f4f3f4'}
           />
         </View>
@@ -198,7 +205,7 @@ const MealSettingsScreen = ({ navigation }) => {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#2196F3" />
+          <ActivityIndicator size="large" color="#007AFF" />
         </View>
       </SafeAreaView>
     );
@@ -216,7 +223,7 @@ const MealSettingsScreen = ({ navigation }) => {
 
         <View style={styles.infoContainer}>
           <View style={styles.infoHeader}>
-            <Ionicons name="information-circle" size={24} color="#2196F3" />
+            <Ionicons name="information-circle" size={24} color="#007AFF" />
             <Text style={styles.infoTitle}>Come funziona</Text>
           </View>
           <Text style={styles.infoText}>
@@ -260,10 +267,10 @@ const MealSettingsScreen = ({ navigation }) => {
   );
 };
 
-const styles = StyleSheet.create({
+const createStyles = (theme) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: theme.colors.background,
   },
   scrollView: {
     flex: 1,
@@ -274,28 +281,28 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   header: {
-    backgroundColor: 'white',
+    backgroundColor: theme.colors.card,
     padding: 20,
     borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
+    borderBottomColor: theme.colors.border,
   },
   headerTitle: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: '#333',
+    color: theme.colors.text,
     marginBottom: 8,
   },
   headerSubtitle: {
     fontSize: 16,
-    color: '#666',
+    color: theme.colors.textSecondary,
     lineHeight: 22,
   },
   infoContainer: {
-    backgroundColor: 'white',
+    backgroundColor: theme.colors.card,
     margin: 15,
     padding: 20,
     borderRadius: 12,
-    shadowColor: '#000',
+    shadowColor: theme.colors.shadow,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
@@ -309,20 +316,20 @@ const styles = StyleSheet.create({
   infoTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#333',
+    color: theme.colors.text,
     marginLeft: 10,
   },
   infoText: {
     fontSize: 14,
-    color: '#666',
+    color: theme.colors.textSecondary,
     lineHeight: 20,
   },
   formContainer: {
-    backgroundColor: 'white',
+    backgroundColor: theme.colors.card,
     margin: 15,
     padding: 20,
     borderRadius: 12,
-    shadowColor: '#000',
+    shadowColor: theme.colors.shadow,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
@@ -339,13 +346,13 @@ const styles = StyleSheet.create({
   mealTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#333',
+    color: theme.colors.text,
     marginLeft: 10,
     flex: 1,
   },
   mealTime: {
     fontSize: 14,
-    color: '#666',
+    color: theme.colors.textSecondary,
   },
   amountRow: {
     flexDirection: 'row',
@@ -358,27 +365,27 @@ const styles = StyleSheet.create({
   amountLabel: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#333',
+    color: theme.colors.text,
     marginBottom: 8,
   },
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#ddd',
+    borderColor: theme.colors.border,
     borderRadius: 8,
-    backgroundColor: '#fff',
+    backgroundColor: theme.colors.card,
   },
   textInput: {
     flex: 1,
     padding: 12,
     fontSize: 16,
-    color: '#333',
+    color: theme.colors.text,
   },
   inputSuffix: {
     paddingRight: 12,
     fontSize: 16,
-    color: '#666',
+    color: theme.colors.textSecondary,
   },
   autoActivateRow: {
     flexDirection: 'row',
@@ -388,24 +395,24 @@ const styles = StyleSheet.create({
   },
   autoActivateLabel: {
     fontSize: 16,
-    color: '#333',
+    color: theme.colors.text,
   },
   autoActivateHelp: {
     fontSize: 12,
-    color: '#999',
+    color: theme.colors.textSecondary,
     lineHeight: 16,
   },
   divider: {
     height: 1,
-    backgroundColor: '#e0e0e0',
+    backgroundColor: theme.colors.border,
     marginVertical: 20,
   },
   exampleContainer: {
-    backgroundColor: 'white',
+    backgroundColor: theme.colors.card,
     margin: 15,
     padding: 20,
     borderRadius: 12,
-    shadowColor: '#000',
+    shadowColor: theme.colors.shadow,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
@@ -414,7 +421,7 @@ const styles = StyleSheet.create({
   exampleTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#333',
+    color: theme.colors.text,
     marginBottom: 15,
   },
   exampleItem: {
@@ -423,16 +430,16 @@ const styles = StyleSheet.create({
   exampleLabel: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#666',
+    color: theme.colors.textSecondary,
     marginBottom: 4,
   },
   exampleText: {
     fontSize: 14,
-    color: '#333',
+    color: theme.colors.text,
     lineHeight: 18,
   },
   saveButton: {
-    backgroundColor: '#2196F3',
+    backgroundColor: '#007AFF',
     margin: 15,
     padding: 15,
     borderRadius: 12,

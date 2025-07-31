@@ -14,40 +14,41 @@ import {
 import { StyleSheet } from 'react-native';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { useTheme, lightTheme } from '../contexts/ThemeContext';
 import VacationService from '../services/VacationService';
 import { formatDate } from '../utils';
 
 // Componenti moderni identici al TimeEntryForm
-const ModernCard = ({ children, style }) => (
-  <View style={[styles.modernCard, style]}>
+const ModernCard = ({ children, style, theme }) => (
+  <View style={[createStyles(theme).modernCard, style]}>
     {children}
   </View>
 );
 
-const SectionHeader = ({ title, icon, iconColor = '#666', onPress, expandable = false, expanded = false }) => (
+const SectionHeader = ({ title, icon, iconColor = '#666', onPress, expandable = false, expanded = false, theme }) => (
   <TouchableOpacity
-    style={styles.sectionHeader}
+    style={createStyles(theme).sectionHeader}
     onPress={onPress}
     activeOpacity={expandable ? 0.7 : 1}
     disabled={!expandable}
   >
     <MaterialCommunityIcons name={icon} size={20} color={iconColor} />
-    <Text style={styles.sectionTitle}>{title}</Text>
+    <Text style={createStyles(theme).sectionTitle}>{title}</Text>
     {expandable && (
       <MaterialCommunityIcons 
         name={expanded ? 'chevron-up' : 'chevron-down'} 
         size={20} 
-        color="#666" 
+        color={theme.colors.textSecondary} 
       />
     )}
   </TouchableOpacity>
 );
 
-const InputRow = ({ label, children, required = false }) => (
-  <View style={styles.inputRow}>
-    <Text style={styles.inputLabel}>
+const InputRow = ({ label, children, required = false, theme }) => (
+  <View style={createStyles(theme).inputRow}>
+    <Text style={createStyles(theme).inputLabel}>
       {label}
-      {required && <Text style={styles.requiredMark}> *</Text>}
+      {required && <Text style={createStyles(theme).requiredMark}> *</Text>}
     </Text>
     {children}
   </View>
@@ -89,6 +90,9 @@ const priorityLevels = [
 ];
 
 const VacationRequestForm = ({ route, navigation }) => {
+  const themeContext = useTheme();
+  const theme = themeContext?.theme || lightTheme; // Fallback di sicurezza
+  const styles = createStyles(theme);
   const today = new Date();
   const [form, setForm] = useState({
     type: 'vacation',
@@ -249,7 +253,10 @@ const VacationRequestForm = ({ route, navigation }) => {
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor="#f8f9fa" />
+      <StatusBar 
+        barStyle={theme.dark ? "light-content" : "dark-content"} 
+        backgroundColor={theme.colors.background} 
+      />
       
       <ScrollView 
         style={styles.scrollView} 
@@ -262,7 +269,7 @@ const VacationRequestForm = ({ route, navigation }) => {
             style={styles.backButton}
             onPress={() => navigation.goBack()}
           >
-            <MaterialCommunityIcons name="arrow-left" size={24} color="#333" />
+            <MaterialCommunityIcons name="arrow-left" size={24} color={theme.colors.text} />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>
             {isEdit ? 'Modifica Richiesta' : 'Nuova Richiesta'}
@@ -271,11 +278,12 @@ const VacationRequestForm = ({ route, navigation }) => {
         </View>
 
         {/* Giorni Residui Card */}
-        <ModernCard style={styles.cardSpacing}>
+        <ModernCard style={styles.cardSpacing} theme={theme}>
           <SectionHeader 
             title="Giorni Disponibili" 
             icon="calendar-check" 
             iconColor="#4CAF50" 
+            theme={theme}
           />
           
           <View style={styles.remainingDaysContainer}>
@@ -295,11 +303,12 @@ const VacationRequestForm = ({ route, navigation }) => {
         </ModernCard>
 
         {/* Tipo Richiesta Card */}
-        <ModernCard style={styles.cardSpacing}>
+        <ModernCard style={styles.cardSpacing} theme={theme}>
           <SectionHeader 
             title="Tipo Richiesta" 
             icon="clipboard-list" 
             iconColor="#2196F3" 
+            theme={theme}
           />
           
           <View style={styles.typeContainer}>
@@ -498,10 +507,10 @@ const VacationRequestForm = ({ route, navigation }) => {
 };
 
 // Stili identici al TimeEntryForm
-const styles = StyleSheet.create({
+const createStyles = (theme) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f8f9fa',
+    backgroundColor: theme.colors.background,
   },
   scrollView: {
     flex: 1,
@@ -520,7 +529,7 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: 'white',
+    backgroundColor: theme.colors.surface,
     justifyContent: 'center',
     alignItems: 'center',
     elevation: 2,

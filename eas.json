@@ -20,6 +20,15 @@
         "buildType": "apk"
       }
     },
+    "production-with-icons": {
+      "autoIncrement": true,
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "APP_VARIANT": "production"
+      }
+    },
     "production-aab": {
       "autoIncrement": true,
       "android": {

@@ -3,11 +3,14 @@ import { View, Text, StyleSheet, Switch, TextInput, TouchableOpacity, Alert, Scr
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useSettings } from '../hooks';
+import { useTheme } from '../contexts/ThemeContext';
 
 const DEFAULT_ALLOWANCE = 15.00;
 
 const TravelAllowanceSettings = ({ navigation }) => {
   const { settings, updatePartialSettings, isLoading } = useSettings();
+  const { theme } = useTheme();
+  const styles = createStyles(theme);
   const [enabled, setEnabled] = useState(settings.travelAllowance?.enabled || false);
   const [dailyAmount, setDailyAmount] = useState(settings.travelAllowance?.dailyAmount?.toString() || DEFAULT_ALLOWANCE.toString());
   const [autoActivate, setAutoActivate] = useState(settings.travelAllowance?.autoActivate || false);
@@ -82,7 +85,7 @@ const TravelAllowanceSettings = ({ navigation }) => {
             <Switch
               value={enabled}
               onValueChange={setEnabled}
-              trackColor={{ false: '#ccc', true: '#607D8B' }}
+              trackColor={{ false: theme.colors.border, true: '#007AFF' }}
               thumbColor={enabled ? '#fff' : '#f4f3f4'}
             />
           </View>
@@ -96,6 +99,7 @@ const TravelAllowanceSettings = ({ navigation }) => {
                     value={dailyAmount}
                     onChangeText={setDailyAmount}
                     placeholder="15.00"
+                    placeholderTextColor={theme.colors.textSecondary}
                     keyboardType="numeric"
                   />
                   <Text style={styles.inputSuffix}>€</Text>
@@ -106,7 +110,7 @@ const TravelAllowanceSettings = ({ navigation }) => {
                 <Switch
                   value={autoActivate}
                   onValueChange={setAutoActivate}
-                  trackColor={{ false: '#ccc', true: '#607D8B' }}
+                  trackColor={{ false: theme.colors.border, true: '#007AFF' }}
                   thumbColor={autoActivate ? '#fff' : '#f4f3f4'}
                 />
                 <Text style={styles.inputHelp}>
@@ -119,7 +123,7 @@ const TravelAllowanceSettings = ({ navigation }) => {
                 <Switch
                   value={applyOnSpecialDays}
                   onValueChange={setApplyOnSpecialDays}
-                  trackColor={{ false: '#ccc', true: '#607D8B' }}
+                  trackColor={{ false: theme.colors.border, true: '#007AFF' }}
                   thumbColor={applyOnSpecialDays ? '#fff' : '#f4f3f4'}
                 />
                 <Text style={styles.inputHelp}>
@@ -143,7 +147,7 @@ const TravelAllowanceSettings = ({ navigation }) => {
                     <Ionicons 
                       name={selectedOptions.includes(opt.key) ? 'checkbox' : 'square-outline'} 
                       size={20} 
-                      color={selectedOptions.includes(opt.key) ? '#607D8B' : '#aaa'} 
+                      color={selectedOptions.includes(opt.key) ? '#007AFF' : theme.colors.textSecondary} 
                       style={{marginRight:8}} 
                     />
                     <View style={styles.optionContent}>
@@ -166,7 +170,7 @@ const TravelAllowanceSettings = ({ navigation }) => {
           )}
         </View>
         <View style={styles.infoBox}>
-          <Ionicons name="information-circle-outline" size={18} color="#607D8B" style={{marginRight:4}} />
+          <Ionicons name="information-circle-outline" size={18} color="#007AFF" style={{marginRight:4}} />
           <Text style={styles.infoText}>
             L'indennità trasferta è un contributo giornaliero previsto dal CCNL o da accordi aziendali. 
             {'\n\n'}✅ <Text style={{fontWeight: 'bold'}}>NOVITÀ CCNL</Text>: Il calcolo proporzionale è conforme al CCNL Metalmeccanico PMI e calcola l'indennità in base alle ore effettive lavorate: (ore_totali / 8) × indennità_giornaliera.
@@ -181,32 +185,148 @@ const TravelAllowanceSettings = ({ navigation }) => {
   );
 };
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f5f5f5' },
-  scrollView: { flex: 1 },
-  header: { flexDirection: 'row', alignItems: 'center', padding: 20, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#e0e0e0' },
-  headerTitle: { fontSize: 22, fontWeight: 'bold', color: '#607D8B' },
-  card: { backgroundColor: '#fff', borderRadius: 14, padding: 16, margin: 16, shadowColor: '#000', shadowOpacity: 0.07, shadowRadius: 8, elevation: 2, borderWidth: 1, borderColor: '#e3eafc' },
-  rowBetween: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  label: { fontSize: 16, fontWeight: 'bold', color: '#607D8B' },
-  inputGroup: { marginBottom: 16 },
-  inputLabel: { fontSize: 15, fontWeight: 'bold', color: '#607D8B', marginBottom: 4 },
-  inputContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f9f9f9', borderRadius: 6, borderWidth: 1, borderColor: '#e0e0e0', paddingHorizontal: 8 },
-  textInput: { flex: 1, height: 40, fontSize: 16, color: '#222' },
-  inputSuffix: { fontSize: 16, color: '#607D8B', marginLeft: 4 },
-  inputHelp: { fontSize: 12, color: '#888', marginTop: 4 },
-  optionRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 6 },
-  selectedOption: { backgroundColor: '#e3eafc', borderRadius: 6 },
-  recommendedOption: { borderWidth: 1, borderColor: '#4CAF50', borderRadius: 6, paddingHorizontal: 4 },
-  optionContent: { flex: 1 },
-  optionLabel: { fontSize: 15, color: '#222' },
-  recommendedLabel: { fontWeight: 'bold' },
-  recommendedBadge: { fontSize: 12, color: '#4CAF50', fontWeight: 'bold' },
-  optionDescription: { fontSize: 12, color: '#666', marginTop: 2, fontStyle: 'italic' },
-  infoBox: { flexDirection: 'row', alignItems: 'flex-start', backgroundColor: '#f0f4ff', borderRadius: 8, padding: 10, margin: 16 },
-  infoText: { fontSize: 13, color: '#607D8B', flex: 1 },
-  saveButton: { backgroundColor: '#607D8B', borderRadius: 8, padding: 14, margin: 16, alignItems: 'center' },
-  saveButtonText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
+const createStyles = (theme) => StyleSheet.create({
+  container: { 
+    flex: 1, 
+    backgroundColor: theme.colors.background 
+  },
+  scrollView: { 
+    flex: 1 
+  },
+  header: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    padding: 20, 
+    backgroundColor: theme.colors.card, 
+    borderBottomWidth: 1, 
+    borderBottomColor: theme.colors.border 
+  },
+  headerTitle: { 
+    fontSize: 22, 
+    fontWeight: 'bold', 
+    color: theme.colors.text 
+  },
+  card: { 
+    backgroundColor: theme.colors.card, 
+    borderRadius: 14, 
+    padding: 16, 
+    margin: 16, 
+    shadowColor: theme.colors.shadow, 
+    shadowOpacity: 0.07, 
+    shadowRadius: 8, 
+    elevation: 2, 
+    borderWidth: 1, 
+    borderColor: theme.colors.border 
+  },
+  rowBetween: { 
+    flexDirection: 'row', 
+    justifyContent: 'space-between', 
+    alignItems: 'center', 
+    marginBottom: 12 
+  },
+  label: { 
+    fontSize: 16, 
+    fontWeight: 'bold', 
+    color: theme.colors.text 
+  },
+  inputGroup: { 
+    marginBottom: 16 
+  },
+  inputLabel: { 
+    fontSize: 15, 
+    fontWeight: 'bold', 
+    color: theme.colors.text, 
+    marginBottom: 4 
+  },
+  inputContainer: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    backgroundColor: theme.colors.surface, 
+    borderRadius: 6, 
+    borderWidth: 1, 
+    borderColor: theme.colors.border, 
+    paddingHorizontal: 8 
+  },
+  textInput: { 
+    flex: 1, 
+    height: 40, 
+    fontSize: 16, 
+    color: theme.colors.text 
+  },
+  inputSuffix: { 
+    fontSize: 16, 
+    color: theme.colors.textSecondary, 
+    marginLeft: 4 
+  },
+  inputHelp: { 
+    fontSize: 12, 
+    color: theme.colors.textSecondary, 
+    marginTop: 4 
+  },
+  optionRow: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    paddingVertical: 6 
+  },
+  selectedOption: { 
+    backgroundColor: theme.name === 'dark' ? 'rgba(0, 122, 255, 0.15)' : '#f0f7ff', 
+    borderRadius: 6,
+    paddingHorizontal: 4
+  },
+  recommendedOption: { 
+    borderWidth: 1, 
+    borderColor: '#4CAF50', 
+    borderRadius: 6, 
+    paddingHorizontal: 4 
+  },
+  optionContent: { 
+    flex: 1 
+  },
+  optionLabel: { 
+    fontSize: 15, 
+    color: theme.colors.text 
+  },
+  recommendedLabel: { 
+    fontWeight: 'bold' 
+  },
+  recommendedBadge: { 
+    fontSize: 12, 
+    color: '#4CAF50', 
+    fontWeight: 'bold' 
+  },
+  optionDescription: { 
+    fontSize: 12, 
+    color: theme.colors.textSecondary, 
+    marginTop: 2, 
+    fontStyle: 'italic' 
+  },
+  infoBox: { 
+    flexDirection: 'row', 
+    alignItems: 'flex-start', 
+    backgroundColor: theme.colors.surface, 
+    borderRadius: 8, 
+    padding: 10, 
+    margin: 16,
+    borderLeftWidth: 3,
+    borderLeftColor: '#007AFF'
+  },
+  infoText: { 
+    fontSize: 13, 
+    color: theme.colors.textSecondary, 
+    flex: 1 
+  },
+  saveButton: { 
+    backgroundColor: '#007AFF', 
+    borderRadius: 8, 
+    padding: 14, 
+    margin: 16, 
+    alignItems: 'center' 
+  },
+  saveButtonText: { 
+    color: '#fff', 
+    fontWeight: 'bold', 
+    fontSize: 16 
+  },
 });
 
 export default TravelAllowanceSettings;

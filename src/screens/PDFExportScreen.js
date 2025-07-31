@@ -14,149 +14,237 @@ import {
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useTheme } from '../contexts/ThemeContext';
 import DatabaseService from '../services/DatabaseService';
-import PDFExportServiceNew from '../services/PDFExportServiceNew';
-import { useCalculationService } from '../hooks';
+import ComprehensivePDFService from '../services/ComprehensivePDFService_v2';
+import { useCalculationService, useSettings } from '../hooks';
 import { DEFAULT_SETTINGS } from '../constants';
 import { createWorkEntryFromData } from '../utils/earningsHelper';
+import testPDFService from '../utils/testPDFService';
 
 const { width } = Dimensions.get('window');
 
 const PDFExportScreen = ({ navigation }) => {
   const { theme } = useTheme();
   const calculationService = useCalculationService();
+  const { settings, isLoading: settingsLoading } = useSettings();
+  
   const [loading, setLoading] = useState(false);
-  const [settingsLoading, setSettingsLoading] = useState(true);
   const [workEntries, setWorkEntries] = useState([]);
-  const [monthlyStats, setMonthlyStats] = useState({});
-  const [settings, setSettings] = useState(null);
+  const [monthlyAggregated, setMonthlyAggregated] = useState({});
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
 
   useEffect(() => {
-    loadSettings();
-  }, []);
-
-  useEffect(() => {
-    if (settings) {
+    if (settings && !settingsLoading) {
       loadWorkData();
     }
-  }, [selectedMonth, selectedYear, settings]);
+  }, [selectedMonth, selectedYear, settings, settingsLoading]);
 
-  const loadSettings = async () => {
-    try {
-      setSettingsLoading(true);
-      const savedSettings = await DatabaseService.getSetting('appSettings', DEFAULT_SETTINGS);
-      setSettings(savedSettings || DEFAULT_SETTINGS);
-    } catch (error) {
-      console.error('❌ PDF Export: Errore caricamento settings:', error);
-      // Fallback ai settings di default
-      setSettings(DEFAULT_SETTINGS);
-    } finally {
-      setSettingsLoading(false);
+  // Calcola aggregazione mensile identica al DashboardScreen
+  const calculateMonthlyAggregation = async (entries) => {
+    if (settingsLoading) {
+      console.log('🔧 PDF EXPORT - Settings ancora in caricamento, attesa...');
+      return {};
     }
+
+    if (!settings) {
+      console.log('🔧 PDF EXPORT - Settings non disponibili, skip...');
+      return {};
+    }
+
+    console.log('🔧 PDF EXPORT - Calcolo aggregazione per', entries.length, 'entries');
+
+    // Definizione di safeSettings (identica al DashboardScreen)
+    const defaultSettings = {
+      contract: {
+        hourlyRate: 16.15,
+        dailyRate: 107.69,
+        monthlyGrossSalary: 2800.00,
+        normalHours: 40,
+        dailyHours: 8,
+        saturdayBonus: 0.2,
+        nightBonus: 0.25,
+        nightBonus2: 0.35,
+        overtimeBonus: 0.2,
+        overtimeLimit: {
+          hours: 8,
+          type: 'daily'
+        }
+      },
+      travelCompensationRate: 1.0,
+      standbySettings: {
+        dailyAllowance: 7.5,
+        dailyIndemnity: 7.5,
+        travelWithBonus: false
+      },
+      mealAllowances: {
+        lunch: { voucherAmount: 5.29 },
+        dinner: { voucherAmount: 5.29 }
+      }
+    };
+    
+    const safeSettings = {
+      ...defaultSettings,
+      ...(settings || {}),
+      contract: { ...defaultSettings.contract, ...(settings?.contract || {}) },
+      standbySettings: { ...defaultSettings.standbySettings, ...(settings?.standbySettings || {}) },
+      mealAllowances: { ...defaultSettings.mealAllowances, ...(settings?.mealAllowances || {}) },
+      travelHoursSetting: settings?.travelHoursSetting || 'TRAVEL_RATE_EXCESS',
+      multiShiftTravelAsWork: settings?.multiShiftTravelAsWork || false
+    };
+
+    // Calcolo indennità di reperibilità dal calendario
+    const standbyAllowances = calculationService.calculateMonthlyStandbyAllowances(selectedYear, selectedMonth, safeSettings);
+
+    if (!entries || entries.length === 0) {
+      const standbyTotal = standbyAllowances.reduce((sum, allowance) => sum + allowance.allowance, 0);
+      return {
+        totalEarnings: standbyTotal,
+        ordinary: { total: 0, hours: {}, days: 0 },
+        standby: { totalEarnings: standbyTotal, workHours: {}, travelHours: {}, days: 0 },
+        allowances: { 
+          travel: 0, 
+          meal: 0, 
+          standby: standbyTotal,
+          travelDays: 0,
+          mealDays: 0,
+          standbyDays: standbyAllowances.length
+        },
+        daysWorked: 0,
+        totalHours: 0
+      };
+    }
+
+    // Aggrega tutti i breakdown giornalieri
+    let aggregated = {
+      totalEarnings: 0,
+      ordinary: {
+        total: 0,
+        days: 0,
+        hours: {
+          lavoro_giornaliera: 0,
+          viaggio_giornaliera: 0,
+          lavoro_extra: 0,
+          viaggio_extra: 0
+        }
+      },
+      standby: {
+        totalEarnings: 0,
+        days: 0,
+        workHours: { ordinary: 0, evening: 0, night: 0, holiday: 0, saturday: 0, saturday_night: 0, night_holiday: 0 },
+        travelHours: { ordinary: 0, evening: 0, night: 0, holiday: 0, saturday: 0, saturday_night: 0, night_holiday: 0 }
+      },
+      allowances: {
+        travel: 0,
+        meal: 0,
+        standby: 0,
+        travelDays: 0,
+        mealDays: 0,
+        standbyDays: 0
+      },
+      daysWorked: 0,
+      totalHours: 0
+    };
+
+    // Processa ogni entry
+    for (const entry of entries) {
+      try {
+        const workEntry = createWorkEntryFromData(entry);
+        const breakdown = await calculationService.calculateEarningsBreakdown(workEntry, safeSettings);
+        
+        if (!breakdown) continue;
+
+        aggregated.totalEarnings += breakdown.totalEarnings || 0;
+        aggregated.daysWorked += 1;
+
+        // Aggrega ore ordinarie
+        if (breakdown.ordinary) {
+          aggregated.ordinary.total += breakdown.ordinary.total || 0;
+          
+          if (breakdown.ordinary.hours) {
+            Object.keys(breakdown.ordinary.hours).forEach(key => {
+              if (aggregated.ordinary.hours[key] !== undefined) {
+                aggregated.ordinary.hours[key] += breakdown.ordinary.hours[key] || 0;
+              }
+            });
+          }
+        }
+
+        // Aggrega reperibilità
+        if (breakdown.standby) {
+          aggregated.standby.totalEarnings += breakdown.standby.totalEarnings || 0;
+          
+          if (breakdown.standby.workHours) {
+            Object.keys(breakdown.standby.workHours).forEach(key => {
+              if (aggregated.standby.workHours[key] !== undefined) {
+                aggregated.standby.workHours[key] += breakdown.standby.workHours[key] || 0;
+              }
+            });
+          }
+
+          if (breakdown.standby.travelHours) {
+            Object.keys(breakdown.standby.travelHours).forEach(key => {
+              if (aggregated.standby.travelHours[key] !== undefined) {
+                aggregated.standby.travelHours[key] += breakdown.standby.travelHours[key] || 0;
+              }
+            });
+          }
+        }
+
+        // Aggrega indennità
+        if (breakdown.allowances) {
+          aggregated.allowances.travel += breakdown.allowances.travel || 0;
+          aggregated.allowances.meal += breakdown.allowances.meal || 0;
+          aggregated.allowances.standby += breakdown.allowances.standby || 0;
+          
+          if (breakdown.allowances.travel > 0) aggregated.allowances.travelDays += 1;
+          if (breakdown.allowances.meal > 0) aggregated.allowances.mealDays += 1;
+          if (breakdown.allowances.standby > 0) aggregated.allowances.standbyDays += 1;
+        }
+
+        // Calcola ore totali
+        const dailyHours = Object.values(breakdown.ordinary?.hours || {}).reduce((a, b) => a + b, 0) +
+                          Object.values(breakdown.standby?.workHours || {}).reduce((a, b) => a + b, 0) +
+                          Object.values(breakdown.standby?.travelHours || {}).reduce((a, b) => a + b, 0);
+        
+        aggregated.totalHours += dailyHours;
+
+      } catch (error) {
+        console.error('Errore PDF nel calcolo breakdown per entry:', entry.id, error);
+      }
+    }
+
+    // Aggiungi indennità di reperibilità dal calendario
+    const existingEntryDates = entries.map(entry => entry.date);
+    const standbyOnlyDays = standbyAllowances.filter(allowance => !existingEntryDates.includes(allowance.date));
+    
+    if (standbyOnlyDays.length > 0) {
+      const standbyOnlyTotal = standbyOnlyDays.reduce((sum, allowance) => sum + allowance.allowance, 0);
+      aggregated.allowances.standby += standbyOnlyTotal;
+      aggregated.allowances.standbyDays += standbyOnlyDays.length;
+      aggregated.totalEarnings += standbyOnlyTotal;
+      aggregated.standby.totalEarnings += standbyOnlyTotal;
+    }
+
+    return aggregated;
   };
 
-  // Sostituisco la chiamata a calculateMonthlyStats in loadWorkData per usare formattedEntries
   const loadWorkData = async () => {
     try {
       setLoading(true);
       console.log('🔍 PDF Export: Caricamento dati per mese:', selectedMonth, 'anno:', selectedYear);
-      // Carica i dati del mese selezionato
+      
       const entries = await DatabaseService.getWorkEntries(selectedYear, selectedMonth);
-      console.log('🔍 PDF Export: Entries caricate dal DB:', entries.length);
-      if (entries.length > 0) {
-        console.log('🔍 PDF Export: Prima entry (esempio):', JSON.stringify(entries[0], null, 2));
-      }
       setWorkEntries(entries);
-      // Calcola breakdown dettagliato come la Dashboard
-      let detailedEntries = [];
-      if (calculationService && settings) {
-        detailedEntries = entries.map(entry => {
-          const workEntry = createWorkEntryFromData(entry);
-          const breakdown = calculationService.calculateEarningsBreakdown(workEntry, settings);
-          // Calcolo coerente con Dashboard/TimeEntryForm
-          return {
-            ...entry,
-            ...workEntry,
-            breakdown,
-            // Ore lavoro ordinarie
-            workHours: breakdown?.ordinary?.hours?.lavoro_giornaliera || 0,
-            // Ore viaggio (solo viaggio, non straordinari)
-            travelHours: breakdown?.ordinary?.hours?.viaggio_giornaliera || 0,
-            // Ore straordinarie (solo lavoro extra)
-            overtimeHours: breakdown?.ordinary?.hours?.lavoro_extra || 0,
-            // Ore viaggio extra (separato)
-            extraTravelHours: breakdown?.ordinary?.hours?.viaggio_extra || 0,
-            // Ore notturne
-            nightHours: breakdown?.standby?.workHours?.night || 0,
-            // Indennità e rimborsi
-            mealAllowance: breakdown?.allowances?.meal || 0,
-            travelAllowance: breakdown?.allowances?.travel || 0,
-            standbyAllowance: breakdown?.allowances?.standby || 0,
-            overnightAllowance: breakdown?.allowances?.overnight || 0,
-            // Guadagni
-            regularEarnings: breakdown?.ordinary?.earnings?.giornaliera || 0,
-            overtimeEarnings: breakdown?.ordinary?.earnings?.lavoro_extra || 0,
-            travelEarnings: breakdown?.ordinary?.earnings?.viaggio_giornaliera || 0,
-            extraTravelEarnings: breakdown?.ordinary?.earnings?.viaggio_extra || 0,
-            nightEarnings: breakdown?.standby?.workEarnings?.night || 0,
-            standbyEarnings: breakdown?.standby?.totalEarnings || 0,
-            totalEarnings: breakdown?.totalEarnings || 0,
-          };
-        });
-      } else {
-        detailedEntries = entries;
-      }
-      // Calcola le statistiche mensili con breakdown dettagliato
-      const stats = calculateMonthlyStats(detailedEntries);
-      setMonthlyStats(stats);
-      setWorkEntries(detailedEntries);
+      
+      // Calcola aggregazione mensile usando la stessa logica del DashboardScreen
+      const aggregated = await calculateMonthlyAggregation(entries);
+      setMonthlyAggregated(aggregated);
+      
     } catch (error) {
       console.error('❌ PDF Export: Errore caricamento dati:', error);
       Alert.alert('Errore', 'Impossibile caricare i dati del mese selezionato');
     } finally {
       setLoading(false);
-    }
-  };
-
-  const calculateMonthlyStats = (entries) => {
-    if (!settings || !calculationService || settingsLoading) {
-      console.log('🚫 PDF Export: Settings o calculationService non disponibili');
-      return {};
-    }
-
-    console.log('📊 PDF Export: Calcolo statistiche per', entries.length, 'entries');
-    console.log('⚙️ PDF Export: Settings loaded:', !!settings);
-
-    try {
-      // 🚀 CRITICAL FIX: Parse entries usando createWorkEntryFromData prima di passarle a calculateMonthlySummary
-      const parsedEntries = entries.map(entry => createWorkEntryFromData(entry));
-      console.log('📊 PDF Export: Parsed entries sample:', JSON.stringify(parsedEntries[0], null, 2));
-      console.log('📊 PDF Export: Settings per calcolo:', JSON.stringify(settings, null, 2));
-      
-      const result = calculationService.calculateMonthlySummary(parsedEntries, settings, selectedMonth, selectedYear);
-      console.log('📊 PDF Export: Monthly summary result:', JSON.stringify(result, null, 2));
-
-      return {
-        totalHours: result.totalHours || 0,
-        regularHours: result.totalHours || 0, // Potresti voler calcolare solo le ore regolari
-        overtimeHours: result.overtimeHours || 0,
-        travelHours: result.travelHours || 0,
-        totalEarnings: result.totalEarnings || 0,
-        regularEarnings: result.regularPay || 0,
-        overtimeEarnings: result.overtimePay || 0,
-        travelEarnings: result.travelPay || 0,
-        standbyEarnings: result.standbyPay || 0,
-        allowances: result.allowances || 0,
-        workDays: entries.length,
-        regularDays: result.regularDays || 0,
-        overtimeDays: result.overtimeDays || 0,
-        travelDays: result.travelAllowanceDays || 0,
-        standbyDays: result.standbyDays || 0
-      };
-    } catch (error) {
-      console.error('❌ PDF Export: Errore nel calcolo delle statistiche:', error);
-      return {};
     }
   };
 
@@ -176,10 +264,9 @@ const PDFExportScreen = ({ navigation }) => {
     try {
       setLoading(true);
       
-      console.log('🚀 PDF Export: Inizio export PDF');
+      console.log('🚀 PDF Export: Inizio export PDF completo');
       console.log('🚀 PDF Export: WorkEntries disponibili:', workEntries.length);
-      console.log('🚀 PDF Export: Settings caricate:', !!settings);
-      console.log('🚀 PDF Export: CalculationService disponibile:', !!calculationService);
+      console.log('🚀 PDF Export: MonthlyAggregated:', monthlyAggregated);
       
       if (workEntries.length === 0) {
         console.log('⚠️ PDF Export: Nessuna work entry disponibile');
@@ -191,184 +278,155 @@ const PDFExportScreen = ({ navigation }) => {
         return;
       }
 
+      const monthName = getMonthName(selectedMonth);
+      const totalHours = monthlyAggregated.totalHours || 0;
+      const totalEarnings = monthlyAggregated.totalEarnings || 0;
+
       Alert.alert(
-        '📄 Genera Report PDF',
-        `Stai per generare un report PDF per ${getMonthName(selectedMonth)} ${selectedYear}.\n\nIl report includerà:\n• ${workEntries.length} registrazioni\n• ${formatHours(monthlyStats.totalHours)} ore totali\n• ${formatCurrency(monthlyStats.totalEarnings)} guadagno lordo`,
+        '📄 Genera Report PDF Completo',
+        `Stai per generare un report PDF dettagliato per ${monthName} ${selectedYear}.\n\nIl report includerà:\n• ${workEntries.length} registrazioni complete\n• ${formatHours(totalHours)} ore totali\n• ${formatCurrency(totalEarnings)} guadagno lordo\n• Breakdown dettagliati per ogni giorno\n• Tutte le informazioni del TimeEntryForm`,
         [
           { text: 'Annulla', style: 'cancel' },
           {
             text: 'Genera PDF',
             onPress: async () => {
               try {
-                // Trasforma i dati delle work entries per il PDF con breakdown dettagliato
-                const formattedEntries = workEntries.map(entry => {
-                  if (calculationService && settings) {
-                    const workEntry = createWorkEntryFromData(entry);
-                    const breakdown = calculationService.calculateEarningsBreakdown(workEntry, settings);
-                    
-                    console.log('🔍 PDF DEBUG - Original entry:', JSON.stringify(entry, null, 2));
-                    console.log('🔍 PDF DEBUG - Parsed workEntry:', JSON.stringify(workEntry, null, 2));
-                    
-                    const workHours = calculationService.calculateWorkHours(workEntry) || 0;
-                    const travelHours = calculationService.calculateTravelHours(workEntry) || 0;
-                    const standbyWorkHours = calculationService.calculateStandbyWorkHours(workEntry) || 0;
-                    const standbyTravelHours = calculationService.calculateStandbyTravelHours(workEntry) || 0;
-                    const totalStandbyHours = standbyWorkHours + standbyTravelHours;
-                    
-                    console.log('🔍 PDF DEBUG - Calculated hours:', {
-                      workHours,
-                      travelHours,
-                      standbyWorkHours,
-                      standbyTravelHours,
-                      totalStandbyHours
-                    });
-                    
-                    // Calcola orari di lavoro dettagliati
-                    const workStart1 = workEntry.workStart1 || entry.work_start_1;
-                    const workEnd1 = workEntry.workEnd1 || entry.work_end_1;
-                    const workStart2 = workEntry.workStart2 || entry.work_start_2;
-                    const workEnd2 = workEntry.workEnd2 || entry.work_end_2;
-                    
-                    let workSchedule = '';
-                    if (workStart1 && workEnd1) {
-                      workSchedule = `${workStart1}-${workEnd1}`;
-                      if (workStart2 && workEnd2) {
-                        workSchedule += ` / ${workStart2}-${workEnd2}`;
-                      }
+                console.log('📄 Avvio generazione PDF con nuovo servizio...');
+                
+                // Definizione di safeSettings (identica al DashboardScreen)
+                const defaultSettings = {
+                  contract: {
+                    hourlyRate: 16.15,
+                    dailyRate: 107.69,
+                    monthlyGrossSalary: 2800.00,
+                    normalHours: 40,
+                    dailyHours: 8,
+                    saturdayBonus: 0.2,
+                    nightBonus: 0.25,
+                    nightBonus2: 0.35,
+                    overtimeBonus: 0.2,
+                    overtimeLimit: {
+                      hours: 8,
+                      type: 'daily'
                     }
-                    
-                    // Calcola orari di viaggio
-                    const depCompany = workEntry.departureCompany || entry.departure_company;
-                    const arrCompany = workEntry.arrivalCompany || entry.arrival_company;
-                    const depSite = workEntry.departureSite || entry.departure_site;
-                    const arrSite = workEntry.arrivalSite || entry.arrival_site;
-                    
-                    let travelSchedule = '';
-                    if (depCompany || depSite || arrCompany || arrSite) {
-                      const depTime = depCompany || depSite || '-';
-                      const arrTime = arrCompany || arrSite || '-';
-                      travelSchedule = `${depTime}-${arrTime}`;
-                    }
-                    
-                    // Determina il tipo di giornata
-                    let dayTypeLabel = 'Lavoro';
-                    const dayType = workEntry.dayType || entry.day_type;
-                    if (dayType === 'festivo') {
-                      dayTypeLabel = 'Festivo';
-                    } else if (dayType === 'malattia') {
-                      dayTypeLabel = 'Malattia';
-                    } else if (dayType === 'ferie') {
-                      dayTypeLabel = 'Ferie';
-                    } else if (dayType === 'permesso') {
-                      dayTypeLabel = 'Permesso';
-                    }
-                    
-                    return {
-                      // Dati base
-                      ...entry,
-                      date: entry.date,
-                      dayType: dayTypeLabel,
-                      workSchedule,
-                      travelSchedule,
-                      
-                      // Ore calcolate
-                      totalHours: (breakdown?.ordinary?.hours?.lavoro_giornaliera || 0) + (breakdown?.ordinary?.hours?.viaggio_giornaliera || 0) + (breakdown?.ordinary?.hours?.lavoro_extra || 0) + (breakdown?.ordinary?.hours?.viaggio_extra || 0),
-                      workHours: breakdown?.ordinary?.hours?.lavoro_giornaliera || 0,
-                      travelHours: breakdown?.ordinary?.hours?.viaggio_giornaliera || 0,
-                      standbyHours: breakdown?.standby?.workHours?.ordinary || 0,
-                      standbyWorkHours: breakdown?.standby?.workHours?.ordinary || 0,
-                      standbyTravelHours: breakdown?.standby?.travelHours?.ordinary || 0,
-                      overtimeHours: breakdown?.ordinary?.hours?.lavoro_extra || 0,
-                      extraTravelHours: breakdown?.ordinary?.hours?.viaggio_extra || 0,
-                      nightHours: breakdown?.standby?.workHours?.night || 0,
-                      
-                      // Indennità e compensi
-                      mealAllowance: breakdown?.allowances?.meal || 0,
-                      travelAllowance: breakdown?.allowances?.travel || 0,
-                      standbyAllowance: breakdown?.allowances?.standby || 0,
-                      overnightAllowance: breakdown?.allowances?.overnight || 0,
-                      
-                      // Guadagni
-                      regularEarnings: breakdown?.ordinary?.earnings?.giornaliera || 0,
-                      overtimeEarnings: breakdown?.ordinary?.earnings?.lavoro_extra || 0,
-                      nightEarnings: breakdown?.standby?.workEarnings?.night || 0,
-                      travelEarnings: breakdown?.ordinary?.earnings?.viaggio_giornaliera || 0,
-                      extraTravelEarnings: breakdown?.ordinary?.earnings?.viaggio_extra || 0,
-                      standbyEarnings: breakdown?.standby?.totalEarnings || 0,
-                      totalEarnings: breakdown?.totalEarnings || 0,
-                      
-                      // Informazioni lavoro
-                      location: workEntry.siteName || entry.site_name || 'Non specificato',
-                      siteName: workEntry.siteName || entry.site_name || 'Non specificato',
-                      
-                      // Breakdown completo per referenza
-                      breakdown
-                    };
+                  },
+                  travelCompensationRate: 1.0,
+                  standbySettings: {
+                    dailyAllowance: 7.5,
+                    dailyIndemnity: 7.5,
+                    travelWithBonus: false
+                  },
+                  mealAllowances: {
+                    lunch: { voucherAmount: 5.29 },
+                    dinner: { voucherAmount: 5.29 }
                   }
-                  
-                  // Fallback se calculationService non è disponibile
-                  return {
-                    ...entry,
-                    date: entry.date,
-                    dayType: 'Lavoro',
-                    workSchedule: '-',
-                    travelSchedule: '-',
-                    totalHours: 0,
-                    workHours: 0,
-                    travelHours: 0,
-                    standbyHours: 0,
-                    standbyWorkHours: 0,
-                    standbyTravelHours: 0,
-                    regularHours: 0,
-                    overtimeHours: 0,
-                    nightHours: 0,
-                    mealAllowance: 0,
-                    travelAllowance: 0,
-                    standbyAllowance: 0,
-                    overnightAllowance: 0,
-                    regularEarnings: 0,
-                    overtimeEarnings: 0,
-                    nightEarnings: 0,
-                    travelEarnings: 0,
-                    standbyEarnings: 0,
-                    totalEarnings: 0,
-                    location: entry.site_name || entry.siteName || 'Non specificato',
-                    siteName: entry.site_name || entry.siteName || 'Non specificato'
-                  };
+                };
+                
+                const safeSettings = {
+                  ...defaultSettings,
+                  ...(settings || {}),
+                  contract: { ...defaultSettings.contract, ...(settings?.contract || {}) },
+                  standbySettings: { ...defaultSettings.standbySettings, ...(settings?.standbySettings || {}) },
+                  mealAllowances: { ...defaultSettings.mealAllowances, ...(settings?.mealAllowances || {}) },
+                  travelHoursSetting: settings?.travelHoursSetting || 'TRAVEL_RATE_EXCESS',
+                  multiShiftTravelAsWork: settings?.multiShiftTravelAsWork || false
+                };
+                
+                // Preparare work entries con breakdown allegati
+                console.log('📄 PDF DEBUG - Inizio calcolo breakdown per', workEntries.length, 'entries');
+                const entriesWithBreakdown = await Promise.all(
+                  workEntries.map(async (entry) => {
+                    try {
+                      const workEntry = createWorkEntryFromData(entry);
+                      const breakdown = await calculationService.calculateEarningsBreakdown(workEntry, safeSettings);
+                      console.log(`📄 PDF DEBUG - Entry ${entry.date}: breakdown calcolato, totalEarnings=€${breakdown.totalEarnings}`);
+                      return {
+                        ...entry,
+                        breakdown: breakdown
+                      };
+                    } catch (error) {
+                      console.error('❌ PDF ERROR - Errore calcolo breakdown per entry:', entry.date, error);
+                      return entry; // Restituisci entry senza breakdown in caso di errore
+                    }
+                  })
+                );
+                
+                // Ricalcola il totale ore mensile dal breakdown (stesso metodo della dashboard)
+                let correctedTotalHours = 0;
+                let correctedTotalEarnings = 0;
+                let validBreakdowns = 0;
+                
+                entriesWithBreakdown.forEach(entry => {
+                  if (entry.breakdown) {
+                    validBreakdowns++;
+                    const dailyHours = Object.values(entry.breakdown.ordinary?.hours || {}).reduce((a, b) => a + b, 0) +
+                                      Object.values(entry.breakdown.standby?.workHours || {}).reduce((a, b) => a + b, 0) +
+                                      Object.values(entry.breakdown.standby?.travelHours || {}).reduce((a, b) => a + b, 0);
+                    correctedTotalHours += dailyHours;
+                    correctedTotalEarnings += entry.breakdown.totalEarnings || 0;
+                    console.log(`📄 PDF DEBUG - Entry ${entry.date}: ${dailyHours}h, €${entry.breakdown.totalEarnings}`);
+                  } else {
+                    console.log(`⚠️ PDF WARNING - Entry ${entry.date}: nessun breakdown allegato`);
+                  }
                 });
-
-                const result = await PDFExportServiceNew.generateAndExportPDF(
-                  monthlyStats,
-                  formattedEntries,
-                  settings,
-                  getMonthName(selectedMonth),
-                  selectedYear,
-                  calculationService
+                
+                console.log('📄 PDF DEBUG - Totali finali:', {
+                  originalHours: monthlyAggregated.totalHours,
+                  correctedHours: correctedTotalHours,
+                  originalEarnings: monthlyAggregated.totalEarnings,
+                  correctedEarnings: correctedTotalEarnings,
+                  validBreakdowns,
+                  totalEntries: entriesWithBreakdown.length
+                });
+                
+                // Aggiorna monthlyAggregated con i totali corretti
+                const correctedMonthlyAggregated = {
+                  ...monthlyAggregated,
+                  totalHours: correctedTotalHours,
+                  totalEarnings: correctedTotalEarnings,
+                  daysWorked: validBreakdowns
+                };
+                
+                console.log('🔧 PDF CORRECTION - Confronto totali:');
+                console.log('🔧 PDF CORRECTION - Ore originali:', monthlyAggregated.totalHours, '→ corrette:', correctedTotalHours);
+                console.log('🔧 PDF CORRECTION - Guadagni originali: €', monthlyAggregated.totalEarnings, '→ corretti: €', correctedTotalEarnings);
+                
+                const result = await ComprehensivePDFService.generateMonthlyReport(
+                  entriesWithBreakdown,
+                  correctedMonthlyAggregated,
+                  selectedMonth,
+                  selectedYear
                 );
 
                 if (result.success) {
                   Alert.alert(
-                    '✅ PDF Generato',
-                    `Report esportato con successo!\n\nFile: ${result.filename}\n${result.shared ? 'PDF condiviso tramite sistema operativo.' : 'PDF salvato nel dispositivo.'}`,
-                    [{ text: 'OK' }]
+                    '✅ PDF Generato con Successo',
+                    `Report completo esportato!\n\nFile salvato: ${result.uri.split('/').pop()}\n\nIl PDF include tutti i dettagli delle registrazioni, i breakdown e le informazioni complete per ogni giorno del mese.`,
+                    [{ text: 'Perfetto' }]
                   );
+                  console.log('✅ PDF Export completato con successo');
                 } else {
-                  Alert.alert(
-                    '❌ Errore',
-                    `Impossibile generare il PDF:\n${result.error}`,
-                    [{ text: 'OK' }]
-                  );
+                  throw new Error(result.message || 'Errore sconosciuto');
                 }
               } catch (error) {
-                Alert.alert('Errore', 'Errore durante la generazione del PDF: ' + error.message);
+                console.error('❌ Errore generazione PDF:', error);
+                Alert.alert(
+                  '❌ Errore Generazione PDF', 
+                  `Si è verificato un errore durante la generazione del PDF:\n\n${error.message}\n\nVerifica che l'app abbia i permessi necessari per salvare i file.`,
+                  [{ text: 'OK' }]
+                );
               }
             }
           }
         ]
       );
     } catch (error) {
-      console.error('Errore export PDF:', error);
-      Alert.alert('Errore', 'Errore durante la preparazione del PDF');
+      console.error('❌ Errore export PDF:', error);
+      Alert.alert(
+        'Errore', 
+        'Errore durante la preparazione del PDF. Riprova più tardi.',
+        [{ text: 'OK' }]
+      );
     } finally {
       setLoading(false);
     }
@@ -396,7 +454,7 @@ const PDFExportScreen = ({ navigation }) => {
           <Text style={[styles.selectorLabel, { color: theme.colors.textSecondary }]}>
             Mese:
           </Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.monthScroll}>
+          <View style={styles.monthsGrid}>
             {months.map(month => (
               <TouchableOpacity
                 key={month}
@@ -418,7 +476,7 @@ const PDFExportScreen = ({ navigation }) => {
                 </Text>
               </TouchableOpacity>
             ))}
-          </ScrollView>
+          </View>
         </View>
 
         <View style={styles.selectorRow}>
@@ -426,27 +484,33 @@ const PDFExportScreen = ({ navigation }) => {
             Anno:
           </Text>
           <View style={styles.yearContainer}>
-            {years.map(year => (
-              <TouchableOpacity
-                key={year}
-                style={[
-                  styles.yearButton,
-                  {
-                    backgroundColor: year === selectedYear ? theme.colors.primary : theme.colors.surface,
-                  }
-                ]}
-                onPress={() => setSelectedYear(year)}
-              >
-                <Text style={[
-                  styles.yearButtonText,
-                  {
-                    color: year === selectedYear ? 'white' : theme.colors.text,
-                  }
-                ]}>
-                  {year}
-                </Text>
-              </TouchableOpacity>
-            ))}
+            <TouchableOpacity
+              style={[styles.yearArrow, { backgroundColor: theme.colors.surface }]}
+              onPress={() => setSelectedYear(selectedYear - 1)}
+            >
+              <MaterialCommunityIcons 
+                name="chevron-left" 
+                size={20} 
+                color={theme.colors.text} 
+              />
+            </TouchableOpacity>
+            
+            <View style={[styles.currentYear, { backgroundColor: theme.colors.primary }]}>
+              <Text style={[styles.currentYearText, { color: 'white' }]}>
+                {selectedYear}
+              </Text>
+            </View>
+            
+            <TouchableOpacity
+              style={[styles.yearArrow, { backgroundColor: theme.colors.surface }]}
+              onPress={() => setSelectedYear(selectedYear + 1)}
+            >
+              <MaterialCommunityIcons 
+                name="chevron-right" 
+                size={20} 
+                color={theme.colors.text} 
+              />
+            </TouchableOpacity>
           </View>
         </View>
       </View>
@@ -455,52 +519,144 @@ const PDFExportScreen = ({ navigation }) => {
 
   const StatsPreview = () => (
     <View style={[styles.statsContainer, { backgroundColor: theme.colors.card }]}>
-      <Text style={[styles.statsTitle, { color: theme.colors.text }]}>
-        📊 Anteprima Report: {getMonthName(selectedMonth)} {selectedYear}
-      </Text>
+      <View style={styles.statsHeader}>
+        <Text style={[styles.statsTitle, { color: theme.colors.text }]}>
+          📊 Anteprima Report: {getMonthName(selectedMonth)} {selectedYear}
+        </Text>
+        {workEntries.length > 0 && (
+          <Text style={[styles.statsSubtitle, { color: theme.colors.textSecondary }]}>
+            {workEntries.length} registrazioni trovate
+          </Text>
+        )}
+      </View>
       
       {workEntries.length > 0 ? (
-        <View style={styles.statsGrid}>
-          <View style={styles.statCard}>
-            <MaterialCommunityIcons name="clock" size={24} color={theme.colors.primary} />
-            <Text style={[styles.statValue, { color: theme.colors.text }]}>
-              {formatHours(monthlyStats.totalHours)}
-            </Text>
-            <Text style={[styles.statLabel, { color: theme.colors.textSecondary }]}>
-              Ore Totali
-            </Text>
+        <>
+          {/* Sezione Principale */}
+          <View style={styles.mainStatsGrid}>
+            <View style={[styles.statCard, styles.primaryStatCard]}>
+              <MaterialCommunityIcons name="clock" size={28} color={theme.colors.primary} />
+              <Text style={[styles.statValue, styles.primaryStatValue, { color: theme.colors.text }]}>
+                {formatHours(monthlyAggregated.totalHours)}
+              </Text>
+              <Text style={[styles.statLabel, { color: theme.colors.textSecondary }]}>
+                Ore Totali
+              </Text>
+            </View>
+            
+            <View style={[styles.statCard, styles.primaryStatCard]}>
+              <MaterialCommunityIcons name="currency-eur" size={28} color={theme.colors.income} />
+              <Text style={[styles.statValue, styles.primaryStatValue, { color: theme.colors.text }]}>
+                {formatCurrency(monthlyAggregated.totalEarnings)}
+              </Text>
+              <Text style={[styles.statLabel, { color: theme.colors.textSecondary }]}>
+                Guadagno Lordo
+              </Text>
+            </View>
           </View>
-          
-          <View style={styles.statCard}>
-            <MaterialCommunityIcons name="currency-eur" size={24} color={theme.colors.income} />
-            <Text style={[styles.statValue, { color: theme.colors.text }]}>
-              {formatCurrency(monthlyStats.totalEarnings)}
+
+          {/* Sezione Dettagli */}
+          <View style={styles.detailsSection}>
+            <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>
+              Dettagli Lavoro
             </Text>
-            <Text style={[styles.statLabel, { color: theme.colors.textSecondary }]}>
-              Guadagno Lordo
-            </Text>
+            <View style={styles.detailsGrid}>
+              <View style={styles.detailCard}>
+                <MaterialCommunityIcons name="calendar-check" size={20} color={theme.colors.secondary} />
+                <Text style={[styles.detailValue, { color: theme.colors.text }]}>
+                  {monthlyAggregated.daysWorked}
+                </Text>
+                <Text style={[styles.detailLabel, { color: theme.colors.textSecondary }]}>
+                  Giorni Lavorati
+                </Text>
+              </View>
+              
+              <View style={styles.detailCard}>
+                <MaterialCommunityIcons name="clock-fast" size={20} color={theme.colors.overtime} />
+                <Text style={[styles.detailValue, { color: theme.colors.text }]}>
+                  {formatHours((monthlyAggregated.ordinary?.hours?.lavoro_extra || 0) + (monthlyAggregated.ordinary?.hours?.viaggio_extra || 0))}
+                </Text>
+                <Text style={[styles.detailLabel, { color: theme.colors.textSecondary }]}>
+                  Straordinari
+                </Text>
+              </View>
+
+              <View style={styles.detailCard}>
+                <MaterialCommunityIcons name="car" size={20} color={theme.colors.travel} />
+                <Text style={[styles.detailValue, { color: theme.colors.text }]}>
+                  {formatHours(monthlyAggregated.ordinary?.hours?.viaggio_ordinario || 0)}
+                </Text>
+                <Text style={[styles.detailLabel, { color: theme.colors.textSecondary }]}>
+                  Viaggio Ordinario
+                </Text>
+              </View>
+
+              <View style={styles.detailCard}>
+                <MaterialCommunityIcons name="phone-in-talk" size={20} color={theme.colors.standby} />
+                <Text style={[styles.detailValue, { color: theme.colors.text }]}>
+                  {formatHours(monthlyAggregated.ordinary?.hours?.reperibilita || 0)}
+                </Text>
+                <Text style={[styles.detailLabel, { color: theme.colors.textSecondary }]}>
+                  Reperibilità
+                </Text>
+              </View>
+            </View>
           </View>
-          
-          <View style={styles.statCard}>
-            <MaterialCommunityIcons name="calendar-check" size={24} color={theme.colors.secondary} />
-            <Text style={[styles.statValue, { color: theme.colors.text }]}>
-              {monthlyStats.workDays}
-            </Text>
-            <Text style={[styles.statLabel, { color: theme.colors.textSecondary }]}>
-              Giorni Lavorati
-            </Text>
-          </View>
-          
-          <View style={styles.statCard}>
-            <MaterialCommunityIcons name="clock-fast" size={24} color={theme.colors.overtime} />
-            <Text style={[styles.statValue, { color: theme.colors.text }]}>
-              {formatHours(monthlyStats.overtimeHours)}
-            </Text>
-            <Text style={[styles.statLabel, { color: theme.colors.textSecondary }]}>
-              Straordinari
-            </Text>
-          </View>
-        </View>
+
+          {/* Sezione Giorni Speciali */}
+          {(monthlyAggregated.saturday?.totalHours > 0 || 
+            monthlyAggregated.sunday?.totalHours > 0 || 
+            monthlyAggregated.holiday?.totalHours > 0) && (
+            <View style={styles.specialDaysSection}>
+              <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>
+                Giorni Non Ordinari
+              </Text>
+              <View style={styles.specialDaysGrid}>
+                {monthlyAggregated.saturday?.totalHours > 0 && (
+                  <View style={[styles.specialDayCard, { borderLeftColor: theme.colors.saturday }]}>
+                    <Text style={[styles.specialDayLabel, { color: theme.colors.textSecondary }]}>
+                      Sabato
+                    </Text>
+                    <Text style={[styles.specialDayValue, { color: theme.colors.text }]}>
+                      {formatHours(monthlyAggregated.saturday.totalHours)}
+                    </Text>
+                    <Text style={[styles.specialDayEarnings, { color: theme.colors.income }]}>
+                      {formatCurrency(monthlyAggregated.saturday.totalEarnings)}
+                    </Text>
+                  </View>
+                )}
+                
+                {monthlyAggregated.sunday?.totalHours > 0 && (
+                  <View style={[styles.specialDayCard, { borderLeftColor: theme.colors.sunday }]}>
+                    <Text style={[styles.specialDayLabel, { color: theme.colors.textSecondary }]}>
+                      Domenica
+                    </Text>
+                    <Text style={[styles.specialDayValue, { color: theme.colors.text }]}>
+                      {formatHours(monthlyAggregated.sunday.totalHours)}
+                    </Text>
+                    <Text style={[styles.specialDayEarnings, { color: theme.colors.income }]}>
+                      {formatCurrency(monthlyAggregated.sunday.totalEarnings)}
+                    </Text>
+                  </View>
+                )}
+                
+                {monthlyAggregated.holiday?.totalHours > 0 && (
+                  <View style={[styles.specialDayCard, { borderLeftColor: theme.colors.holiday }]}>
+                    <Text style={[styles.specialDayLabel, { color: theme.colors.textSecondary }]}>
+                      Festivi
+                    </Text>
+                    <Text style={[styles.specialDayValue, { color: theme.colors.text }]}>
+                      {formatHours(monthlyAggregated.holiday.totalHours)}
+                    </Text>
+                    <Text style={[styles.specialDayEarnings, { color: theme.colors.income }]}>
+                      {formatCurrency(monthlyAggregated.holiday.totalEarnings)}
+                    </Text>
+                  </View>
+                )}
+              </View>
+            </View>
+          )}
+        </>
       ) : (
         <View style={styles.noDataContainer}>
           <MaterialCommunityIcons name="calendar-remove" size={48} color={theme.colors.textSecondary} />
@@ -639,6 +795,18 @@ const PDFExportScreen = ({ navigation }) => {
               🔍 Debug Database
             </Text>
           </TouchableOpacity>
+
+          {/* 🧪 TEST: Pulsante per testare il nuovo servizio PDF */}
+          <TouchableOpacity
+            style={[styles.debugButton, { backgroundColor: '#4CAF50', marginTop: 10 }]}
+            onPress={testPDFService}
+            disabled={loading}
+          >
+            <MaterialCommunityIcons name="file-pdf-box" size={20} color="white" />
+            <Text style={styles.debugButtonText}>
+              🧪 Test PDF Service
+            </Text>
+          </TouchableOpacity>
         </View>
 
         {/* Info card */}
@@ -730,11 +898,18 @@ const styles = StyleSheet.create({
   monthScroll: {
     flexDirection: 'row',
   },
+  monthsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    justifyContent: 'space-between',
+  },
   monthButton: {
-    paddingHorizontal: 16,
+    paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 20,
-    marginRight: 8,
+    width: '22%', // 4 mesi per riga con gap
+    alignItems: 'center',
   },
   monthButtonText: {
     fontSize: 12,
@@ -742,7 +917,27 @@ const styles = StyleSheet.create({
   },
   yearContainer: {
     flexDirection: 'row',
-    gap: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+  },
+  yearArrow: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  currentYear: {
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 8,
+    minWidth: 80,
+    alignItems: 'center',
+  },
+  currentYearText: {
+    fontSize: 16,
+    fontWeight: '600',
   },
   yearButton: {
     paddingHorizontal: 20,
@@ -766,7 +961,87 @@ const styles = StyleSheet.create({
   statsTitle: {
     fontSize: 18,
     fontWeight: '600',
-    marginBottom: 16,
+    marginBottom: 4,
+  },
+  statsHeader: {
+    marginBottom: 20,
+  },
+  statsSubtitle: {
+    fontSize: 14,
+    fontStyle: 'italic',
+  },
+  mainStatsGrid: {
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 20,
+  },
+  primaryStatCard: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.03)',
+    borderRadius: 16,
+    padding: 20,
+    alignItems: 'center',
+  },
+  primaryStatValue: {
+    fontSize: 20,
+    fontWeight: '700',
+  },
+  detailsSection: {
+    marginBottom: 20,
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 12,
+  },
+  detailsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  detailCard: {
+    width: '48%',
+    alignItems: 'center',
+    padding: 12,
+    backgroundColor: 'rgba(0,0,0,0.02)',
+    borderRadius: 12,
+  },
+  detailValue: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginVertical: 4,
+  },
+  detailLabel: {
+    fontSize: 11,
+    textAlign: 'center',
+  },
+  specialDaysSection: {
+    marginBottom: 12,
+  },
+  specialDaysGrid: {
+    gap: 8,
+  },
+  specialDayCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    backgroundColor: 'rgba(0,0,0,0.02)',
+    borderRadius: 12,
+    borderLeftWidth: 4,
+  },
+  specialDayLabel: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  specialDayValue: {
+    fontSize: 14,
+    fontWeight: '600',
+    marginRight: 12,
+  },
+  specialDayEarnings: {
+    fontSize: 12,
+    fontWeight: '500',
   },
   statsGrid: {
     flexDirection: 'row',

@@ -1,125 +1,119 @@
-import NotificationService from './src/services/NotificationService.js';
-import * as Notifications from 'expo-notifications';
+// 🧪 TEST SPECIFICO PER TIMING DELLE NOTIFICHE
+// Verifica perché le notifiche arrivano subito invece di essere programmate
 
-async function testNotificationTiming() {
-  console.log('🧪 === TEST TIMING NOTIFICHE ===');
-  console.log(`⏰ Test avviato alle: ${new Date().toISOString()}`);
+console.log('🧪 === TEST TIMING NOTIFICHE ===');
+
+// Simula l'ambiente React Native per il test
+global.console = console;
+
+try {
+  // Importa il SuperNotificationService
+  const SuperNotificationService = require('./src/services/SuperNotificationService.js');
   
-  try {
-    // Pulisci tutte le notifiche esistenti
-    await NotificationService.cleanupAllNotifications();
-    console.log('🧹 Notifiche precedenti cancellate');
+  async function testNotificationTiming() {
+    console.log('🚀 Inizializzazione SuperNotificationService...');
     
-    // Test 1: Notifica con trigger di 30 secondi
-    console.log('\n🧪 TEST 1: Notifica con trigger seconds (30s)');
+    const service = new SuperNotificationService();
     
-    await Notifications.scheduleNotificationAsync({
-      content: {
-        title: '🧪 Test Trigger Seconds',
-        body: 'Questa notifica dovrebbe arrivare tra 30 secondi',
-        sound: 'default',
-        data: { 
-          type: 'test_notification',
-          testType: 'seconds_trigger',
-          scheduledFor: new Date(Date.now() + 30000).toISOString()
-        }
-      },
-      trigger: {
-        seconds: 30,
-      },
+    // Test 1: Verifica inizializzazione
+    console.log('📱 Stato iniziale:', {
+      initialized: service.initialized,
+      hasPermission: service.hasPermission
     });
     
-    console.log('✅ Notifica con trigger seconds programmata');
+    // Test 2: Simula programmazione notifica per domani
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    tomorrow.setHours(8, 0, 0, 0);
     
-    // Test 2: Notifica con trigger date
-    console.log('\n🧪 TEST 2: Notifica con trigger date (45s)');
+    console.log('📅 Data corrente:', new Date().toISOString());
+    console.log('📅 Data programmata:', tomorrow.toISOString());
+    console.log('⏰ Differenza (ore):', (tomorrow.getTime() - new Date().getTime()) / (1000 * 60 * 60));
     
-    const futureDate = new Date();
-    futureDate.setSeconds(futureDate.getSeconds() + 45);
+    // Test 3: Verifica logica di confronto date
+    const now = new Date();
+    const isInFuture = tomorrow > now;
+    console.log('🔮 È nel futuro?', isInFuture);
     
-    await Notifications.scheduleNotificationAsync({
-      content: {
-        title: '🧪 Test Trigger Date',
-        body: 'Questa notifica dovrebbe arrivare tra 45 secondi',
-        sound: 'default',
-        data: { 
-          type: 'test_notification',
-          testType: 'date_trigger',
-          scheduledFor: futureDate.toISOString()
-        }
-      },
-      trigger: {
-        date: futureDate,
-      },
-    });
+    // Test 4: Simula la configurazione trigger di Expo
+    const triggerConfig = {
+      date: tomorrow
+    };
     
-    console.log('✅ Notifica con trigger date programmata');
+    console.log('⚙️ Configurazione trigger:', JSON.stringify(triggerConfig, null, 2));
     
-    // Verifica notifiche programmate dopo 5 secondi
-    setTimeout(async () => {
-      console.log('\n📋 VERIFICA NOTIFICHE PROGRAMMATE (dopo 5s):');
-      const scheduled = await Notifications.getAllScheduledNotificationsAsync();
-      console.log(`🔢 Notifiche programmate: ${scheduled.length}`);
-      
-      scheduled.forEach((notif, index) => {
-        console.log(`  ${index + 1}. ${notif.content.title}`);
-        console.log(`     Trigger: ${JSON.stringify(notif.trigger)}`);
-        console.log(`     ID: ${notif.identifier}`);
-      });
-      
-      if (scheduled.length === 0) {
-        console.log('❌ PROBLEMA: Nessuna notifica programmata trovata!');
-      } else {
-        console.log('✅ Notifiche correttamente programmate');
-      }
-    }, 5000);
-    
-    // Test del sistema completo
-    console.log('\n🧪 TEST 3: Sistema NotificationService');
-    
-    setTimeout(async () => {
+    // Test 5: Verifica settings di default
+    try {
       const testSettings = {
         enabled: true,
-        timeEntryReminders: {
-          enabled: true,
-          time: '20:05', // 5 minuti da ora corrente (approssimativo)
-          weekendsEnabled: true
-        }
+        morningTime: '08:00',
+        eveningTime: '18:00',
+        weekendsEnabled: false
       };
       
-      console.log('📱 Test programmazione automatica...');
-      await NotificationService.forceScheduleNotifications(testSettings);
+      console.log('📋 Settings test:', testSettings);
       
-      // Verifica finale dopo altri 5 secondi
-      setTimeout(async () => {
-        console.log('\n📋 VERIFICA FINALE SISTEMA:');
-        const finalScheduled = await Notifications.getAllScheduledNotificationsAsync();
-        console.log(`🔢 Notifiche sistema: ${finalScheduled.length}`);
+      // Simula la logica di programmazione
+      const [hours, minutes] = testSettings.morningTime.split(':').map(Number);
+      const daysToSchedule = testSettings.weekendsEnabled ? [0,1,2,3,4,5,6] : [1,2,3,4,5];
+      
+      console.log('🕐 Ore programmate:', hours, ':', minutes);
+      console.log('📆 Giorni inclusi:', daysToSchedule);
+      
+      // Test programmazione per i prossimi 3 giorni
+      for (let day = 1; day <= 3; day++) {
+        const targetDate = new Date();
+        targetDate.setDate(targetDate.getDate() + day);
         
-        if (finalScheduled.length > 0) {
-          finalScheduled.forEach((notif, index) => {
-            const data = notif.content.data;
-            const scheduledDate = data?.scheduledDate ? new Date(data.scheduledDate) : null;
-            const now = new Date();
-            
-            console.log(`  ${index + 1}. ${notif.content.title}`);
-            console.log(`     Tipo: ${data?.type}`);
-            
-            if (scheduledDate) {
-              const timeDiff = scheduledDate.getTime() - now.getTime();
-              const minutesDiff = Math.floor(timeDiff / (1000 * 60));
-              console.log(`     Programmata per: ${scheduledDate.toLocaleString('it-IT')} (tra ${minutesDiff} minuti)`);
-            }
-            
-            console.log(`     Trigger: ${JSON.stringify(notif.trigger)}`);
-          });
+        console.log(`📅 Giorno +${day}:`, {
+          date: targetDate.toDateString(),
+          dayOfWeek: targetDate.getDay(),
+          included: daysToSchedule.includes(targetDate.getDay())
+        });
+        
+        if (!daysToSchedule.includes(targetDate.getDay())) {
+          console.log(`   ⏭️ Saltato (weekend non abilitato)`);
+          continue;
         }
-      }, 5000);
-    }, 10000);
+        
+        targetDate.setHours(hours, minutes, 0, 0);
+        
+        const isValidTime = targetDate > now;
+        console.log(`   ⏰ Orario: ${targetDate.toISOString()}`);
+        console.log(`   ✅ Valido: ${isValidTime}`);
+        
+        if (isValidTime) {
+          console.log(`   📱 PROGRAMMAZIONE: ${targetDate.toLocaleString('it-IT')}`);
+        }
+      }
+      
+    } catch (settingsError) {
+      console.error('❌ Errore test settings:', settingsError.message);
+    }
     
-  } catch (error) {
-    console.error('❌ Errore nel test:', error);
+    console.log('✅ Test timing completato');
   }
+  
+  // Esegui test
+  testNotificationTiming().catch(error => {
+    console.error('❌ Errore test:', error.message);
+  });
+  
+} catch (error) {
+  console.error('❌ Errore caricamento service:', error.message);
+  
+  // Test alternativo senza service
+  console.log('🔄 Test alternativo...');
+  
+  const now = new Date();
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  tomorrow.setHours(8, 0, 0, 0);
+  
+  console.log('📊 Dati base:');
+  console.log('   Ora:', now.toISOString());
+  console.log('   Domani 8:00:', tomorrow.toISOString());
+  console.log('   Differenza ms:', tomorrow.getTime() - now.getTime());
+  console.log('   Differenza ore:', (tomorrow.getTime() - now.getTime()) / (1000 * 60 * 60));
+  console.log('   Nel futuro:', tomorrow > now);
 }
-
-export default testNotificationTiming;
