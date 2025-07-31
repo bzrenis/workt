@@ -17,9 +17,8 @@ import { useTheme } from '../contexts/ThemeContext';
 const { width } = Dimensions.get('window');
 
 const ThemeSettingsScreen = ({ navigation }) => {
-  const { theme, isDark, toggleTheme, setTheme } = useTheme();
+  const { theme, isDark, toggleTheme, setTheme, autoTheme, saveAutoTheme, themeMode, saveThemeMode } = useTheme();
   const styles = createStyles(theme);
-  const [autoTheme, setAutoTheme] = useState(false);
 
   const themeOptions = [
     {
@@ -47,28 +46,51 @@ const ThemeSettingsScreen = ({ navigation }) => {
         text: '#FFFFFF',
         primary: '#64B5F6'
       }
+    },
+    {
+      id: 'auto-time',
+      name: 'Automatico - Orario',
+      description: 'Cambia in base all\'orario: scuro 19-07, chiaro 07-19',
+      icon: 'clock-outline',
+      colors: ['#FFF3E0', '#E1F5FE', '#FF9800'],
+      preview: {
+        background: '#FFF3E0',
+        surface: '#E1F5FE',
+        text: '#212121',
+        primary: '#FF9800'
+      }
+    },
+    {
+      id: 'auto-system',
+      name: 'Automatico - Sistema',
+      description: 'Segue le impostazioni di sistema del dispositivo',
+      icon: 'cellphone-cog',
+      colors: ['#E8F5E8', '#F3E5F5', '#4CAF50'],
+      preview: {
+        background: '#E8F5E8',
+        surface: '#F3E5F5',
+        text: '#212121',
+        primary: '#4CAF50'
+      }
     }
   ];
 
   const handleThemeChange = (themeId) => {
-    setTheme(themeId);
-    // Mostra feedback
+    saveThemeMode(themeId);
+    
+    // Mostra feedback specifico per ogni modalità
+    const messages = {
+      'light': '☀️ Tema chiaro applicato!',
+      'dark': '� Tema scuro applicato!',
+      'auto-time': '🕐 Tema automatico orario attivato!\nScuro: 19:00-07:00 | Chiaro: 07:00-19:00',
+      'auto-system': '📱 Tema automatico sistema attivato!\nSeguirà le impostazioni del dispositivo'
+    };
+    
     Alert.alert(
-      '🎨 Tema Cambiato',
-      `Tema ${themeId === 'dark' ? 'scuro' : 'chiaro'} applicato con successo!`,
-      [{ text: 'OK' }]
+      '🎨 Tema Impostato',
+      messages[themeId] || 'Tema applicato con successo!',
+      [{ text: 'Perfetto!' }]
     );
-  };
-
-  const handleAutoThemeToggle = (value) => {
-    setAutoTheme(value);
-    if (value) {
-      Alert.alert(
-        '🌓 Tema Automatico',
-        'Funzionalità in sviluppo. Il tema cambierà automaticamente in base all\'orario.',
-        [{ text: 'OK' }]
-      );
-    }
   };
 
   const ThemePreviewCard = ({ themeOption, isSelected }) => (
@@ -197,37 +219,64 @@ const ThemeSettingsScreen = ({ navigation }) => {
               <ThemePreviewCard
                 key={themeOption.id}
                 themeOption={themeOption}
-                isSelected={isDark ? themeOption.id === 'dark' : themeOption.id === 'light'}
+                isSelected={themeMode === themeOption.id}
               />
             ))}
           </View>
         </View>
 
-        {/* Opzioni avanzate */}
+        {/* Stato Corrente */}
         <View style={[styles.sectionCard, { backgroundColor: theme.colors.card }]}>
           <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>
-            Opzioni Avanzate
+            Stato Corrente
           </Text>
           
-          <View style={styles.optionRow}>
-            <View style={styles.optionInfo}>
-              <MaterialCommunityIcons name="clock-outline" size={24} color={theme.colors.textSecondary} />
-              <View style={styles.optionText}>
-                <Text style={[styles.optionTitle, { color: theme.colors.text }]}>
-                  Tema Automatico
-                </Text>
-                <Text style={[styles.optionDescription, { color: theme.colors.textSecondary }]}>
-                  Cambia automaticamente in base all'orario (Prossimamente)
+          <View style={styles.statusContainer}>
+            <View style={styles.statusRow}>
+              <MaterialCommunityIcons 
+                name={isDark ? "weather-night" : "weather-sunny"} 
+                size={20} 
+                color={theme.colors.primary} 
+              />
+              <Text style={[styles.statusText, { color: theme.colors.text }]}>
+                Tema attivo: {isDark ? 'Scuro 🌙' : 'Chiaro ☀️'}
+              </Text>
+            </View>
+            
+            <View style={styles.statusRow}>
+              <MaterialCommunityIcons 
+                name="cog-outline" 
+                size={20} 
+                color={theme.colors.textSecondary} 
+              />
+              <Text style={[styles.statusText, { color: theme.colors.textSecondary }]}>
+                Modalità: {(() => {
+                  switch(themeMode) {
+                    case 'light': return 'Chiaro fisso';
+                    case 'dark': return 'Scuro fisso';
+                    case 'auto-time': return 'Automatico orario';
+                    case 'auto-system': return 'Automatico sistema';
+                    default: return 'Sconosciuta';
+                  }
+                })()}
+              </Text>
+            </View>
+            
+            {(themeMode === 'auto-time' || themeMode === 'auto-system') && (
+              <View style={styles.statusRow}>
+                <MaterialCommunityIcons 
+                  name="clock-outline" 
+                  size={20} 
+                  color={theme.colors.primary} 
+                />
+                <Text style={[styles.statusText, { color: theme.colors.text }]}>
+                  {themeMode === 'auto-time' 
+                    ? `Ora corrente: ${new Date().getHours()}:${String(new Date().getMinutes()).padStart(2, '0')}`
+                    : 'Segue impostazioni dispositivo'
+                  }
                 </Text>
               </View>
-            </View>
-            <Switch
-              value={autoTheme}
-              onValueChange={handleAutoThemeToggle}
-              trackColor={{ false: '#E0E0E0', true: '#81C784' }}
-              thumbColor={autoTheme ? '#4CAF50' : '#f4f3f4'}
-              disabled={true}
-            />
+            )}
           </View>
 
           <TouchableOpacity 
@@ -240,7 +289,7 @@ const ThemeSettingsScreen = ({ navigation }) => {
                   { text: 'Annulla', style: 'cancel' },
                   { 
                     text: 'Ripristina', 
-                    onPress: () => setTheme('light'),
+                    onPress: () => saveThemeMode('light'),
                     style: 'destructive'
                   }
                 ]
@@ -420,6 +469,19 @@ const createStyles = (theme) => StyleSheet.create({
   optionDescription: {
     fontSize: 12,
     lineHeight: 16,
+  },
+  statusContainer: {
+    marginVertical: 8,
+  },
+  statusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  statusText: {
+    fontSize: 14,
+    marginLeft: 12,
+    flex: 1,
   },
   resetButton: {
     flexDirection: 'row',

@@ -1,6 +1,6 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { StatusBar } from 'react-native';
+import { StatusBar, Appearance } from 'react-native';
 
 // Definizione dei temi
 export const lightTheme = {
@@ -123,8 +123,25 @@ const ThemeContext = createContext({
 export const useTheme = () => {
   const context = useContext(ThemeContext);
   if (!context) {
-    throw new Error('useTheme deve essere usato all\'interno di ThemeProvider');
+    // Fallback di emergenza: ritorna un tema di default
+    console.warn('useTheme usato fuori da ThemeProvider, usando tema di default');
+    return {
+      theme: lightTheme,
+      isDark: false,
+      toggleTheme: () => {},
+      setTheme: () => {},
+      isLoading: false
+    };
   }
+  
+  // Assicurati che theme esista sempre
+  if (!context.theme) {
+    return {
+      ...context,
+      theme: lightTheme
+    };
+  }
+  
   return context;
 };
 
@@ -132,6 +149,8 @@ export const useTheme = () => {
 export const ThemeProvider = ({ children }) => {
   const [isDark, setIsDark] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [autoTheme, setAutoTheme] = useState(false);
+  const [themeMode, setThemeMode] = useState('light'); // 'light', 'dark', 'auto-time', 'auto-system'
 
   // Carica il tema salvato all'avvio
   useEffect(() => {
@@ -142,15 +161,91 @@ export const ThemeProvider = ({ children }) => {
   useEffect(() => {
     const currentTheme = isDark ? darkTheme : lightTheme;
     StatusBar.setBarStyle(currentTheme.colors.statusBarStyle);
-    StatusBar.setBackgroundColor(currentTheme.colors.statusBarBackground, true);
+    // StatusBar.setBackgroundColor rimosso per compatibilità edge-to-edge
   }, [isDark]);
+
+  // Funzione per determinare se è ora del tema scuro (basato su orario)
+  const shouldBeDarkByTime = () => {
+    const hour = new Date().getHours();
+    // Tema scuro dalle 19:00 alle 07:00
+    return hour >= 19 || hour < 7;
+  };
+
+  // Funzione per determinare il tema basato sulla modalità
+  const shouldBeDark = useCallback(() => {
+    switch (themeMode) {
+      case 'dark':
+        return true;
+      case 'light':
+        return false;
+      case 'auto-time':
+        return shouldBeDarkByTime();
+      case 'auto-system':
+        return Appearance.getColorScheme() === 'dark';
+      default:
+        return false;
+    }
+  }, [themeMode]);
+
+  // Aggiorna il tema automaticamente
+  const updateAutoTheme = useCallback(() => {
+    if (themeMode === 'auto-time' || themeMode === 'auto-system') {
+      const newIsDark = shouldBeDark();
+      if (newIsDark !== isDark) {
+        setIsDark(newIsDark);
+        // Non salviamo il tema quando è automatico, solo la modalità
+      }
+    }
+  }, [themeMode, isDark, shouldBeDark]);
+
+  // Listener per le modifiche delle impostazioni di sistema
+  useEffect(() => {
+    if (themeMode === 'auto-system') {
+      const subscription = Appearance.addChangeListener(({ colorScheme }) => {
+        setIsDark(colorScheme === 'dark');
+      });
+      return () => subscription?.remove();
+    }
+  }, [themeMode]);
+
+  // Timer per controllare il tema automatico basato su orario ogni minuto
+  useEffect(() => {
+    if (themeMode === 'auto-time') {
+      const interval = setInterval(updateAutoTheme, 60000); // Controlla ogni minuto
+      return () => clearInterval(interval);
+    }
+  }, [themeMode, updateAutoTheme]);
 
   const loadTheme = async () => {
     try {
-      const savedTheme = await AsyncStorage.getItem('@app_theme');
-      if (savedTheme !== null) {
-        setIsDark(savedTheme === 'dark');
-      }
+      const [savedTheme, savedThemeMode] = await Promise.all([
+        AsyncStorage.getItem('@app_theme'),
+        AsyncStorage.getItem('@app_theme_mode')
+      ]);
+      
+      const mode = savedThemeMode || 'light';
+      setThemeMode(mode);
+      
+      // Imposta autoTheme per compatibilità con l'interfaccia esistente
+      setAutoTheme(mode === 'auto-time' || mode === 'auto-system');
+      
+      // Determina il tema corrente basato sulla modalità
+      const currentShouldBeDark = (() => {
+        switch (mode) {
+          case 'dark':
+            return true;
+          case 'light':
+            return false;
+          case 'auto-time':
+            return shouldBeDarkByTime();
+          case 'auto-system':
+            return Appearance.getColorScheme() === 'dark';
+          default:
+            return savedTheme === 'dark';
+        }
+      })();
+      
+      setIsDark(currentShouldBeDark);
     } catch (error) {
       console.error('Errore nel caricamento tema:', error);
     } finally {
@@ -166,32 +261,66 @@ export const ThemeProvider = ({ children }) => {
     }
   };
 
+  const saveThemeMode = async (mode) => {
+    try {
+      await AsyncStorage.setItem('@app_theme_mode', mode);
+      setThemeMode(mode);
+      setAutoTheme(mode === 'auto-time' || mode === 'auto-system');
+      
+      // Applica immediatamente il tema corretto
+      const currentShouldBeDark = (() => {
+        switch (mode) {
+          case 'dark':
+            return true;
+          case 'light':
+            return false;
+          case 'auto-time':
+            return shouldBeDarkByTime();
+          case 'auto-system':
+            return Appearance.getColorScheme() === 'dark';
+          default:
+            return false;
+        }
+      })();
+      
+      setIsDark(currentShouldBeDark);
+      await saveTheme(currentShouldBeDark ? 'dark' : 'light');
+    } catch (error) {
+      console.error('Errore nel salvataggio modalità tema:', error);
+    }
+  };
+
+  const saveAutoTheme = async (isAuto) => {
+    // Manteniamo questa funzione per compatibilità, ma ora usiamo saveThemeMode
+    const mode = isAuto ? 'auto-time' : (isDark ? 'dark' : 'light');
+    await saveThemeMode(mode);
+  };
+
   const toggleTheme = () => {
-    const newIsDark = !isDark;
-    setIsDark(newIsDark);
-    saveTheme(newIsDark ? 'dark' : 'light');
+    const newMode = isDark ? 'light' : 'dark';
+    saveThemeMode(newMode);
   };
 
   const setTheme = (themeName) => {
-    const newIsDark = themeName === 'dark';
-    setIsDark(newIsDark);
-    saveTheme(themeName);
+    saveThemeMode(themeName);
   };
 
   const theme = isDark ? darkTheme : lightTheme;
 
-  if (isLoading) {
-    // Ritorna un tema di default durante il caricamento
-    return null;
-  }
+  // Durante il caricamento, fornisci comunque un tema di default invece di null
+  const currentTheme = isLoading ? lightTheme : theme;
 
   return (
     <ThemeContext.Provider 
       value={{ 
-        theme, 
+        theme: currentTheme, 
         isDark, 
+        autoTheme,
+        themeMode,
         toggleTheme, 
         setTheme,
+        saveAutoTheme,
+        saveThemeMode,
         isLoading 
       }}
     >
