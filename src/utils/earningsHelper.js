@@ -30,7 +30,7 @@ export const createWorkEntryFromData = (entry, calculationServiceInstance = null
   const workEntryData = entry.item || entry;
 
   // Log per debug
-  console.log('Input entry:', JSON.stringify(workEntryData, null, 2));
+  // console.log('Input entry:', JSON.stringify(workEntryData, null, 2));
   
   // Crea workEntry con i valori corretti
   const workEntry = {
@@ -45,28 +45,92 @@ export const createWorkEntryFromData = (entry, calculationServiceInstance = null
     workEnd2: workEntryData.workEnd2 || workEntryData.work_end_2 || '',
     departureReturn: workEntryData.departureReturn || workEntryData.departure_return || '',
     arrivalCompany: workEntryData.arrivalCompany || workEntryData.arrival_company || '',
-    // Parse interventi se è una stringa JSON
+    // Parse interventi se è una stringa JSON con gestione errori migliorata
     interventi: (() => {
       if (typeof workEntryData.interventi === 'string') {
         try {
-          return JSON.parse(workEntryData.interventi);
+          // 🚨 FIX PARSING: Pulizia dati corrotti prima del parsing
+          let cleanData = workEntryData.interventi.trim();
+          
+          // Se la stringa non inizia con [ o è vuota, restituisci array vuoto
+          if (!cleanData || (!cleanData.startsWith('[') && !cleanData.startsWith('{'))) {
+            console.warn('🚨 PARSING: Dati interventi non validi:', cleanData);
+            return [];
+          }
+          
+          const parsed = JSON.parse(cleanData);
+          return Array.isArray(parsed) ? parsed : [];
         } catch (error) {
-          console.warn('Errore parsing interventi:', error);
-          return [];
+          console.warn('🚨 PARSING: Errore parsing interventi:', error);
+          console.warn('🚨 PARSING: Dati originali:', workEntryData.interventi);
+          
+          // Tentativo di riparazione automatica per formati corrotti
+          try {
+            console.warn('🚨 PARSING: Tentativo riparazione automatica...');
+            
+            let cleaned = String(workEntryData.interventi)
+              .replace(/[\u0000-\u001F\u007F-\u009F]/g, '') // Rimuovi caratteri di controllo
+              .replace(/\n/g, ' ')
+              .replace(/\r/g, ' ')
+              .replace(/\t/g, ' ')
+              .replace(/\s+/g, ' ')
+              .trim();
+            
+            // Gestione formato specifico: [{departure_company=19:25, arrival_site=22:25...}]
+            if (cleaned.includes('=') && cleaned.includes('{') && cleaned.includes('}')) {
+              console.warn('🔧 PARSING: Rilevato formato oggetto, tentativo conversione...');
+              
+              // Converto il formato = in formato JSON
+              let jsonString = cleaned
+                .replace(/\{([^}]+)\}/g, (match, content) => {
+                  // Processa il contenuto dell'oggetto
+                  let pairs = content.split(',').map(pair => {
+                    let [key, value] = pair.split('=');
+                    if (key && value !== undefined) {
+                      return `"${key.trim()}":"${value.trim()}"`;
+                    } else if (key) {
+                      return `"${key.trim()}":""`;
+                    }
+                    return '';
+                  }).filter(pair => pair);
+                  
+                  return `{${pairs.join(',')}}`;
+                });
+              
+              console.warn('🔧 PARSING: JSON convertito:', jsonString);
+              const repaired = JSON.parse(jsonString);
+              console.log('✅ PARSING: Conversione formato oggetto riuscita');
+              return Array.isArray(repaired) ? repaired : [repaired];
+            }
+            
+            // Se non è il formato oggetto, prova pulizia standard
+            if (cleaned.startsWith('[') || cleaned.startsWith('{')) {
+              const repaired = JSON.parse(cleaned);
+              console.log('✅ PARSING: Riparazione automatica riuscita');
+              return Array.isArray(repaired) ? repaired : [];
+            }
+            
+            console.warn('🚨 PARSING: Formato non riconosciuto, ritorno array vuoto');
+            return [];
+            
+          } catch (secondError) {
+            console.warn('🚨 PARSING: Anche la riparazione automatica è fallita:', secondError.message);
+            return [];
+          }
         }
       }
-      return workEntryData.interventi || [];
+      return Array.isArray(workEntryData.interventi) ? workEntryData.interventi : [];
     })(),
     // 🚀 MULTI-TURNO: Parse viaggi se è una stringa JSON
     viaggi: (() => {
       if (typeof workEntryData.viaggi === 'string') {
         try {
           const parsed = JSON.parse(workEntryData.viaggi);
-          console.log(`🔥 EARNINGSHELPER: Parsed viaggi per entry ${workEntryData.id}:`, {
-            viaggiRaw: workEntryData.viaggi,
-            viaggiParsed: parsed,
-            viaggiCount: parsed.length
-          });
+          // console.log(`🔥 EARNINGSHELPER: Parsed viaggi per entry ${workEntryData.id}:`, {
+          //   viaggiRaw: workEntryData.viaggi,
+          //   viaggiParsed: parsed,
+          //   viaggiCount: parsed.length
+          // });
           return parsed;
         } catch (error) {
           console.warn('🔥 EARNINGSHELPER: Errore parsing viaggi:', error);
@@ -93,7 +157,7 @@ export const createWorkEntryFromData = (entry, calculationServiceInstance = null
   };
 
   // Log per debug risultato finale
-  console.log('Created workEntry:', JSON.stringify(workEntry, null, 2));
+  // console.log('Created workEntry:', JSON.stringify(workEntry, null, 2));
   
   return workEntry;
 };

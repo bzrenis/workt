@@ -9,9 +9,9 @@ import {
   Alert,
   Platform,
   Switch,
-  StatusBar,
   Dimensions
 } from 'react-native';
+import { StatusBar } from 'expo-status-bar';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { Picker } from '@react-native-picker/picker';
@@ -23,37 +23,37 @@ import DatabaseService from '../services/DatabaseService';
 import { useCalculationService } from '../hooks';
 import { createWorkEntryFromData } from '../utils/earningsHelper';
 import HolidayService from '../services/HolidayService';
-import NotificationService from '../services/NotificationService';
+import NotificationService from '../services/FixedNotificationService';
 
 const { width } = Dimensions.get('window');
 
 // Componenti moderni per card e sezioni
-const ModernCard = ({ children, style }) => (
+const ModernCard = ({ children, style, styles }) => (
   <View style={[styles.modernCard, style]}>
     {children}
   </View>
 );
 
-const SectionHeader = ({ title, icon, iconColor = '#666', onPress, expandable = false, expanded = false }) => (
+const SectionHeader = ({ title, icon, iconColor, onPress, expandable = false, expanded = false, styles }) => (
   <TouchableOpacity
     style={styles.sectionHeader}
     onPress={onPress}
     activeOpacity={expandable ? 0.7 : 1}
     disabled={!expandable}
   >
-    <MaterialCommunityIcons name={icon} size={20} color={iconColor} />
+    <MaterialCommunityIcons name={icon} size={20} color={iconColor || styles.iconSecondary.color} />
     <Text style={styles.sectionTitle}>{title}</Text>
     {expandable && (
       <MaterialCommunityIcons 
         name={expanded ? 'chevron-up' : 'chevron-down'} 
         size={20} 
-        color="#666" 
+        color={styles.iconSecondary.color} 
       />
     )}
   </TouchableOpacity>
 );
 
-const InputRow = ({ label, children, required = false }) => (
+const InputRow = ({ label, children, required = false, styles }) => (
   <View style={styles.inputRow}>
     <Text style={styles.inputLabel}>
       {label}
@@ -63,7 +63,7 @@ const InputRow = ({ label, children, required = false }) => (
   </View>
 );
 
-const ModernSwitch = ({ label, value, onValueChange, description }) => (
+const ModernSwitch = ({ label, value, onValueChange, description, styles }) => (
   <View style={styles.switchRow}>
     <View style={styles.switchContent}>
       <Text style={styles.switchLabel}>{label}</Text>
@@ -72,13 +72,13 @@ const ModernSwitch = ({ label, value, onValueChange, description }) => (
     <Switch
       value={value}
       onValueChange={onValueChange}
-      trackColor={{ false: '#E0E0E0', true: '#C8E6C9' }}
-      thumbColor={value ? '#4CAF50' : '#f4f3f4'}
+      trackColor={{ false: styles.switchTrack.backgroundColor, true: styles.switchTrackActive.backgroundColor }}
+      thumbColor={value ? styles.switchThumbActive.backgroundColor : styles.switchThumb.backgroundColor}
     />
   </View>
 );
 
-const ModernButton = ({ onPress, title, variant = 'primary', icon, disabled = false, style }) => {
+const ModernButton = ({ onPress, title, variant = 'primary', icon, disabled = false, style, styles }) => {
   const buttonStyle = [
     styles.modernButton,
     variant === 'secondary' && styles.secondaryButton,
@@ -107,39 +107,84 @@ const ModernButton = ({ onPress, title, variant = 'primary', icon, disabled = fa
   );
 };
 
-const InfoBadge = ({ label, value, color = '#4CAF50', backgroundColor = '#E8F5E9' }) => (
-  <View style={[styles.infoBadge, { backgroundColor }]}>
-    <Text style={[styles.infoBadgeLabel, { color }]}>{label}</Text>
-    {value && <Text style={[styles.infoBadgeValue, { color }]}>{value}</Text>}
+const InfoBadge = ({ label, value, color, backgroundColor, styles }) => (
+  <View style={[styles.infoBadge, { backgroundColor: backgroundColor || styles.infoBadgeDefault.backgroundColor }]}>
+    <Text style={[styles.infoBadgeLabel, { color: color || styles.infoBadgeDefault.color }]}>{label}</Text>
+    {value && <Text style={[styles.infoBadgeValue, { color: color || styles.infoBadgeDefault.color }]}>{value}</Text>}
   </View>
 );
 
-const TimeFieldModern = ({ label, value, icon, onPress, onClear }) => (
-  <TouchableOpacity style={styles.modernTimeField} onPress={onPress}>
-    <View style={styles.timeFieldHeader}>
-      <MaterialCommunityIcons name={icon} size={16} color="#666" />
-      <Text style={styles.timeFieldLabel}>{label}</Text>
-    </View>
-    <View style={styles.timeFieldContent}>
-      <Text style={styles.timeFieldValue}>{value || '--:--'}</Text>
-      {value && (
-        <TouchableOpacity
-          style={styles.clearTimeButton}
-          onPress={(e) => {
-            e.stopPropagation();
-            onClear();
-          }}
-          hitSlop={{ top: 10, right: 10, bottom: 10, left: 10 }}
-        >
-          <MaterialCommunityIcons name="close-circle" size={18} color="#f44336" />
-        </TouchableOpacity>
-      )}
-    </View>
-  </TouchableOpacity>
-);
+const TimeFieldModern = ({ label, value, icon, onPress, onClear, styles }) => {
+  // Stili di fallback se styles non è definito
+  const fallbackStyles = {
+    modernTimeField: {
+      flex: 1,
+      minWidth: '45%',
+      backgroundColor: 'white',
+      borderRadius: 8,
+      padding: 10,
+      borderWidth: 1,
+      borderColor: '#e0e0e0',
+    },
+    timeFieldHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: 4,
+      justifyContent: 'center',
+    },
+    timeFieldLabel: {
+      fontSize: 12,
+      color: '#666',
+      marginLeft: 6,
+      flex: 1,
+      textAlign: 'center',
+    },
+    timeFieldContent: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    timeFieldValue: {
+      fontSize: 16,
+      color: '#333',
+      fontWeight: '500',
+      textAlign: 'center',
+      minWidth: 50,
+    },
+    clearTimeButton: {
+      marginLeft: 8,
+    },
+  };
+
+  const currentStyles = styles || fallbackStyles;
+  
+  return (
+    <TouchableOpacity style={currentStyles.modernTimeField} onPress={onPress}>
+      <View style={currentStyles.timeFieldHeader}>
+        <MaterialCommunityIcons name={icon} size={16} color={styles?.iconSecondary?.color || '#666'} />
+        <Text style={currentStyles.timeFieldLabel}>{label}</Text>
+      </View>
+      <View style={currentStyles.timeFieldContent}>
+        <Text style={currentStyles.timeFieldValue}>{value || '--:--'}</Text>
+        {value && (
+          <TouchableOpacity
+            style={currentStyles.clearTimeButton}
+            onPress={(e) => {
+              e.stopPropagation();
+              onClear();
+            }}
+            hitSlop={{ top: 10, right: 10, bottom: 10, left: 10 }}
+          >
+            <MaterialCommunityIcons name="close-circle" size={18} color={styles?.iconError?.color || '#f44336'} />
+          </TouchableOpacity>
+        )}
+      </View>
+    </TouchableOpacity>
+  );
+};
 
 // Earnings Summary Component
-const EarningsSummary = ({ form, settings, isDateInStandbyCalendar, isStandbyCalendarInitialized, reperibilityManualOverride, dayType }) => {
+const EarningsSummary = ({ form, settings, isDateInStandbyCalendar, isStandbyCalendarInitialized, reperibilityManualOverride, dayType, styles }) => {
   const [breakdown, setBreakdown] = useState(null);
   const calculationService = useCalculationService();
   
@@ -198,7 +243,7 @@ const EarningsSummary = ({ form, settings, isDateInStandbyCalendar, isStandbyCal
       completamentoGiornata: form.completamentoGiornata || 'nessuno', // Modalità di completamento giornata
       // Nuovi campi per gestione giorni fissi
       isFixedDay: isFixedDay,
-      fixedEarnings: form.fixedEarnings || (isFixedDay ? (settings?.contract?.dailyRate || 107.69) : 0),
+      fixedEarnings: form.fixedEarnings || (isFixedDay ? (settings?.contract?.dailyRate || 109.19) : 0),
       dayType: form.dayType || dayType
     };
   }, [form, dayType]);
@@ -245,7 +290,9 @@ const EarningsSummary = ({ form, settings, isDateInStandbyCalendar, isStandbyCal
       mealAllowances: {
         lunch: { voucherAmount: 5.29 },
         dinner: { voucherAmount: 5.29 }
-      }
+      },
+      // 🔥 FORZA refresh per impostazioni giorni speciali
+      specialDayTravelSettings: settings?.specialDayTravelSettings || null
     };
     
     // Merge settings (safe)
@@ -255,7 +302,9 @@ const EarningsSummary = ({ form, settings, isDateInStandbyCalendar, isStandbyCal
       contract: { ...defaultSettings.contract, ...(settings?.contract || {}) },
       standbySettings: { ...defaultSettings.standbySettings, ...(settings?.standbySettings || {}) },
       mealAllowances: { ...defaultSettings.mealAllowances, ...(settings?.mealAllowances || {}) },
-      travelHoursSetting: settings?.travelHoursSetting || 'MULTI_SHIFT_OPTIMIZED' // Modalità viaggio predefinita
+      travelHoursSetting: settings?.travelHoursSetting || 'MULTI_SHIFT_OPTIMIZED', // Modalità viaggio predefinita
+      // 🔥 INCLUDI esplicitamente le impostazioni giorni speciali
+      specialDayTravelSettings: settings?.specialDayTravelSettings || defaultSettings.specialDayTravelSettings
     };
     
     // Se è un giorno di ferie/malattia/riposo, calcola la retribuzione fissa
@@ -275,27 +324,83 @@ const EarningsSummary = ({ form, settings, isDateInStandbyCalendar, isStandbyCal
         }
       });
     } else {
-      const result = calculationService.calculateEarningsBreakdown(workEntry, safeSettings);
-      setBreakdown(result);
-      // Log dettagliato per debug breakdown
-      if (workEntry.date === '2025-07-06') {
-        console.log('DEBUG breakdown 06/07/2025:', JSON.stringify(result, null, 2));
-      }
-      // Log delle impostazioni viaggio per debug
-      console.log('🚀 DEBUG MODALITÀ VIAGGIO ATTIVA:', {
-        modalitaSelezionata: safeSettings.travelHoursSetting,
-        descrizione: safeSettings.travelHoursSetting === 'AS_WORK' ? 'Come ore lavorative' :
-                     safeSettings.travelHoursSetting === 'TRAVEL_SEPARATE' ? 'Viaggio con tariffa separata' :
-                     safeSettings.travelHoursSetting === 'EXCESS_AS_TRAVEL' ? 'Eccedenza come retribuzione viaggio' :
-                     safeSettings.travelHoursSetting === 'EXCESS_AS_OVERTIME' ? 'Eccedenza come straordinario' : 
-                     safeSettings.travelHoursSetting === 'MULTI_SHIFT_OPTIMIZED' ? 'Multi-turno ottimizzato (viaggi interni = lavoro)' : 'Sconosciuta',
-        settingsOriginali: settings?.travelHoursSetting,
-        travelCompensationRate: safeSettings.travelCompensationRate,
-        workHours: calculationService.calculateWorkHours(workEntry),
-        travelHours: calculationService.calculateTravelHours(workEntry)
-      });
+      // Usa async/await per il nuovo sistema
+      const calculateAsync = async () => {
+        try {
+          // 🔍 DEBUG: Verifica che le impostazioni giorni speciali siano presenti
+          console.log('🔍 EarningsSummary - DEBUG impostazioni:', {
+            hasSettings: !!settings,
+            hasSpecialDaySettings: !!settings?.specialDayTravelSettings,
+            specialDaySettings: settings?.specialDayTravelSettings,
+            safeSpecialSettings: safeSettings?.specialDayTravelSettings,
+            workEntryDate: workEntry.date
+          });
+          
+          const result = await calculationService.calculateEarningsBreakdown(workEntry, safeSettings);
+          setBreakdown(result);
+          
+          // Log dettagliato per debug breakdown
+          if (workEntry.date === '2025-07-06') {
+            console.log('DEBUG breakdown 06/07/2025:', JSON.stringify(result, null, 2));
+          }
+          
+          // 🕐 Log del sistema multi-fascia se attivo
+          if (result.details?.hourlyRatesBreakdown) {
+            console.log('🕐 SISTEMA MULTI-FASCIA ATTIVO:', {
+              method: result.details.hourlyRatesMethod,
+              totalFasce: result.details.hourlyRatesBreakdown.length,
+              breakdown: result.details.hourlyRatesBreakdown.map(item => ({
+                fascia: item.name,
+                ore: item.hours?.toFixed(2),
+                tariffa: `€${item.hourlyRate?.toFixed(2)}`,
+                guadagno: `€${item.earnings?.toFixed(2)}`
+              }))
+            });
+          }
+          
+          // 📊 Log del sistema tariffa giornaliera se attivo
+          if (result.details?.calculationMethod === 'DAILY_RATE_WITH_SUPPLEMENTS') {
+            console.log('📊 SISTEMA TARIFFA GIORNALIERA ATTIVO:', {
+              method: result.details.calculationMethod,
+              isWeekday: result.details.dailyRateBreakdown?.isWeekday,
+              dailyRate: `€${result.details.dailyRateBreakdown?.dailyRate?.toFixed(2) || 0}`,
+              supplements: `€${result.details.dailyRateBreakdown?.supplements?.toFixed(2) || 0}`,
+              overtime: `€${result.details.dailyRateBreakdown?.totalOvertimeEarnings?.toFixed(2) || 0}`,
+              total: `€${result.details.dailyRateBreakdown?.totalEarnings?.toFixed(2) || 0}`,
+              regularBreakdown: result.details.dailyRateBreakdown?.regularBreakdown?.length || 0,
+              overtimeBreakdown: result.details.dailyRateBreakdown?.overtimeBreakdown?.length || 0
+            });
+          }
+          
+          // Log delle impostazioni viaggio per debug
+          console.log('🚀 DEBUG MODALITÀ VIAGGIO ATTIVA:', {
+            modalitaSelezionata: safeSettings.travelHoursSetting,
+            descrizione: safeSettings.travelHoursSetting === 'AS_WORK' ? 'Come ore lavorative' :
+                         safeSettings.travelHoursSetting === 'TRAVEL_SEPARATE' ? 'Viaggio con tariffa separata' :
+                         safeSettings.travelHoursSetting === 'EXCESS_AS_TRAVEL' ? 'Eccedenza come retribuzione viaggio' :
+                         safeSettings.travelHoursSetting === 'EXCESS_AS_OVERTIME' ? 'Eccedenza come straordinario' : 
+                         safeSettings.travelHoursSetting === 'MULTI_SHIFT_OPTIMIZED' ? 'Multi-turno ottimizzato (viaggi interni = lavoro)' : 'Sconosciuta',
+            settingsOriginali: settings?.travelHoursSetting,
+            travelCompensationRate: safeSettings.travelCompensationRate,
+            workHours: calculationService.calculateWorkHours(workEntry),
+            travelHours: calculationService.calculateTravelHours(workEntry)
+          });
+        } catch (error) {
+          console.error('❌ Errore calcolo breakdown:', error);
+          // Fallback per errori
+          setBreakdown({
+            ordinary: { total: 0 },
+            standby: null,
+            allowances: { travel: 0, meal: 0, standby: 0 },
+            totalEarnings: 0,
+            details: { error: error.message }
+          });
+        }
+      };
+      
+      calculateAsync();
     }
-  }, [workEntry, settings]);
+  }, [workEntry, settings, settings?.specialDayTravelSettings]);
   
   // Debug per indennità reperibilità
   useEffect(() => {
@@ -382,14 +487,15 @@ const EarningsSummary = ({ form, settings, isDateInStandbyCalendar, isStandbyCal
   
   // Return loading state if breakdown is not ready
   if (!breakdown) return (
-    <ModernCard>
+    <ModernCard styles={styles}>
       <SectionHeader 
         title="Riepilogo Guadagni" 
         icon="cash-multiple" 
-        iconColor="#4CAF50" 
+        iconColor={styles.infoText.color} 
+        styles={styles}
       />
       <View style={styles.loadingContainer}>
-        <MaterialCommunityIcons name="calculator" size={32} color="#ccc" />
+        <MaterialCommunityIcons name="calculator" size={32} color={styles.iconSecondary.color} />
         <Text style={styles.loadingText}>Calcolo in corso...</Text>
       </View>
     </ModernCard>
@@ -412,18 +518,19 @@ const EarningsSummary = ({ form, settings, isDateInStandbyCalendar, isStandbyCal
      breakdown?.allowances?.standby > 0);
   
   return (
-    <ModernCard style={styles.cardSpacing}>
+    <ModernCard style={styles.cardSpacing} styles={styles}>
       <SectionHeader 
         title="Riepilogo Guadagni" 
         icon="cash-multiple" 
-        iconColor="#4CAF50" 
+        iconColor={styles.infoText.color} 
+        styles={styles}
       />
       
       {/* Sezione speciale per giorni di ferie/malattia/riposo */}
       {breakdown?.isFixedDay && (
         <View style={styles.breakdownSection}>
           <View style={styles.sectionHeaderWithIcon}>
-            <TypeIcon type={breakdown?.dayType} size={16} color="#43a047" />
+            <TypeIcon type={breakdown?.dayType} size={16} color={styles.infoText.color} />
             <Text style={styles.breakdownSubtitle}>
               {breakdown?.dayType === 'ferie' ? 'Giornata di Ferie' :
                breakdown?.dayType === 'malattia' ? 'Giornata di Malattia' :
@@ -439,7 +546,7 @@ const EarningsSummary = ({ form, settings, isDateInStandbyCalendar, isStandbyCal
               <Text style={styles.breakdownLabel}>Retribuzione CCNL</Text>
               <Text style={styles.breakdownValue}>{formatSafeAmount(breakdown?.fixedEarnings)}</Text>
             </View>
-            <Text style={styles.rateCalc}>
+            <Text style={styles.breakdownDetail}>
               Retribuzione giornaliera secondo contratto CCNL Metalmeccanico PMI Level 5
             </Text>
             <Text style={styles.breakdownDetail}>
@@ -461,13 +568,334 @@ const EarningsSummary = ({ form, settings, isDateInStandbyCalendar, isStandbyCal
       {!breakdown?.isFixedDay && hasOrdinaryHours && (
         <View style={styles.breakdownSection}>
           <View style={styles.sectionHeaderWithIcon}>
-            <MaterialCommunityIcons name="briefcase-clock" size={16} color="#2196F3" />
+            <MaterialCommunityIcons name="briefcase-clock" size={16} color={styles.infoText.color} />
             <Text style={styles.breakdownSubtitle}>Attività Ordinarie</Text>
           </View>
 
-          {/* Giornaliero/Ordinario - Prime 8 ore (solo giorni feriali) */}
-          {(!breakdown?.details?.isSaturday && !breakdown?.details?.isSunday && !breakdown?.details?.isHoliday) &&
-            (breakdown?.ordinary?.hours?.lavoro_giornaliera > 0 || breakdown?.ordinary?.hours?.viaggio_giornaliera > 0) && (
+          {/* 🕐 NUOVO: Breakdown fasce orarie se sistema PURE_HOURLY_WITH_MULTIPLIERS attivo */}
+          {breakdown?.details?.hourlyRatesBreakdown && breakdown?.details?.hourlyRatesBreakdown.length > 0 && (
+            <View style={styles.breakdownItem}>
+              <View style={styles.breakdownRow}>
+                <Text style={[styles.breakdownLabel, { fontWeight: 'bold' }]}>
+                  🕐 Sistema Multi-Fascia Attivo
+                </Text>
+                <Text style={styles.breakdownValue}>
+                  {breakdown?.details?.hourlyRatesMethod === 'hourly_rates_service' ? 'CCNL' : 'Legacy'}
+                </Text>
+              </View>
+              <Text style={styles.breakdownDetail}>
+                Calcolo automatico basato su fasce orarie personalizzate secondo CCNL
+              </Text>
+
+              {/* Prime 8 ore cronologiche per sistema multi-fascia */}
+              <View style={[styles.breakdownItem, { marginLeft: 10, marginTop: 8, backgroundColor: '#f8f9fa', padding: 8, borderRadius: 4 }]}>
+                <View style={styles.breakdownRow}>
+                  <Text style={[styles.breakdownLabel, { fontWeight: 'bold' }]}>Prime 8 ore cronologiche</Text>
+                  <Text style={[styles.breakdownValue, { color: '#1976d2' }]}>
+                    {formatSafeHours(Math.min(8, (breakdown.ordinary?.hours?.lavoro_giornaliera || 0) + (breakdown.ordinary?.hours?.viaggio_giornaliera || 0)))}
+                  </Text>
+                </View>
+                <Text style={styles.breakdownDetail}>
+                  {(() => {
+                    // Usa sempre il fallback semplice per chiarezza
+                    let details = [];
+                    if (breakdown.ordinary?.hours?.lavoro_giornaliera > 0) {
+                      details.push(`Lavoro ${formatSafeHours(breakdown.ordinary.hours.lavoro_giornaliera)}`);
+                    }
+                    if (breakdown.ordinary?.hours?.viaggio_giornaliera > 0) {
+                      details.push(`Viaggio ${formatSafeHours(breakdown.ordinary.hours.viaggio_giornaliera)}`);
+                    }
+                    return details.length > 0 ? details.join(' + ') : 'Prime 8 ore lavorative';
+                  })()}
+                </Text>
+              </View>
+              
+              {/* Dettaglio fasce orarie */}
+              {breakdown.details.hourlyRatesBreakdown.map((fascia, index) => (
+                <View key={index} style={[styles.breakdownItem, { marginLeft: 10, marginTop: 8 }]}>
+                  <View style={styles.breakdownRow}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+                      <View 
+                        style={{
+                          width: 12,
+                          height: 12,
+                          borderRadius: 6,
+                          backgroundColor: fascia.color || '#2196F3',
+                          marginRight: 8
+                        }}
+                      />
+                      <Text style={styles.breakdownLabel}>
+                        {fascia.name} {fascia.periodLabel ? `(${fascia.periodLabel})` : ''}
+                      </Text>
+                    </View>
+                    <Text style={styles.breakdownValue}>
+                      {formatSafeHours(fascia.hours)}
+                    </Text>
+                  </View>
+                  <Text style={styles.breakdownDetail}>
+                    €{fascia.hourlyRate?.toFixed(2).replace('.', ',')} x {formatSafeHours(fascia.hours)} = €{fascia.earnings?.toFixed(2).replace('.', ',')}
+                    {fascia.rate !== 1.0 && ` (${Math.round((fascia.rate - 1) * 100)}% maggiorazione)`}
+                  </Text>
+                </View>
+              ))}
+              
+              <View style={[styles.breakdownRow, { marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#e0e0e0' }]}>
+                <Text style={styles.breakdownLabel}>Totale Multi-Fascia</Text>
+                <Text style={styles.breakdownTotal}>
+                  {formatSafeAmount(breakdown?.ordinary?.total || 0)}
+                </Text>
+              </View>
+            </View>
+          )}
+
+          {/* 📊 NUOVO: Breakdown tariffa giornaliera se metodo DAILY_RATE_WITH_SUPPLEMENTS attivo */}
+          {breakdown?.details?.calculationMethod === 'DAILY_RATE_WITH_SUPPLEMENTS' && breakdown?.details?.dailyRateBreakdown && (
+            <View style={styles.breakdownItem}>
+              <View style={styles.breakdownRow}>
+                <Text style={[styles.breakdownLabel, { fontWeight: 'bold' }]}>
+                  📊 Tariffa Giornaliera + Maggiorazioni CCNL
+                </Text>
+                <Text style={styles.breakdownValue}>
+                  {breakdown.details.dailyRateBreakdown.isWeekday ? 'Feriale' : 'Festivo'}
+                </Text>
+              </View>
+              <Text style={styles.breakdownDetail}>
+                {breakdown.details.dailyRateBreakdown.isWeekday ? 
+                  'Conforme CCNL: tariffa giornaliera + supplementi per fasce nelle prime 8h' :
+                  'Giorni festivi: calcolo orario con maggiorazioni speciali'
+                }
+              </Text>
+              
+              {/* Solo per giorni feriali: tariffa giornaliera base */}
+              {breakdown.details.dailyRateBreakdown.isWeekday && breakdown.details.dailyRateBreakdown.dailyRate > 0 && (
+                <View style={[styles.breakdownItem, { marginLeft: 10, marginTop: 8 }]}>
+                  <View style={styles.breakdownRow}>
+                    <Text style={styles.breakdownLabel}>Tariffa Giornaliera Base (prime 8h)</Text>
+                    <Text style={styles.breakdownValue}>
+                      €{breakdown.details.dailyRateBreakdown.dailyRate.toFixed(2).replace('.', ',')}
+                    </Text>
+                  </View>
+                  <Text style={styles.breakdownDetail}>
+                    {(() => {
+                      // Usa sempre il fallback semplice per chiarezza
+                      let details = [];
+                      if (breakdown.ordinary?.hours?.lavoro_giornaliera > 0) {
+                        details.push(`Lavoro ${formatSafeHours(breakdown.ordinary.hours.lavoro_giornaliera)}`);
+                      }
+                      if (breakdown.ordinary?.hours?.viaggio_giornaliera > 0) {
+                        details.push(`Viaggio ${formatSafeHours(breakdown.ordinary.hours.viaggio_giornaliera)}`);
+                      }
+                      return details.length > 0 ? details.join(' + ') : 'Prime 8 ore lavorative';
+                    })()}
+                  </Text>
+                </View>
+              )}
+              
+              {/* Supplementi per fasce diverse nelle prime 8h */}
+              {breakdown.details.dailyRateBreakdown.regularBreakdown && 
+               breakdown.details.dailyRateBreakdown.regularBreakdown.length > 0 && 
+               breakdown.details.dailyRateBreakdown.supplements > 0 && (
+                <>
+                  <Text style={[styles.breakdownLabel, { marginTop: 12, marginLeft: 10, fontWeight: 'bold' }]}>
+                    Supplementi Prime 8 Ore per Fascia:
+                  </Text>
+                  {breakdown.details.dailyRateBreakdown.regularBreakdown.map((regular, index) => (
+                    <View key={index} style={[styles.breakdownItem, { marginLeft: 20, marginTop: 8 }]}>
+                      <View style={styles.breakdownRow}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+                          <View 
+                            style={{
+                              width: 12,
+                              height: 12,
+                              borderRadius: 6,
+                              backgroundColor: regular.period && regular.period.includes('Notturno') ? '#9C27B0' : 
+                                             regular.period && regular.period.includes('Serale') ? '#FF9800' : '#4CAF50',
+                              marginRight: 8
+                            }}
+                          />
+                          <Text style={styles.breakdownLabel}>
+                            {regular.timeRange || regular.period || 'Periodo di lavoro'}
+                          </Text>
+                        </View>
+                        <Text style={styles.breakdownValue}>
+                          {formatSafeHours(regular.totalHours || regular.hours)}
+                        </Text>
+                      </View>
+                      
+                      {/* Nuova struttura: mostra sub-breakdown se presente */}
+                      {regular.breakdown && regular.breakdown.length > 0 ? (
+                        <View style={{ marginTop: 4 }}>
+                          {regular.breakdown.map((subItem, subIndex) => (
+                            <Text key={subIndex} style={[styles.breakdownDetail, { fontSize: 11, marginLeft: 20, marginTop: 2 }]}>
+                              {subItem.type}: {formatSafeHours(subItem.hours)} {subItem.rate > 0 ? 
+                                `(+${Math.round(subItem.rate * 100)}%) = €${subItem.amount.toFixed(2).replace('.', ',')}` :
+                                '(nessun supplemento)'
+                              }
+                            </Text>
+                          ))}
+                        </View>
+                      ) : (
+                        /* Struttura legacy */
+                        <Text style={styles.breakdownDetail}>
+                          {regular.timeRange || regular.period} • {regular.supplementAmount > 0 ? 
+                            `Supplemento: €${regular.supplementAmount.toFixed(2).replace('.', ',')} (+${Math.round(regular.supplement * 100)}%)` :
+                            'Nessun supplemento (fascia diurna)'
+                          }
+                        </Text>
+                      )}
+                    </View>
+                  ))}
+                  
+                  {/* Totale supplementi se presenti */}
+                  {breakdown.details.dailyRateBreakdown.supplements > 0 && (
+                    <View style={[styles.breakdownItem, { marginLeft: 10, marginTop: 8, backgroundColor: '#f0f8ff', padding: 8, borderRadius: 4 }]}>
+                      <View style={styles.breakdownRow}>
+                        <Text style={[styles.breakdownLabel, { fontWeight: 'bold' }]}>Totale Supplementi Prime 8h</Text>
+                        <Text style={[styles.breakdownValue, { fontWeight: 'bold', color: '#1976d2' }]}>
+                          +€{breakdown.details.dailyRateBreakdown.supplements.toFixed(2).replace('.', ',')}
+                        </Text>
+                      </View>
+                      <Text style={styles.breakdownDetail}>
+                        Supplementi aggiuntivi alle prime 8 ore lavorative
+                      </Text>
+                    </View>
+                  )}
+                </>
+              )}
+              
+              {/* Breakdown dettagliato straordinari per fascia oraria */}
+              {breakdown.details.dailyRateBreakdown.overtimeBreakdown && 
+               breakdown.details.dailyRateBreakdown.overtimeBreakdown.length > 0 && 
+               breakdown.details.dailyRateBreakdown.overtimeHours > 0 && (
+                <>
+                  <Text style={[styles.breakdownLabel, { marginTop: 12, marginLeft: 10, fontWeight: 'bold' }]}>Straordinari (oltre 8h) per Fascia:</Text>
+                  {breakdown.details.dailyRateBreakdown.overtimeBreakdown.map((overtime, index) => (
+                    <View key={index} style={[styles.breakdownItem, { marginLeft: 20, marginTop: 8 }]}> 
+                      <View style={styles.breakdownRow}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+                          <View 
+                            style={{
+                              width: 12,
+                              height: 12,
+                              borderRadius: 6,
+                              backgroundColor: overtime.period && overtime.period.includes('Notturno') ? '#9C27B0' : 
+                                             overtime.period && overtime.period.includes('Serale') ? '#FF9800' : '#4CAF50',
+                              marginRight: 8
+                            }}
+                          />
+                          <Text style={styles.breakdownLabel}>
+                            {overtime.timeRange || overtime.period || 'Periodo straordinario'}
+                          </Text>
+                        </View>
+                        <Text style={styles.breakdownValue}>
+                          {(() => {
+                            console.log('🚀 DEBUG OVERTIME PERIOD - overtime object:', overtime);
+                            console.log('🚀 DEBUG OVERTIME PERIOD - overtime.hours:', overtime.hours);
+                            const totalHours = overtime.breakdown 
+                              ? overtime.breakdown.reduce((sum, item) => sum + (item.hours || 0), 0)
+                              : overtime.hours;
+                            console.log('🚀 DEBUG OVERTIME PERIOD - calculated total:', totalHours);
+                            return formatSafeHours(totalHours);
+                          })()}
+                        </Text>
+                      </View>
+                      {/* Breakdown per fascia */}
+                      {overtime.breakdown && overtime.breakdown.length > 0 ? (
+                        overtime.breakdown.map((sub, subIdx) => (
+                          <Text key={subIdx} style={[styles.breakdownDetail, { fontSize: 11, marginLeft: 20, marginTop: 2 }]}> 
+                            {sub.type}: {formatSafeHours(sub.hours)} {sub.percent ? `${sub.percent}` : '--'}
+                            {sub.details && (sub.details.basePercent || sub.details.eveningPercent || sub.details.nightPercent) ?
+                              ` = ${sub.percent} (${[sub.details.basePercent, sub.details.eveningPercent, sub.details.nightPercent].filter(Boolean).join(' + ')})` :
+                              ` = ${sub.percent}`
+                            }
+                            {Number.isFinite(sub.amount) ? ` = €${sub.amount.toFixed(2).replace('.', ',')}` : ' = 0,00 €'}
+                          </Text>
+                        ))
+                      ) : (
+                        <Text style={styles.breakdownDetail}>
+                          {overtime.timeRange} • €{Number.isFinite(overtime.hourlyRate) ? overtime.hourlyRate.toFixed(2).replace('.', ',') : '--'} x {formatSafeHours(overtime.hours)} = {Number.isFinite(overtime.earnings) ? `€${overtime.earnings.toFixed(2).replace('.', ',')}` : '0,00 €'}
+                          {' '}(+{Number.isFinite(overtime.rate) ? Math.round((overtime.rate - 1) * 100) : '--'}% CCNL)
+                        </Text>
+                      )}
+                    </View>
+                  ))}
+                  
+                  {/* Totale straordinario nel formato standard */}
+                  {breakdown.details.dailyRateBreakdown.overtimeHours > 0 && (
+                    <View style={[styles.breakdownItem, { marginLeft: 10, marginTop: 8, backgroundColor: '#f0f8ff', padding: 8, borderRadius: 4 }]}>
+                      <View style={styles.breakdownRow}>
+                        <Text style={[styles.breakdownLabel, { fontWeight: 'bold' }]}>Totale straordinario</Text>
+                        <Text style={[styles.breakdownValue, { fontWeight: 'bold', color: '#1976d2' }]}>+€{breakdown.details.dailyRateBreakdown.totalOvertimeEarnings.toFixed(2).replace('.', ',')}</Text>
+                      </View>
+                    </View>
+                  )}
+                </>
+              )}
+              
+              {/* Straordinari semplificati se non c'è breakdown dettagliato */}
+              {/* DEBUG LOG per vedere cosa riceve il UI */}
+              {(() => {
+                console.log(`[TimeEntryForm] 🚀 UI DEBUG - breakdown.details.dailyRateBreakdown.overtimeHours:`, breakdown.details.dailyRateBreakdown.overtimeHours);
+                console.log(`[TimeEntryForm] 🚀 UI DEBUG - Full dailyRateBreakdown:`, JSON.stringify(breakdown.details.dailyRateBreakdown, null, 2));
+                return null;
+              })()}
+              {breakdown.details.dailyRateBreakdown.overtimeHours > 0 && 
+               (!breakdown.details.dailyRateBreakdown.overtimeBreakdown || breakdown.details.dailyRateBreakdown.overtimeBreakdown.length === 0) && (
+                <View style={[styles.breakdownItem, { marginLeft: 10, marginTop: 8 }]}>
+                  <View style={styles.breakdownRow}>
+                    <Text style={styles.breakdownLabel}>Straordinario CCNL</Text>
+                    <Text style={styles.breakdownValue}>
+                      {formatSafeHours(breakdown.details.dailyRateBreakdown.overtimeHours)}
+                    </Text>
+                  </View>
+                </View>
+              )}
+
+            {/* Breakdown viaggio dettagliato */}
+            {breakdown.details.dailyRateBreakdown.travelBreakdown && breakdown.details.dailyRateBreakdown.travelBreakdown.length > 0 && (
+              <>
+                <Text style={[styles.breakdownLabel, { marginTop: 12, marginLeft: 10, fontWeight: 'bold' }]}>Viaggio compensato:</Text>
+                {breakdown.details.dailyRateBreakdown.travelBreakdown.map((travel, index) => (
+                  <View key={index} style={[styles.breakdownItem, { marginLeft: 20, marginTop: 8 }]}>  
+                    <View style={styles.breakdownRow}>
+                      <Text style={styles.breakdownLabel}>{travel.type}</Text>
+                      <Text style={styles.breakdownValue}>{formatSafeHours(travel.hours)}</Text>
+                    </View>
+                    {travel.hours > 0 && (
+                      <Text style={styles.breakdownDetail}>
+                        €{(settings.contract?.hourlyRate || 16.41).toFixed(2).replace('.', ',')} × {travel.hours.toFixed(2).replace('.', ',') || '0,00'}h 
+                        {' '}× {Math.round((settings.travelCompensationRate || 1.0) * 100)}% = €{((settings.contract?.hourlyRate || 16.41) * travel.hours * (settings.travelCompensationRate || 1.0)).toFixed(2).replace('.', ',')}
+                      </Text>
+                    )}
+                  </View>
+                ))}
+                {breakdown.details.dailyRateBreakdown.travelEarnings > 0 && (
+                  <View style={[styles.breakdownItem, { marginLeft: 10, marginTop: 8, backgroundColor: '#e3f2fd', padding: 8, borderRadius: 4 }]}>  
+                    <View style={styles.breakdownRow}>
+                      <Text style={[styles.breakdownLabel, { fontWeight: 'bold' }]}>Totale Viaggio Compensato</Text>
+                      <Text style={[styles.breakdownValue, { fontWeight: 'bold', color: '#1976d2' }]}>+€{breakdown.details.dailyRateBreakdown.travelEarnings.toFixed(2).replace('.', ',')}</Text>
+                    </View>
+                  </View>
+                )}
+              </>
+            )}
+              
+              <View style={[styles.breakdownRow, { marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#e0e0e0' }]}>
+                <Text style={styles.breakdownLabel}>Totale Tariffa Giornaliera</Text>
+                <Text style={styles.breakdownTotal}>
+                  {formatSafeAmount(breakdown?.ordinary?.total || 0)}
+                </Text>
+              </View>
+            </View>
+          )}
+
+          {/* Visualizzazione standard quando nessun sistema specifico è attivo */}
+          {(!breakdown?.details?.hourlyRatesBreakdown || breakdown?.details?.hourlyRatesBreakdown.length === 0) && 
+           breakdown?.details?.calculationMethod !== 'DAILY_RATE_WITH_SUPPLEMENTS' && (
+            <>
+              {/* Giornaliero/Ordinario - Prime 8 ore (solo giorni feriali) */}
+              {(!breakdown?.details?.isSaturday && !breakdown?.details?.isSunday && !breakdown?.details?.isHoliday) &&
+                (breakdown?.ordinary?.hours?.lavoro_giornaliera > 0 || breakdown?.ordinary?.hours?.viaggio_giornaliera > 0) && (
               <View style={styles.breakdownItem}>
                 <View style={styles.breakdownRow}>
                   <Text style={styles.breakdownLabel}>Giornaliero (prime 8h)</Text>
@@ -476,23 +904,21 @@ const EarningsSummary = ({ form, settings, isDateInStandbyCalendar, isStandbyCal
                     (breakdown?.ordinary?.hours?.viaggio_giornaliera || 0)
                   )}</Text>
                 </View>
-                {breakdown?.ordinary?.earnings?.giornaliera > 0 && (
-                  <Text style={styles.rateCalc}>
-                    {(() => {
-                      const totalOrdinaryHours =
-                        (breakdown?.ordinary?.hours?.lavoro_giornaliera || 0) +
-                        (breakdown?.ordinary?.hours?.viaggio_giornaliera || 0);
-                      const standardWorkDayHours = 8;
-                      const dailyRate = settings.contract?.dailyRate || 109.19;
-                      if (totalOrdinaryHours >= standardWorkDayHours) {
-                        return `${dailyRate.toFixed(2).replace('.', ',')} € x 1 giorno = ${breakdown?.ordinary?.earnings?.giornaliera.toFixed(2).replace('.', ',')} €`;
-                      } else {
-                        const percentage = (totalOrdinaryHours / standardWorkDayHours * 100).toFixed(0);
-                        return `${dailyRate.toFixed(2).replace('.', ',')} € x ${percentage}% (${totalOrdinaryHours.toFixed(2).replace('.', ',')}h / 8h) = ${breakdown?.ordinary?.earnings?.giornaliera.toFixed(2).replace('.', ',')} €`;
-                      }
-                    })()}
-                  </Text>
-                )}
+                <Text style={styles.breakdownDetail}>
+                  {(() => {
+                    const totalOrdinaryHours =
+                      (breakdown?.ordinary?.hours?.lavoro_giornaliera || 0) +
+                      (breakdown?.ordinary?.hours?.viaggio_giornaliera || 0);
+                    const standardWorkDayHours = 8;
+                    const dailyRate = settings.contract?.dailyRate || 109.19;
+                    if (totalOrdinaryHours >= standardWorkDayHours) {
+                      return `${dailyRate.toFixed(2).replace('.', ',')} € x 1 giorno = ${breakdown?.ordinary?.earnings?.giornaliera.toFixed(2).replace('.', ',')} €`;
+                    } else {
+                      const percentage = (totalOrdinaryHours / standardWorkDayHours * 100).toFixed(0);
+                      return `${dailyRate.toFixed(2).replace('.', ',')} € x ${percentage}% (${totalOrdinaryHours.toFixed(2).replace('.', ',')}h / 8h) = ${breakdown?.ordinary?.earnings?.giornaliera.toFixed(2).replace('.', ',')} €`;
+                    }
+                  })()}
+                </Text>
                 {breakdown?.ordinary?.hours?.lavoro_giornaliera > 0 && (
                   <Text style={styles.breakdownDetail}>
                     {`- Lavoro: ${formatSafeHours(breakdown?.ordinary?.hours?.lavoro_giornaliera)}`}
@@ -517,7 +943,7 @@ const EarningsSummary = ({ form, settings, isDateInStandbyCalendar, isStandbyCal
                       <Text style={styles.breakdownLabel}>Lavoro ordinario domenica</Text>
                       <Text style={styles.breakdownValue}>{formatSafeHours((breakdown?.ordinary?.hours?.lavoro_giornaliera || 0) + (breakdown?.ordinary?.hours?.viaggio_giornaliera || 0))}</Text>
                     </View>
-                    <Text style={styles.rateCalc}>
+                    <Text style={styles.breakdownDetail}>
                       {(() => {
                         const base = settings.contract?.hourlyRate || 16.41;
                         const multiplier = settings.contract?.overtimeRates?.holiday || 1.3;
@@ -540,7 +966,7 @@ const EarningsSummary = ({ form, settings, isDateInStandbyCalendar, isStandbyCal
                       <Text style={styles.breakdownLabel}>Lavoro ordinario festivo</Text>
                       <Text style={styles.breakdownValue}>{formatSafeHours((breakdown?.ordinary?.hours?.lavoro_giornaliera || 0) + (breakdown?.ordinary?.hours?.viaggio_giornaliera || 0))}</Text>
                     </View>
-                    <Text style={styles.rateCalc}>
+                    <Text style={styles.breakdownDetail}>
                       {(() => {
                         const base = settings.contract?.hourlyRate || 16.41;
                         const multiplier = settings.contract?.overtimeRates?.holiday || 1.3;
@@ -562,7 +988,7 @@ const EarningsSummary = ({ form, settings, isDateInStandbyCalendar, isStandbyCal
                       <Text style={styles.breakdownLabel}>Lavoro ordinario sabato</Text>
                       <Text style={styles.breakdownValue}>{formatSafeHours((breakdown?.ordinary?.hours?.lavoro_giornaliera || 0) + (breakdown?.ordinary?.hours?.viaggio_giornaliera || 0))}</Text>
                     </View>
-                    <Text style={styles.rateCalc}>
+                    <Text style={styles.breakdownDetail}>
                       {(() => {
                         const base = settings.contract?.hourlyRate || 16.41;
                         const multiplier = settings.contract?.overtimeRates?.saturday || 1.25;
@@ -592,7 +1018,7 @@ const EarningsSummary = ({ form, settings, isDateInStandbyCalendar, isStandbyCal
                       <Text style={styles.breakdownValue}>{formatSafeHours(breakdown?.ordinary?.hours?.viaggio_extra)}</Text>
                     </View>
                     {(breakdown?.ordinary?.earnings?.viaggio_extra > 0) && (
-                      <Text style={styles.rateCalc}>
+                      <Text style={styles.breakdownDetail}>
                         {(() => {
                           const base = settings.contract?.hourlyRate || 16.41;
                           
@@ -648,7 +1074,7 @@ const EarningsSummary = ({ form, settings, isDateInStandbyCalendar, isStandbyCal
                 <Text style={styles.breakdownValue}>{formatSafeHours(breakdown?.ordinary?.hours?.viaggio_extra)}</Text>
               </View>
               {breakdown?.ordinary?.earnings?.viaggio_extra > 0 && breakdown?.ordinary?.hours?.viaggio_extra > 0 && (
-                <Text style={styles.rateCalc}>
+                <Text style={styles.breakdownDetail}>
                   {(() => {
                     if (settings?.travelHoursSetting === 'EXCESS_AS_OVERTIME') {
                       // Mostra come straordinario con tariffa maggiorata
@@ -672,10 +1098,14 @@ const EarningsSummary = ({ form, settings, isDateInStandbyCalendar, isStandbyCal
             <View style={styles.breakdownItem}>
               <View style={styles.breakdownRow}>
                 <Text style={styles.breakdownLabel}>Lavoro extra (oltre 8h){bonusLabel(breakdown?.details?.isSaturday, breakdown?.details?.isSunday, breakdown?.details?.isHoliday)}</Text>
-                <Text style={styles.breakdownValue}>{formatSafeHours(breakdown?.ordinary?.hours?.lavoro_extra)}</Text>
+                <Text style={styles.breakdownValue}>{(() => {
+                  console.log('🚀 UI DEBUG - breakdown.ordinary.hours.lavoro_extra:', breakdown?.ordinary?.hours?.lavoro_extra);
+                  console.log('🚀 UI DEBUG - formatSafeHours result:', formatSafeHours(breakdown?.ordinary?.hours?.lavoro_extra));
+                  return formatSafeHours(breakdown?.ordinary?.hours?.lavoro_extra);
+                })()}</Text>
               </View>
               {breakdown?.ordinary?.earnings?.lavoro_extra > 0 && breakdown?.ordinary?.hours?.lavoro_extra > 0 && (
-                <Text style={styles.rateCalc}>
+                <Text style={styles.breakdownDetail}>
                   {(() => {
                     const base = settings.contract?.hourlyRate || 16.41;
                     // Usa la maggiorazione corretta in base al giorno
@@ -703,22 +1133,45 @@ const EarningsSummary = ({ form, settings, isDateInStandbyCalendar, isStandbyCal
           {/* Nota modalità MULTI_SHIFT_OPTIMIZED */}
           {settings?.travelHoursSetting === 'MULTI_SHIFT_OPTIMIZED' && (
             <View style={styles.breakdownDetail}>
-              <Text style={{fontSize: 12, color: '#4CAF50', fontStyle: 'italic', marginTop: 4}}>
+              <Text style={[styles.infoText, {fontSize: 12, fontStyle: 'italic', marginTop: 4}]}>
                 🎯 Modalità Multi-turno Ottimizzata attiva
               </Text>
-              <Text style={{fontSize: 12, color: '#4CAF50', fontStyle: 'italic', marginTop: 2}}>
+              <Text style={[styles.infoText, {fontSize: 12, fontStyle: 'italic', marginTop: 2}]}>
                 • Viaggi tra turni considerati come ore lavorative
               </Text>
-              <Text style={{fontSize: 12, color: '#4CAF50', fontStyle: 'italic', marginTop: 2}}>
+              <Text style={[styles.infoText, {fontSize: 12, fontStyle: 'italic', marginTop: 2}]}>
                 • Solo primo viaggio (partenza azienda) e ultimo viaggio (arrivo azienda) pagati come viaggio
               </Text>
+              
+              {/* Prime 8 ore cronologiche per multi-turno */}
+              <View style={[styles.breakdownItem, { marginTop: 8, backgroundColor: '#fff3e0', padding: 8, borderRadius: 4 }]}>
+                <View style={styles.breakdownRow}>
+                  <Text style={[styles.breakdownLabel, { fontWeight: 'bold', fontSize: 12 }]}>🎯 Prime 8 ore Multi-turno</Text>
+                  <Text style={[styles.breakdownValue, { color: '#f57c00', fontSize: 12 }]}>
+                    {formatSafeHours(Math.min(8, (breakdown.ordinary?.hours?.lavoro_giornaliera || 0) + (breakdown.ordinary?.hours?.viaggio_giornaliera || 0)))}
+                  </Text>
+                </View>
+                <Text style={[styles.breakdownDetail, { fontSize: 11 }]}>
+                  {(() => {
+                    // Usa sempre il fallback semplice per chiarezza
+                    let details = [];
+                    if (breakdown.ordinary?.hours?.lavoro_giornaliera > 0) {
+                      details.push(`Lavoro ${formatSafeHours(breakdown.ordinary.hours.lavoro_giornaliera)}`);
+                    }
+                    if (breakdown.ordinary?.hours?.viaggio_giornaliera > 0) {
+                      details.push(`Viaggio ${formatSafeHours(breakdown.ordinary.hours.viaggio_giornaliera)}`);
+                    }
+                    return details.length > 0 ? details.join(' + ') : 'Prime 8 ore lavorative';
+                  })()}
+                </Text>
+              </View>
             </View>
           )}
           
           {/* Nota maggiorazione CCNL */}
           {(breakdown?.details?.isSunday || breakdown?.details?.isHoliday || breakdown?.details?.isSaturday) && (
             <View style={styles.breakdownDetail}>
-              <Text style={{fontSize: 12, color: '#1976d2', fontStyle: 'italic', marginTop: 4}}>
+              <Text style={[styles.infoText, {fontSize: 12, fontStyle: 'italic', marginTop: 4}]}>
                 {breakdown?.details?.isSunday ? 
                   `Applicata maggiorazione CCNL domenicale (+${((settings.contract?.overtimeRates?.holiday || 1.3) - 1)*100}%)` : 
                  breakdown?.details?.isHoliday ? 
@@ -727,15 +1180,17 @@ const EarningsSummary = ({ form, settings, isDateInStandbyCalendar, isStandbyCal
               </Text>
               {(breakdown?.details?.isSunday || breakdown?.details?.isHoliday) && (
                 <>
-                  <Text style={{fontSize: 12, color: '#1976d2', fontStyle: 'italic', marginTop: 2}}>
+                  <Text style={[styles.infoText, {fontSize: 12, fontStyle: 'italic', marginTop: 2}]}>
                     La diaria giornaliera non viene applicata nei giorni {breakdown?.details?.isSunday ? 'domenicali' : 'festivi'}.
                   </Text>
-                  <Text style={{fontSize: 12, color: '#1976d2', fontStyle: 'italic', marginTop: 2}}>
+                  <Text style={[styles.infoText, {fontSize: 12, fontStyle: 'italic', marginTop: 2}]}>
                     Tutte le ore sono pagate con la maggiorazione CCNL.
                   </Text>
                 </>
               )}
             </View>
+          )}
+            </>
           )}
         </View>
       )}
@@ -743,281 +1198,1023 @@ const EarningsSummary = ({ form, settings, isDateInStandbyCalendar, isStandbyCal
       {!breakdown?.isFixedDay && hasStandbyHours && (
         <View style={styles.breakdownSection}>
           <View style={styles.sectionHeaderWithIcon}>
-            <MaterialCommunityIcons name="alarm-light" size={16} color="#E91E63" />
-            <Text style={styles.breakdownSubtitle}>Interventi Reperibilità</Text>
+            <MaterialCommunityIcons name="alarm-light" size={16} color={styles.infoText.color} />
+            <Text style={styles.breakdownSubtitle}>Interventi Reperibilità per Fascia</Text>
           </View>
           
-          {/* Lavoro diurno reperibilità */}
-          {breakdown?.standby?.workHours?.ordinary > 0 && (
+          {/* Fascia Diurna */}
+          {(breakdown?.standby?.workHours?.ordinary > 0 || breakdown?.standby?.travelHours?.ordinary > 0) && (
             <View style={styles.breakdownItem}>
+              {/* Header fascia con emoji e totale ore */}
               <View style={styles.breakdownRow}>
                 <Text style={styles.breakdownLabel}>
-                  Lavoro diurno {breakdown?.standby?.workEarnings?.ordinary && breakdown?.standby?.workHours?.ordinary > 0 
-                    ? (() => {
-                        const rate = breakdown.standby.workEarnings.ordinary / breakdown.standby.workHours.ordinary;
-                        const baseRate = settings.contract?.hourlyRate || 16.41;
-                        const percentage = Math.round((rate / baseRate - 1) * 100);
-                        return percentage > 0 ? `(+${percentage}%)` : '';
-                      })()
-                    : ''
-                  }
+                  🟢 Fascia Diurna
                 </Text>
-                <Text style={styles.breakdownValue}>{formatSafeHours(breakdown?.standby?.workHours?.ordinary)}</Text>
+                <Text style={styles.breakdownValue}>
+                  {formatSafeHours((breakdown?.standby?.workHours?.ordinary || 0) + (breakdown?.standby?.travelHours?.ordinary || 0))}
+                </Text>
               </View>
-              {breakdown?.standby?.workEarnings?.ordinary > 0 && breakdown?.standby?.workHours?.ordinary > 0 && (
-                <Text style={styles.rateCalc}>
-                  {(breakdown.standby.workEarnings.ordinary / breakdown.standby.workHours.ordinary).toFixed(2).replace('.', ',')} € x {formatSafeHours(breakdown?.standby?.workHours?.ordinary)} = {breakdown?.standby?.workEarnings?.ordinary.toFixed(2).replace('.', ',')} €
-                </Text>
-              )}
-            </View>
-          )}
-          
-          {/* Lavoro serale reperibilità */}
-          {breakdown?.standby?.workHours?.evening > 0 && (
-            <View style={styles.breakdownItem}>
-              <View style={styles.breakdownRow}>
-                <Text style={styles.breakdownLabel}>
-                  Lavoro serale {breakdown?.standby?.workEarnings?.evening && breakdown?.standby?.workHours?.evening > 0 
-                    ? `(+${Math.round(((breakdown.standby.workEarnings.evening / breakdown.standby.workHours.evening) / (settings.contract?.hourlyRate || 16.41) - 1) * 100)}%)`
-                    : '(+25%)'
-                  }
-                </Text>
-                <Text style={styles.breakdownValue}>{formatSafeHours(breakdown?.standby?.workHours?.evening)}</Text>
-              </View>
-              {breakdown?.standby?.workEarnings?.evening > 0 && breakdown?.standby?.workHours?.evening > 0 && (
-                <Text style={styles.rateCalc}>
-                  {(breakdown.standby.workEarnings.evening / breakdown.standby.workHours.evening).toFixed(2).replace('.', ',')} € x {formatSafeHours(breakdown?.standby?.workHours?.evening)} = {breakdown?.standby?.workEarnings?.evening.toFixed(2).replace('.', ',')} €
-                </Text>
-              )}
-            </View>
-          )}
-          
-          {/* Lavoro notturno reperibilità */}
-          {breakdown?.standby?.workHours?.night > 0 && (
-            <View style={styles.breakdownItem}>
-              <View style={styles.breakdownRow}>
-                <Text style={styles.breakdownLabel}>
-                  Lavoro notturno {breakdown?.standby?.workEarnings?.night && breakdown?.standby?.workHours?.night > 0 
-                    ? `(+${Math.round(((breakdown.standby.workEarnings.night / breakdown.standby.workHours.night) / (settings.contract?.hourlyRate || 16.41) - 1) * 100)}%)`
-                    : '(+25%)'
-                  }
-                </Text>
-                <Text style={styles.breakdownValue}>{formatSafeHours(breakdown?.standby?.workHours?.night)}</Text>
-              </View>
-              {breakdown?.standby?.workEarnings?.night > 0 && breakdown?.standby?.workHours?.night > 0 && (
-                <Text style={styles.rateCalc}>
-                  {(breakdown.standby.workEarnings.night / breakdown.standby.workHours.night).toFixed(2).replace('.', ',')} € x {formatSafeHours(breakdown?.standby?.workHours?.night)} = {breakdown?.standby?.workEarnings?.night.toFixed(2).replace('.', ',')} €
-                </Text>
-              )}
-            </View>
-          )}
-
-          {/* Lavoro sabato reperibilità */}
-          {breakdown?.standby?.workHours?.saturday > 0 && (
-            <View style={styles.breakdownItem}>
-              <View style={styles.breakdownRow}>
-                <Text style={styles.breakdownLabel}>
-                  Lavoro sabato {breakdown?.standby?.workEarnings?.saturday && breakdown?.standby?.workHours?.saturday > 0 
-                    ? `(+${Math.round(((breakdown.standby.workEarnings.saturday / breakdown.standby.workHours.saturday) / (settings.contract?.hourlyRate || 16.41) - 1) * 100)}%)`
-                    : '(+25%)'
-                  }
-                </Text>
-                <Text style={styles.breakdownValue}>{formatSafeHours(breakdown?.standby?.workHours?.saturday)}</Text>
-              </View>
-              {breakdown?.standby?.workEarnings?.saturday > 0 && breakdown?.standby?.workHours?.saturday > 0 && (
-                <Text style={styles.rateCalc}>
-                  {(breakdown.standby.workEarnings.saturday / breakdown.standby.workHours.saturday).toFixed(2).replace('.', ',')} € x {formatSafeHours(breakdown?.standby?.workHours?.saturday)} = {breakdown?.standby?.workEarnings?.saturday.toFixed(2).replace('.', ',')} €
-                </Text>
-              )}
-            </View>
-          )}
-
-          {/* Lavoro festivo/domenica reperibilità */}
-          {breakdown?.standby?.workHours?.holiday > 0 && (
-            <View style={styles.breakdownItem}>
-              <View style={styles.breakdownRow}>
-                <Text style={styles.breakdownLabel}>
-                  Lavoro festivo {breakdown?.standby?.workEarnings?.holiday && breakdown?.standby?.workHours?.holiday > 0 
-                    ? `(+${Math.round(((breakdown.standby.workEarnings.holiday / breakdown.standby.workHours.holiday) / (settings.contract?.hourlyRate || 16.41) - 1) * 100)}%)`
-                    : '(+30%)'
-                  }
-                </Text>
-                <Text style={styles.breakdownValue}>{formatSafeHours(breakdown?.standby?.workHours?.holiday)}</Text>
-              </View>
-              {breakdown?.standby?.workEarnings?.holiday > 0 && breakdown?.standby?.workHours?.holiday > 0 && (
-                <Text style={styles.rateCalc}>
-                  {(breakdown.standby.workEarnings.holiday / breakdown.standby.workHours.holiday).toFixed(2).replace('.', ',')} € x {formatSafeHours(breakdown?.standby?.workHours?.holiday)} = {breakdown?.standby?.workEarnings?.holiday.toFixed(2).replace('.', ',')} €
-                </Text>
-              )}
-            </View>
-          )}
-          
-          {/* Viaggi reperibilità */}
-          {breakdown?.standby?.travelHours?.ordinary > 0 && (
-            <View style={styles.breakdownItem}>
-              <View style={styles.breakdownRow}>
-                <Text style={styles.breakdownLabel}>
+              
+              {/* Dettaglio Lavoro */}
+              {breakdown?.standby?.workHours?.ordinary > 0 && (
+                <Text style={styles.breakdownDetail}>
                   {(() => {
-                    if (settings?.travelHoursSetting === 'EXCESS_AS_OVERTIME') {
-                      // Verifica se le ore totali superano 8h per determinare se è straordinario
-                      const totalOrdinaryHours = (breakdown?.ordinary?.hours?.lavoro_giornaliera || 0) + 
-                                                 (breakdown?.ordinary?.hours?.viaggio_giornaliera || 0);
-                      const isOvertime = totalOrdinaryHours >= 8;
-                      return isOvertime ? 'Straordinario diurno (da viaggio reperibilità)' : 'Viaggio diurno';
-                    }
-                    return 'Viaggio diurno';
-                  })()}
-                </Text>
-                <Text style={styles.breakdownValue}>{formatSafeHours(breakdown?.standby?.travelHours?.ordinary)}</Text>
-              </View>
-              {breakdown?.standby?.travelEarnings?.ordinary > 0 && breakdown?.standby?.travelHours?.ordinary > 0 && (
-                <Text style={styles.rateCalc}>
-                  {(() => {
-                    const base = settings.contract?.hourlyRate || 16.41;
-                    if (settings?.travelHoursSetting === 'EXCESS_AS_OVERTIME') {
-                      const totalOrdinaryHours = (breakdown?.ordinary?.hours?.lavoro_giornaliera || 0) + 
-                                                 (breakdown?.ordinary?.hours?.viaggio_giornaliera || 0);
-                      const isOvertime = totalOrdinaryHours >= 8;
-                      if (isOvertime) {
-                        const overtimeRate = settings.contract?.overtimeRates?.day || 1.2;
-                        const rate = base * overtimeRate;
-                        return `${rate.toFixed(2).replace('.', ',')} € x ${formatSafeHours(breakdown?.standby?.travelHours?.ordinary)} (Straordinario +20%) = ${breakdown?.standby?.travelEarnings?.ordinary.toFixed(2).replace('.', ',')} €`;
+                    // Calcola ore corrette per la fascia diurna usando la nuova logica
+                    const calculateSegmentHoursByTimeSlot = (start, end) => {
+                      if (!start || !end) return {};
+                      
+                      const parseTime = (timeString) => {
+                        const [hours, minutes] = timeString.split(':').map(Number);
+                        return hours * 60 + minutes;
+                      };
+                      
+                      const calculateTimeDifference = (startTime, endTime) => {
+                        const start = parseTime(startTime);
+                        const end = parseTime(endTime);
+                        return end >= start ? end - start : (1440 - start) + end;
+                      };
+                      
+                      const startMinutes = parseTime(start);
+                      const duration = calculateTimeDifference(start, end);
+                      
+                      let ordinaryMinutes = 0;
+                      
+                      for (let i = 0; i < duration; i++) {
+                        const currentMinute = (startMinutes + i) % 1440;
+                        const hour = Math.floor(currentMinute / 60);
+                        
+                        // Verifica se questo minuto è nella fascia diurna (6:00-20:00)
+                        if (hour >= 6 && hour < 20) {
+                          ordinaryMinutes++;
+                        }
                       }
-                    }
-                    // Tariffa viaggio normale
-                    const rate = base * (settings.travelCompensationRate || 1.0);
-                    return `${rate.toFixed(2).replace('.', ',')} € x ${formatSafeHours(breakdown?.standby?.travelHours?.ordinary)} (Tariffa viaggio ${Math.round((settings.travelCompensationRate || 1.0) * 100)}%) = ${breakdown?.standby?.travelEarnings?.ordinary.toFixed(2).replace('.', ',')} €`;
-                  })()}
-                </Text>
-              )}
-            </View>
-          )}
-          
-          {/* Viaggio serale reperibilità */}
-          {breakdown?.standby?.travelHours?.evening > 0 && (
-            <View style={styles.breakdownItem}>
-              <View style={styles.breakdownRow}>
-                <Text style={styles.breakdownLabel}>
-                  {(() => {
-                    if (settings?.travelHoursSetting === 'EXCESS_AS_OVERTIME') {
-                      const totalOrdinaryHours = (breakdown?.ordinary?.hours?.lavoro_giornaliera || 0) + 
-                                                 (breakdown?.ordinary?.hours?.viaggio_giornaliera || 0);
-                      const isOvertime = totalOrdinaryHours >= 8;
-                      return isOvertime ? 'Straordinario serale (da viaggio reperibilità) (+25%)' : 'Viaggio serale (+25%)';
-                    }
-                    return 'Viaggio serale (+25%)';
-                  })()}
-                </Text>
-                <Text style={styles.breakdownValue}>{formatSafeHours(breakdown?.standby?.travelHours?.evening)}</Text>
-              </View>
-              {breakdown?.standby?.travelEarnings?.evening > 0 && breakdown?.standby?.travelHours?.evening > 0 && (
-                <Text style={styles.rateCalc}>
-                  {(() => {
-                    const base = settings.contract?.hourlyRate || 16.41;
-                    const nightMultiplier = settings.contract?.overtimeRates?.nightUntil22 || 1.25;
+                      
+                      return Math.round((ordinaryMinutes / 60) * 100) / 100;
+                    };
+
+                    // Funzione per calcolare gli orari effettivi nella fascia diurna
+                    const calculateTimeSlotRanges = (start, end) => {
+                      if (!start || !end) return [];
+                      
+                      const parseTime = (timeString) => {
+                        const [hours, minutes] = timeString.split(':').map(Number);
+                        return { hours, minutes, totalMinutes: hours * 60 + minutes };
+                      };
+                      
+                      const formatTime = (minutes) => {
+                        const h = Math.floor(minutes / 60);
+                        const m = minutes % 60;
+                        return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+                      };
+                      
+                      const startTime = parseTime(start);
+                      const endTime = parseTime(end);
+                      let currentMinutes = startTime.totalMinutes;
+                      const endMinutes = endTime.totalMinutes >= startTime.totalMinutes ? 
+                        endTime.totalMinutes : endTime.totalMinutes + 1440;
+                      
+                      const ranges = [];
+                      let rangeStart = null;
+                      
+                      while (currentMinutes < endMinutes) {
+                        const hour = Math.floor((currentMinutes % 1440) / 60);
+                        const inDiurno = hour >= 6 && hour < 20;
+                        
+                        if (inDiurno && rangeStart === null) {
+                          rangeStart = currentMinutes % 1440;
+                        } else if (!inDiurno && rangeStart !== null) {
+                          ranges.push(`${formatTime(rangeStart)}-${formatTime(currentMinutes % 1440)}`);
+                          rangeStart = null;
+                        }
+                        
+                        currentMinutes++;
+                      }
+                      
+                      // Chiudi l'ultimo range se necessario
+                      if (rangeStart !== null) {
+                        ranges.push(`${formatTime(rangeStart)}-${formatTime(endMinutes % 1440)}`);
+                      }
+                      
+                      return ranges;
+                    };
+
+                    // Trova gli interventi che hanno ore nella fascia diurna e calcola gli orari reali per fascia
+                    const diurnaInterventions = form.interventi?.filter(intervento => {
+                      let hasDiurnaHours = false;
+                      
+                      // Controlla primo turno lavoro
+                      if (intervento.work_start_1 && intervento.work_end_1) {
+                        const hours = calculateSegmentHoursByTimeSlot(intervento.work_start_1, intervento.work_end_1);
+                        if (hours > 0) hasDiurnaHours = true;
+                      }
+                      
+                      // Controlla secondo turno lavoro
+                      if (intervento.work_start_2 && intervento.work_end_2) {
+                        const hours = calculateSegmentHoursByTimeSlot(intervento.work_start_2, intervento.work_end_2);
+                        if (hours > 0) hasDiurnaHours = true;
+                      }
+                      
+                      return hasDiurnaHours;
+                    }).map(intervento => {
+                      // Crea una rappresentazione degli orari che cadono nella fascia diurna
+                      const segments = [];
+                      
+                      if (intervento.work_start_1 && intervento.work_end_1) {
+                        const hours = calculateSegmentHoursByTimeSlot(intervento.work_start_1, intervento.work_end_1);
+                        if (hours > 0) {
+                          const ranges = calculateTimeSlotRanges(intervento.work_start_1, intervento.work_end_1);
+                          segments.push(...ranges);
+                        }
+                      }
+                      
+                      if (intervento.work_start_2 && intervento.work_end_2) {
+                        const hours = calculateSegmentHoursByTimeSlot(intervento.work_start_2, intervento.work_end_2);
+                        if (hours > 0) {
+                          const ranges = calculateTimeSlotRanges(intervento.work_start_2, intervento.work_end_2);
+                          segments.push(...ranges);
+                        }
+                      }
+                      
+                      return segments.join(', ');
+                    }).filter(segment => segment) || [];
                     
-                    if (settings?.travelHoursSetting === 'EXCESS_AS_OVERTIME') {
-                      const totalOrdinaryHours = (breakdown?.ordinary?.hours?.lavoro_giornaliera || 0) + 
-                                                 (breakdown?.ordinary?.hours?.viaggio_giornaliera || 0);
-                      const isOvertime = totalOrdinaryHours >= 8;
-                      if (isOvertime) {
-                        const rate = base * nightMultiplier;
-                        return `${rate.toFixed(2).replace('.', ',')} € x ${formatSafeHours(breakdown?.standby?.travelHours?.evening)} (Straordinario serale +25%) = ${breakdown?.standby?.travelEarnings?.evening.toFixed(2).replace('.', ',')} €`;
+                    const orari = diurnaInterventions.length > 0 
+                      ? ` (${diurnaInterventions.join(', ')})`
+                      : '';
+                    
+                    const isOvertime = breakdown?.standby?.isOvertimeApplied;
+                    const rate = breakdown?.standby?.workEarnings?.ordinary && breakdown?.standby?.workHours?.ordinary > 0 
+                      ? breakdown.standby.workEarnings.ordinary / breakdown.standby.workHours.ordinary
+                      : (settings.contract?.hourlyRate || 16.41);
+                    const baseRate = settings.contract?.hourlyRate || 16.41;
+                    const percentage = Math.round((rate / baseRate - 1) * 100);
+                    const percentageText = percentage > 0 ? ` (+${percentage}%)` : '';
+                    
+                    const labelText = isOvertime ? `Straordinario diurno` : `Lavoro diurno`;
+                    const earnings = breakdown?.standby?.workEarnings?.ordinary || 0;
+                    
+                    return `   ${labelText}${orari}${percentageText}: ${formatSafeHours(breakdown?.standby?.workHours?.ordinary)} = €${earnings.toFixed(2).replace('.', ',')}`;
+                  })()}
+                </Text>
+              )}
+              
+              {/* Dettaglio Viaggio */}
+              {breakdown?.standby?.travelHours?.ordinary > 0 && (
+                <Text style={styles.breakdownDetail}>
+                  {(() => {
+                    // Calcola ore e orari viaggio per la fascia diurna
+                    const calculateTravelSegmentHoursByTimeSlot = (start, end) => {
+                      if (!start || !end) return {};
+                      
+                      const parseTime = (timeString) => {
+                        const [hours, minutes] = timeString.split(':').map(Number);
+                        return hours * 60 + minutes;
+                      };
+                      
+                      const calculateTimeDifference = (startTime, endTime) => {
+                        const start = parseTime(startTime);
+                        const end = parseTime(endTime);
+                        return end >= start ? end - start : (1440 - start) + end;
+                      };
+                      
+                      const startMinutes = parseTime(start);
+                      const duration = calculateTimeDifference(start, end);
+                      
+                      let ordinaryMinutes = 0;
+                      
+                      for (let i = 0; i < duration; i++) {
+                        const currentMinute = (startMinutes + i) % 1440;
+                        const hour = Math.floor(currentMinute / 60);
+                        
+                        // Verifica se questo minuto è nella fascia diurna (6:00-20:00)
+                        if (hour >= 6 && hour < 20) {
+                          ordinaryMinutes++;
+                        }
                       }
-                    }
-                    // Tariffa viaggio con maggiorazione serale
-                    const rate = base * nightMultiplier * (settings.travelCompensationRate || 1.0);
-                    return `${rate.toFixed(2).replace('.', ',')} € x ${formatSafeHours(breakdown?.standby?.travelHours?.evening)} (Viaggio serale +25%) = ${breakdown?.standby?.travelEarnings?.evening.toFixed(2).replace('.', ',')} €`;
+                      
+                      return Math.round((ordinaryMinutes / 60) * 100) / 100;
+                    };
+
+                    // Funzione per calcolare gli orari effettivi viaggio nella fascia diurna
+                    const calculateTravelTimeSlotRanges = (start, end) => {
+                      if (!start || !end) return [];
+                      
+                      const parseTime = (timeString) => {
+                        const [hours, minutes] = timeString.split(':').map(Number);
+                        return { hours, minutes, totalMinutes: hours * 60 + minutes };
+                      };
+                      
+                      const formatTime = (minutes) => {
+                        const h = Math.floor(minutes / 60);
+                        const m = minutes % 60;
+                        return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+                      };
+                      
+                      const startTime = parseTime(start);
+                      const endTime = parseTime(end);
+                      let currentMinutes = startTime.totalMinutes;
+                      const endMinutes = endTime.totalMinutes >= startTime.totalMinutes ? 
+                        endTime.totalMinutes : endTime.totalMinutes + 1440;
+                      
+                      const ranges = [];
+                      let rangeStart = null;
+                      
+                      while (currentMinutes < endMinutes) {
+                        const hour = Math.floor((currentMinutes % 1440) / 60);
+                        const inDiurno = hour >= 6 && hour < 20;
+                        
+                        if (inDiurno && rangeStart === null) {
+                          rangeStart = currentMinutes % 1440;
+                        } else if (!inDiurno && rangeStart !== null) {
+                          ranges.push(`${formatTime(rangeStart)}-${formatTime(currentMinutes % 1440)}`);
+                          rangeStart = null;
+                        }
+                        
+                        currentMinutes++;
+                      }
+                      
+                      // Chiudi l'ultimo range se necessario
+                      if (rangeStart !== null) {
+                        ranges.push(`${formatTime(rangeStart)}-${formatTime(endMinutes % 1440)}`);
+                      }
+                      
+                      return ranges;
+                    };
+
+                    // Trova gli interventi che hanno viaggi nella fascia diurna
+                    const viaggiDiurni = form.interventi?.filter(intervento => {
+                      let hasDiurnoTravel = false;
+                      
+                      // Controlla viaggio andata
+                      if (intervento.departure_company && intervento.arrival_site) {
+                        const hours = calculateTravelSegmentHoursByTimeSlot(intervento.departure_company, intervento.arrival_site);
+                        if (hours > 0) hasDiurnoTravel = true;
+                      }
+                      
+                      // Controlla viaggio ritorno
+                      if (intervento.departure_return && intervento.arrival_company) {
+                        const hours = calculateTravelSegmentHoursByTimeSlot(intervento.departure_return, intervento.arrival_company);
+                        if (hours > 0) hasDiurnoTravel = true;
+                      }
+                      
+                      return hasDiurnoTravel;
+                    }).map(intervento => {
+                      // Crea una rappresentazione degli orari viaggio che cadono nella fascia diurna
+                      const segments = [];
+                      
+                      if (intervento.departure_company && intervento.arrival_site) {
+                        const hours = calculateTravelSegmentHoursByTimeSlot(intervento.departure_company, intervento.arrival_site);
+                        if (hours > 0) {
+                          const ranges = calculateTravelTimeSlotRanges(intervento.departure_company, intervento.arrival_site);
+                          segments.push(...ranges);
+                        }
+                      }
+                      
+                      if (intervento.departure_return && intervento.arrival_company) {
+                        const hours = calculateTravelSegmentHoursByTimeSlot(intervento.departure_return, intervento.arrival_company);
+                        if (hours > 0) {
+                          const ranges = calculateTravelTimeSlotRanges(intervento.departure_return, intervento.arrival_company);
+                          segments.push(...ranges);
+                        }
+                      }
+                      
+                      return segments.join(', ');
+                    }).filter(segment => segment) || [];
+                    
+                    const orariViaggio = viaggiDiurni.length > 0 
+                      ? ` (${viaggiDiurni.join(', ')})`
+                      : '';
+                    
+                    return `   Viaggio diurno${orariViaggio}: ${formatSafeHours(breakdown?.standby?.travelHours?.ordinary)} = €${breakdown?.standby?.travelEarnings?.ordinary?.toFixed(2)?.replace('.', ',')}`;
                   })()}
                 </Text>
               )}
             </View>
           )}
           
-          {/* Viaggio notturno reperibilità */}
-          {breakdown?.standby?.travelHours?.night > 0 && (
+          {/* Fascia Serale */}
+          {(breakdown?.standby?.workHours?.evening > 0 || breakdown?.standby?.travelHours?.evening > 0) && (
             <View style={styles.breakdownItem}>
+              {/* Header fascia con emoji e totale ore */}
               <View style={styles.breakdownRow}>
                 <Text style={styles.breakdownLabel}>
-                  {(() => {
-                    if (settings?.travelHoursSetting === 'EXCESS_AS_OVERTIME') {
-                      const totalOrdinaryHours = (breakdown?.ordinary?.hours?.lavoro_giornaliera || 0) + 
-                                                 (breakdown?.ordinary?.hours?.viaggio_giornaliera || 0);
-                      const isOvertime = totalOrdinaryHours >= 8;
-                      return isOvertime ? 'Straordinario notturno (da viaggio reperibilità) (+35%)' : 'Viaggio notturno (+35%)';
-                    }
-                    return 'Viaggio notturno (+25%)';
-                  })()}
+                  🟢 Fascia Serale
                 </Text>
-                <Text style={styles.breakdownValue}>{formatSafeHours(breakdown?.standby?.travelHours?.night)}</Text>
+                <Text style={styles.breakdownValue}>
+                  {formatSafeHours((breakdown?.standby?.workHours?.evening || 0) + (breakdown?.standby?.travelHours?.evening || 0))}
+                </Text>
               </View>
-              {breakdown?.standby?.travelEarnings?.night > 0 && breakdown?.standby?.travelHours?.night > 0 && (
-                <Text style={styles.rateCalc}>
+              
+              {/* Dettaglio Lavoro */}
+              {breakdown?.standby?.workHours?.evening > 0 && (
+                <Text style={styles.breakdownDetail}>
                   {(() => {
-                    const base = settings.contract?.hourlyRate || 16.41;
-                    const nightMultiplier = settings.contract?.overtimeRates?.nightAfter22 || 1.35; // Maggiorazione notturna dopo 22:00
-                    
-                    if (settings?.travelHoursSetting === 'EXCESS_AS_OVERTIME') {
-                      const totalOrdinaryHours = (breakdown?.ordinary?.hours?.lavoro_giornaliera || 0) + 
-                                                 (breakdown?.ordinary?.hours?.viaggio_giornaliera || 0);
-                      const isOvertime = totalOrdinaryHours >= 8;
-                      if (isOvertime) {
-                        const rate = base * nightMultiplier;
-                        return `${rate.toFixed(2).replace('.', ',')} € x ${formatSafeHours(breakdown?.standby?.travelHours?.night)} (Straordinario notturno +35%) = ${breakdown?.standby?.travelEarnings?.night.toFixed(2).replace('.', ',')} €`;
+                    // Calcola ore corrette per la fascia serale usando la nuova logica
+                    const calculateSegmentHoursByTimeSlot = (start, end) => {
+                      if (!start || !end) return {};
+                      
+                      const parseTime = (timeString) => {
+                        const [hours, minutes] = timeString.split(':').map(Number);
+                        return hours * 60 + minutes;
+                      };
+                      
+                      const calculateTimeDifference = (startTime, endTime) => {
+                        const start = parseTime(startTime);
+                        const end = parseTime(endTime);
+                        return end >= start ? end - start : (1440 - start) + end;
+                      };
+                      
+                      const startMinutes = parseTime(start);
+                      const duration = calculateTimeDifference(start, end);
+                      
+                      let eveningMinutes = 0;
+                      
+                      for (let i = 0; i < duration; i++) {
+                        const currentMinute = (startMinutes + i) % 1440;
+                        const hour = Math.floor(currentMinute / 60);
+                        
+                        // Verifica se questo minuto è nella fascia serale (20:00-22:00)
+                        if (hour >= 20 && hour < 22) {
+                          eveningMinutes++;
+                        }
                       }
-                    }
-                    // Tariffa viaggio con maggiorazione notturna
-                    const rate = base * nightMultiplier * (settings.travelCompensationRate || 1.0);
-                    return `${rate.toFixed(2).replace('.', ',')} € x ${formatSafeHours(breakdown?.standby?.travelHours?.night)} (Viaggio notturno +25%) = ${breakdown?.standby?.travelEarnings?.night.toFixed(2).replace('.', ',')} €`;
+                      
+                      return Math.round((eveningMinutes / 60) * 100) / 100;
+                    };
+
+                    // Funzione per calcolare gli orari effettivi nella fascia serale
+                    const calculateTimeSlotRanges = (start, end) => {
+                      if (!start || !end) return [];
+                      
+                      const parseTime = (timeString) => {
+                        const [hours, minutes] = timeString.split(':').map(Number);
+                        return { hours, minutes, totalMinutes: hours * 60 + minutes };
+                      };
+                      
+                      const formatTime = (minutes) => {
+                        const h = Math.floor(minutes / 60);
+                        const m = minutes % 60;
+                        return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+                      };
+                      
+                      const startTime = parseTime(start);
+                      const endTime = parseTime(end);
+                      let currentMinutes = startTime.totalMinutes;
+                      const endMinutes = endTime.totalMinutes >= startTime.totalMinutes ? 
+                        endTime.totalMinutes : endTime.totalMinutes + 1440;
+                      
+                      const ranges = [];
+                      let rangeStart = null;
+                      
+                      while (currentMinutes < endMinutes) {
+                        const hour = Math.floor((currentMinutes % 1440) / 60);
+                        const inSerale = hour >= 20 && hour < 22;
+                        
+                        if (inSerale && rangeStart === null) {
+                          rangeStart = currentMinutes % 1440;
+                        } else if (!inSerale && rangeStart !== null) {
+                          ranges.push(`${formatTime(rangeStart)}-${formatTime(currentMinutes % 1440)}`);
+                          rangeStart = null;
+                        }
+                        
+                        currentMinutes++;
+                      }
+                      
+                      // Chiudi l'ultimo range se necessario
+                      if (rangeStart !== null) {
+                        ranges.push(`${formatTime(rangeStart)}-${formatTime(endMinutes % 1440)}`);
+                      }
+                      
+                      return ranges;
+                    };
+
+                    // Trova gli interventi che hanno ore nella fascia serale e calcola gli orari reali per fascia
+                    const seraleInterventions = form.interventi?.filter(intervento => {
+                      let hasSeraleHours = false;
+                      
+                      // Controlla primo turno lavoro
+                      if (intervento.work_start_1 && intervento.work_end_1) {
+                        const hours = calculateSegmentHoursByTimeSlot(intervento.work_start_1, intervento.work_end_1);
+                        if (hours > 0) hasSeraleHours = true;
+                      }
+                      
+                      // Controlla secondo turno lavoro
+                      if (intervento.work_start_2 && intervento.work_end_2) {
+                        const hours = calculateSegmentHoursByTimeSlot(intervento.work_start_2, intervento.work_end_2);
+                        if (hours > 0) hasSeraleHours = true;
+                      }
+                      
+                      return hasSeraleHours;
+                    }).map(intervento => {
+                      // Crea una rappresentazione degli orari che cadono nella fascia serale
+                      const segments = [];
+                      
+                      if (intervento.work_start_1 && intervento.work_end_1) {
+                        const hours = calculateSegmentHoursByTimeSlot(intervento.work_start_1, intervento.work_end_1);
+                        if (hours > 0) {
+                          const ranges = calculateTimeSlotRanges(intervento.work_start_1, intervento.work_end_1);
+                          segments.push(...ranges);
+                        }
+                      }
+                      
+                      if (intervento.work_start_2 && intervento.work_end_2) {
+                        const hours = calculateSegmentHoursByTimeSlot(intervento.work_start_2, intervento.work_end_2);
+                        if (hours > 0) {
+                          const ranges = calculateTimeSlotRanges(intervento.work_start_2, intervento.work_end_2);
+                          segments.push(...ranges);
+                        }
+                      }
+                      
+                      return segments.join(', ');
+                    }).filter(segment => segment) || [];
+                    
+                    const orari = seraleInterventions.length > 0 
+                      ? ` (${seraleInterventions.join(', ')})`
+                      : '';
+                    
+                    const isOvertime = breakdown?.standby?.isOvertimeApplied;
+                    const rate = breakdown?.standby?.workEarnings?.evening && breakdown?.standby?.workHours?.evening > 0 
+                      ? breakdown.standby.workEarnings.evening / breakdown.standby.workHours.evening
+                      : (settings.contract?.hourlyRate || 16.41);
+                    const baseRate = settings.contract?.hourlyRate || 16.41;
+                    const percentage = Math.round((rate / baseRate - 1) * 100);
+                    const percentageText = percentage > 0 ? ` (+${percentage}%)` : '';
+                    
+                    const labelText = isOvertime ? `Straordinario serale` : `Lavoro serale`;
+                    const earnings = breakdown?.standby?.workEarnings?.evening || 0;
+                    
+                    return `   ${labelText}${orari}${percentageText}: ${formatSafeHours(breakdown?.standby?.workHours?.evening)} = €${earnings.toFixed(2).replace('.', ',')}`;
+                  })()}
+                </Text>
+              )}
+              
+              {/* Dettaglio Viaggio */}
+              {breakdown?.standby?.travelHours?.evening > 0 && (
+                <Text style={styles.breakdownDetail}>
+                  {(() => {
+                    // Calcola ore e orari viaggio per la fascia serale
+                    const calculateTravelSegmentHoursByTimeSlot = (start, end) => {
+                      if (!start || !end) return {};
+                      
+                      const parseTime = (timeString) => {
+                        const [hours, minutes] = timeString.split(':').map(Number);
+                        return hours * 60 + minutes;
+                      };
+                      
+                      const calculateTimeDifference = (startTime, endTime) => {
+                        const start = parseTime(startTime);
+                        const end = parseTime(endTime);
+                        return end >= start ? end - start : (1440 - start) + end;
+                      };
+                      
+                      const startMinutes = parseTime(start);
+                      const duration = calculateTimeDifference(start, end);
+                      
+                      let seraleMinutes = 0;
+                      
+                      for (let i = 0; i < duration; i++) {
+                        const currentMinute = (startMinutes + i) % 1440;
+                        const hour = Math.floor(currentMinute / 60);
+                        
+                        // Verifica se questo minuto è nella fascia serale (20:00-22:00)
+                        if (hour >= 20 && hour < 22) {
+                          seraleMinutes++;
+                        }
+                      }
+                      
+                      return Math.round((seraleMinutes / 60) * 100) / 100;
+                    };
+
+                    // Funzione per calcolare gli orari effettivi viaggio nella fascia serale
+                    const calculateTravelTimeSlotRanges = (start, end) => {
+                      if (!start || !end) return [];
+                      
+                      const parseTime = (timeString) => {
+                        const [hours, minutes] = timeString.split(':').map(Number);
+                        return { hours, minutes, totalMinutes: hours * 60 + minutes };
+                      };
+                      
+                      const formatTime = (minutes) => {
+                        const h = Math.floor(minutes / 60);
+                        const m = minutes % 60;
+                        return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+                      };
+                      
+                      const startTime = parseTime(start);
+                      const endTime = parseTime(end);
+                      let currentMinutes = startTime.totalMinutes;
+                      const endMinutes = endTime.totalMinutes >= startTime.totalMinutes ? 
+                        endTime.totalMinutes : endTime.totalMinutes + 1440;
+                      
+                      const ranges = [];
+                      let rangeStart = null;
+                      
+                      while (currentMinutes < endMinutes) {
+                        const hour = Math.floor((currentMinutes % 1440) / 60);
+                        const inSerale = hour >= 20 && hour < 22;
+                        
+                        if (inSerale && rangeStart === null) {
+                          rangeStart = currentMinutes % 1440;
+                        } else if (!inSerale && rangeStart !== null) {
+                          ranges.push(`${formatTime(rangeStart)}-${formatTime(currentMinutes % 1440)}`);
+                          rangeStart = null;
+                        }
+                        
+                        currentMinutes++;
+                      }
+                      
+                      // Chiudi l'ultimo range se necessario
+                      if (rangeStart !== null) {
+                        ranges.push(`${formatTime(rangeStart)}-${formatTime(endMinutes % 1440)}`);
+                      }
+                      
+                      return ranges;
+                    };
+
+                    // Trova gli interventi che hanno viaggi nella fascia serale
+                    const viaggiSerali = form.interventi?.filter(intervento => {
+                      let hasSeraleTravel = false;
+                      
+                      // Controlla viaggio andata
+                      if (intervento.departure_company && intervento.arrival_site) {
+                        const hours = calculateTravelSegmentHoursByTimeSlot(intervento.departure_company, intervento.arrival_site);
+                        if (hours > 0) hasSeraleTravel = true;
+                      }
+                      
+                      // Controlla viaggio ritorno
+                      if (intervento.departure_return && intervento.arrival_company) {
+                        const hours = calculateTravelSegmentHoursByTimeSlot(intervento.departure_return, intervento.arrival_company);
+                        if (hours > 0) hasSeraleTravel = true;
+                      }
+                      
+                      return hasSeraleTravel;
+                    }).map(intervento => {
+                      // Crea una rappresentazione degli orari viaggio che cadono nella fascia serale
+                      const segments = [];
+                      
+                      if (intervento.departure_company && intervento.arrival_site) {
+                        const hours = calculateTravelSegmentHoursByTimeSlot(intervento.departure_company, intervento.arrival_site);
+                        if (hours > 0) {
+                          const ranges = calculateTravelTimeSlotRanges(intervento.departure_company, intervento.arrival_site);
+                          segments.push(...ranges);
+                        }
+                      }
+                      
+                      if (intervento.departure_return && intervento.arrival_company) {
+                        const hours = calculateTravelSegmentHoursByTimeSlot(intervento.departure_return, intervento.arrival_company);
+                        if (hours > 0) {
+                          const ranges = calculateTravelTimeSlotRanges(intervento.departure_return, intervento.arrival_company);
+                          segments.push(...ranges);
+                        }
+                      }
+                      
+                      return segments.join(', ');
+                    }).filter(segment => segment) || [];
+                    
+                    const orariViaggio = viaggiSerali.length > 0 
+                      ? ` (${viaggiSerali.join(', ')})`
+                      : '';
+                    
+                    return `   Viaggio serale${orariViaggio}: ${formatSafeHours(breakdown?.standby?.travelHours?.evening)} = €${breakdown?.standby?.travelEarnings?.evening?.toFixed(2)?.replace('.', ',')}`;
+                  })()}
+                </Text>
+              )}
+            </View>
+          )}
+          
+          {/* Fascia Notturna */}
+          {(breakdown?.standby?.workHours?.night > 0 || breakdown?.standby?.travelHours?.night > 0) && (
+            <View style={styles.breakdownItem}>
+              {/* Header fascia con emoji e totale ore */}
+              <View style={styles.breakdownRow}>
+                <Text style={styles.breakdownLabel}>
+                  🌙 Fascia Notturna
+                </Text>
+                <Text style={styles.breakdownValue}>
+                  {formatSafeHours((breakdown?.standby?.workHours?.night || 0) + (breakdown?.standby?.travelHours?.night || 0))}
+                </Text>
+              </View>
+              
+              {/* Dettaglio Lavoro */}
+              {breakdown?.standby?.workHours?.night > 0 && (
+                <Text style={styles.breakdownDetail}>
+                  {(() => {
+                    // Calcola ore corrette per la fascia notturna usando la nuova logica
+                    const calculateSegmentHoursByTimeSlot = (start, end) => {
+                      if (!start || !end) return {};
+                      
+                      const parseTime = (timeString) => {
+                        const [hours, minutes] = timeString.split(':').map(Number);
+                        return hours * 60 + minutes;
+                      };
+                      
+                      const calculateTimeDifference = (startTime, endTime) => {
+                        const start = parseTime(startTime);
+                        const end = parseTime(endTime);
+                        return end >= start ? end - start : (1440 - start) + end;
+                      };
+                      
+                      const startMinutes = parseTime(start);
+                      const duration = calculateTimeDifference(start, end);
+                      
+                      let nightMinutes = 0;
+                      
+                      for (let i = 0; i < duration; i++) {
+                        const currentMinute = (startMinutes + i) % 1440;
+                        const hour = Math.floor(currentMinute / 60);
+                        
+                        // Verifica se questo minuto è nella fascia notturna (22:00-06:00)
+                        if (hour >= 22 || hour < 6) {
+                          nightMinutes++;
+                        }
+                      }
+                      
+                      return Math.round((nightMinutes / 60) * 100) / 100;
+                    };
+
+                    // Funzione per calcolare gli orari effettivi nella fascia notturna
+                    const calculateTimeSlotRanges = (start, end) => {
+                      if (!start || !end) return [];
+                      
+                      const parseTime = (timeString) => {
+                        const [hours, minutes] = timeString.split(':').map(Number);
+                        return { hours, minutes, totalMinutes: hours * 60 + minutes };
+                      };
+                      
+                      const formatTime = (minutes) => {
+                        const h = Math.floor(minutes / 60);
+                        const m = minutes % 60;
+                        return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+                      };
+                      
+                      const startTime = parseTime(start);
+                      const endTime = parseTime(end);
+                      let currentMinutes = startTime.totalMinutes;
+                      const endMinutes = endTime.totalMinutes >= startTime.totalMinutes ? 
+                        endTime.totalMinutes : endTime.totalMinutes + 1440;
+                      
+                      const ranges = [];
+                      let rangeStart = null;
+                      
+                      while (currentMinutes < endMinutes) {
+                        const hour = Math.floor((currentMinutes % 1440) / 60);
+                        const inNotturno = hour >= 22 || hour < 6;
+                        
+                        if (inNotturno && rangeStart === null) {
+                          rangeStart = currentMinutes % 1440;
+                        } else if (!inNotturno && rangeStart !== null) {
+                          ranges.push(`${formatTime(rangeStart)}-${formatTime(currentMinutes % 1440)}`);
+                          rangeStart = null;
+                        }
+                        
+                        currentMinutes++;
+                      }
+                      
+                      // Chiudi l'ultimo range se necessario
+                      if (rangeStart !== null) {
+                        ranges.push(`${formatTime(rangeStart)}-${formatTime(endMinutes % 1440)}`);
+                      }
+                      
+                      return ranges;
+                    };
+
+                    // Trova gli interventi che hanno ore nella fascia notturna e calcola gli orari reali per fascia
+                    const notturnaInterventions = form.interventi?.filter(intervento => {
+                      let hasNotturnaHours = false;
+                      
+                      // Controlla primo turno lavoro
+                      if (intervento.work_start_1 && intervento.work_end_1) {
+                        const hours = calculateSegmentHoursByTimeSlot(intervento.work_start_1, intervento.work_end_1);
+                        if (hours > 0) hasNotturnaHours = true;
+                      }
+                      
+                      // Controlla secondo turno lavoro
+                      if (intervento.work_start_2 && intervento.work_end_2) {
+                        const hours = calculateSegmentHoursByTimeSlot(intervento.work_start_2, intervento.work_end_2);
+                        if (hours > 0) hasNotturnaHours = true;
+                      }
+                      
+                      return hasNotturnaHours;
+                    }).map(intervento => {
+                      // Crea una rappresentazione degli orari che cadono nella fascia notturna
+                      const segments = [];
+                      
+                      if (intervento.work_start_1 && intervento.work_end_1) {
+                        const hours = calculateSegmentHoursByTimeSlot(intervento.work_start_1, intervento.work_end_1);
+                        if (hours > 0) {
+                          const ranges = calculateTimeSlotRanges(intervento.work_start_1, intervento.work_end_1);
+                          segments.push(...ranges);
+                        }
+                      }
+                      
+                      if (intervento.work_start_2 && intervento.work_end_2) {
+                        const hours = calculateSegmentHoursByTimeSlot(intervento.work_start_2, intervento.work_end_2);
+                        if (hours > 0) {
+                          const ranges = calculateTimeSlotRanges(intervento.work_start_2, intervento.work_end_2);
+                          segments.push(...ranges);
+                        }
+                      }
+                      
+                      return segments.join(', ');
+                    }).filter(segment => segment) || [];
+                    
+                    const orari = notturnaInterventions.length > 0 
+                      ? ` (${notturnaInterventions.join(', ')})`
+                      : '';
+                    
+                    const isOvertime = breakdown?.standby?.isOvertimeApplied;
+                    const rate = breakdown?.standby?.workEarnings?.night && breakdown?.standby?.workHours?.night > 0 
+                      ? breakdown.standby.workEarnings.night / breakdown.standby.workHours.night
+                      : (settings.contract?.hourlyRate || 16.41);
+                    const baseRate = settings.contract?.hourlyRate || 16.41;
+                    const percentage = Math.round((rate / baseRate - 1) * 100);
+                    const percentageText = percentage > 0 ? ` (+${percentage}%)` : '';
+                    
+                    const labelText = isOvertime ? `Straordinario notturno` : `Lavoro notturno`;
+                    const earnings = breakdown?.standby?.workEarnings?.night || 0;
+                    
+                    return `   ${labelText}${orari}${percentageText}: ${formatSafeHours(breakdown?.standby?.workHours?.night)} = €${earnings.toFixed(2).replace('.', ',')}`;
+                  })()}
+                </Text>
+              )}
+              
+              {/* Dettaglio Viaggio */}
+              {breakdown?.standby?.travelHours?.night > 0 && (
+                <Text style={styles.breakdownDetail}>
+                  {(() => {
+                    // Calcola ore e orari viaggio per la fascia notturna
+                    const calculateTravelSegmentHoursByTimeSlot = (start, end) => {
+                      if (!start || !end) return {};
+                      
+                      const parseTime = (timeString) => {
+                        const [hours, minutes] = timeString.split(':').map(Number);
+                        return hours * 60 + minutes;
+                      };
+                      
+                      const calculateTimeDifference = (startTime, endTime) => {
+                        const start = parseTime(startTime);
+                        const end = parseTime(endTime);
+                        return end >= start ? end - start : (1440 - start) + end;
+                      };
+                      
+                      const startMinutes = parseTime(start);
+                      const duration = calculateTimeDifference(start, end);
+                      
+                      let notturnoMinutes = 0;
+                      
+                      for (let i = 0; i < duration; i++) {
+                        const currentMinute = (startMinutes + i) % 1440;
+                        const hour = Math.floor(currentMinute / 60);
+                        
+                        // Verifica se questo minuto è nella fascia notturna (22:00-06:00)
+                        if (hour >= 22 || hour < 6) {
+                          notturnoMinutes++;
+                        }
+                      }
+                      
+                      return Math.round((notturnoMinutes / 60) * 100) / 100;
+                    };
+
+                    // Funzione per calcolare gli orari effettivi viaggio nella fascia notturna
+                    const calculateTravelTimeSlotRanges = (start, end) => {
+                      if (!start || !end) return [];
+                      
+                      const parseTime = (timeString) => {
+                        const [hours, minutes] = timeString.split(':').map(Number);
+                        return { hours, minutes, totalMinutes: hours * 60 + minutes };
+                      };
+                      
+                      const formatTime = (minutes) => {
+                        const h = Math.floor(minutes / 60);
+                        const m = minutes % 60;
+                        return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+                      };
+                      
+                      const startTime = parseTime(start);
+                      const endTime = parseTime(end);
+                      let currentMinutes = startTime.totalMinutes;
+                      const endMinutes = endTime.totalMinutes >= startTime.totalMinutes ? 
+                        endTime.totalMinutes : endTime.totalMinutes + 1440;
+                      
+                      const ranges = [];
+                      let rangeStart = null;
+                      
+                      while (currentMinutes < endMinutes) {
+                        const hour = Math.floor((currentMinutes % 1440) / 60);
+                        const inNotturno = hour >= 22 || hour < 6;
+                        
+                        if (inNotturno && rangeStart === null) {
+                          rangeStart = currentMinutes % 1440;
+                        } else if (!inNotturno && rangeStart !== null) {
+                          ranges.push(`${formatTime(rangeStart)}-${formatTime(currentMinutes % 1440)}`);
+                          rangeStart = null;
+                        }
+                        
+                        currentMinutes++;
+                      }
+                      
+                      // Chiudi l'ultimo range se necessario
+                      if (rangeStart !== null) {
+                        ranges.push(`${formatTime(rangeStart)}-${formatTime(endMinutes % 1440)}`);
+                      }
+                      
+                      return ranges;
+                    };
+
+                    // Trova gli interventi che hanno viaggi nella fascia notturna
+                    const viaggiNotturni = form.interventi?.filter(intervento => {
+                      let hasNotturnoTravel = false;
+                      
+                      // Controlla viaggio andata
+                      if (intervento.departure_company && intervento.arrival_site) {
+                        const hours = calculateTravelSegmentHoursByTimeSlot(intervento.departure_company, intervento.arrival_site);
+                        if (hours > 0) hasNotturnoTravel = true;
+                      }
+                      
+                      // Controlla viaggio ritorno
+                      if (intervento.departure_return && intervento.arrival_company) {
+                        const hours = calculateTravelSegmentHoursByTimeSlot(intervento.departure_return, intervento.arrival_company);
+                        if (hours > 0) hasNotturnoTravel = true;
+                      }
+                      
+                      return hasNotturnoTravel;
+                    }).map(intervento => {
+                      // Crea una rappresentazione degli orari viaggio che cadono nella fascia notturna
+                      const segments = [];
+                      
+                      if (intervento.departure_company && intervento.arrival_site) {
+                        const hours = calculateTravelSegmentHoursByTimeSlot(intervento.departure_company, intervento.arrival_site);
+                        if (hours > 0) {
+                          const ranges = calculateTravelTimeSlotRanges(intervento.departure_company, intervento.arrival_site);
+                          segments.push(...ranges);
+                        }
+                      }
+                      
+                      if (intervento.departure_return && intervento.arrival_company) {
+                        const hours = calculateTravelSegmentHoursByTimeSlot(intervento.departure_return, intervento.arrival_company);
+                        if (hours > 0) {
+                          const ranges = calculateTravelTimeSlotRanges(intervento.departure_return, intervento.arrival_company);
+                          segments.push(...ranges);
+                        }
+                      }
+                      
+                      return segments.join(', ');
+                    }).filter(segment => segment) || [];
+                    
+                    const orariViaggio = viaggiNotturni.length > 0 
+                      ? ` (${viaggiNotturni.join(', ')})`
+                      : '';
+                    
+                    return `   Viaggio notturno${orariViaggio}: ${formatSafeHours(breakdown?.standby?.travelHours?.night)} = €${breakdown?.standby?.travelEarnings?.night?.toFixed(2)?.replace('.', ',')}`;
                   })()}
                 </Text>
               )}
             </View>
           )}
 
-          {/* Viaggio sabato reperibilità */}
-          {breakdown?.standby?.travelHours?.saturday > 0 && (
+          {/* Fascia Sabato */}
+          {(breakdown?.standby?.workHours?.saturday > 0 || breakdown?.standby?.travelHours?.saturday > 0) && (
             <View style={styles.breakdownItem}>
+              {/* Header fascia con emoji e totale ore */}
               <View style={styles.breakdownRow}>
                 <Text style={styles.breakdownLabel}>
-                  Viaggio sabato (+25%)
+                  📅 Fascia Sabato
                 </Text>
-                <Text style={styles.breakdownValue}>{formatSafeHours(breakdown?.standby?.travelHours?.saturday)}</Text>
+                <Text style={styles.breakdownValue}>
+                  {formatSafeHours((breakdown?.standby?.workHours?.saturday || 0) + (breakdown?.standby?.travelHours?.saturday || 0))}
+                </Text>
               </View>
-              {breakdown?.standby?.travelEarnings?.saturday > 0 && breakdown?.standby?.travelHours?.saturday > 0 && (
-                <Text style={styles.rateCalc}>
+              
+              {/* Dettaglio Lavoro */}
+              {breakdown?.standby?.workHours?.saturday > 0 && (
+                <Text style={styles.breakdownDetail}>
                   {(() => {
-                    const base = settings.contract?.hourlyRate || 16.41;
-                    const saturdayMultiplier = settings.contract?.overtimeRates?.saturday || 1.25;
-                    const rate = base * saturdayMultiplier * (settings.travelCompensationRate || 1.0);
-                    return `${rate.toFixed(2).replace('.', ',')} € x ${formatSafeHours(breakdown?.standby?.travelHours?.saturday)} (Viaggio sabato +25%) = ${breakdown?.standby?.travelEarnings?.saturday.toFixed(2).replace('.', ',')} €`;
+                    // Per il sabato, tutti gli interventi nella giornata di sabato appartengono a questa fascia
+                    // Non c'è bisogno di calcolare ore per fasce orarie specifiche
+                    const workDate = new Date(form.date);
+                    const isSaturday = workDate.getDay() === 6;
+                    
+                    if (!isSaturday) return '';
+                    
+                    const sabatoInterventions = form.interventi?.filter(intervento => {
+                      // Filtra interventi che hanno lavoro
+                      return (intervento.work_start_1 && intervento.work_end_1) || 
+                             (intervento.work_start_2 && intervento.work_end_2);
+                    }).map(intervento => {
+                      const segments = [];
+                      if (intervento.work_start_1 && intervento.work_end_1) {
+                        segments.push(`${intervento.work_start_1}-${intervento.work_end_1}`);
+                      }
+                      if (intervento.work_start_2 && intervento.work_end_2) {
+                        segments.push(`${intervento.work_start_2}-${intervento.work_end_2}`);
+                      }
+                      return segments.join(', ');
+                    }).filter(segment => segment) || [];
+                    
+                    const orari = sabatoInterventions.length > 0 
+                      ? ` (${sabatoInterventions.join(', ')})`
+                      : '';
+                    
+                    const rate = breakdown?.standby?.workEarnings?.saturday && breakdown?.standby?.workHours?.saturday > 0 
+                      ? breakdown.standby.workEarnings.saturday / breakdown.standby.workHours.saturday
+                      : (settings.contract?.hourlyRate || 16.41);
+                    const baseRate = settings.contract?.hourlyRate || 16.41;
+                    const percentage = Math.round((rate / baseRate - 1) * 100);
+                    const percentageText = percentage > 0 ? ` (+${percentage}%)` : '';
+                    const earnings = breakdown?.standby?.workEarnings?.saturday || 0;
+                    
+                    return `   Lavoro sabato${orari}${percentageText}: ${formatSafeHours(breakdown?.standby?.workHours?.saturday)} = €${earnings.toFixed(2).replace('.', ',')}`;
                   })()}
+                </Text>
+              )}
+              
+              {/* Dettaglio Viaggio */}
+              {breakdown?.standby?.travelHours?.saturday > 0 && (
+                <Text style={styles.breakdownDetail}>
+                  {'   '}Viaggio sabato: {formatSafeHours(breakdown?.standby?.travelHours?.saturday)} = €{breakdown?.standby?.travelEarnings?.saturday?.toFixed(2)?.replace('.', ',')}
                 </Text>
               )}
             </View>
           )}
 
-          {/* Viaggio festivo/domenica reperibilità */}
-          {breakdown?.standby?.travelHours?.holiday > 0 && (
+          {/* Fascia Festiva */}
+          {((breakdown?.standby?.workHours?.holiday || 0) > 0 || (breakdown?.standby?.travelHours?.holiday || 0) > 0) && (
             <View style={styles.breakdownItem}>
               <View style={styles.breakdownRow}>
                 <Text style={styles.breakdownLabel}>
-                  Viaggio festivo (+30%)
+                  🎉 Fascia Festiva
                 </Text>
-                <Text style={styles.breakdownValue}>{formatSafeHours(breakdown?.standby?.travelHours?.holiday)}</Text>
+                <Text style={styles.breakdownValue}>
+                  {formatSafeHours((breakdown?.standby?.workHours?.holiday || 0) + (breakdown?.standby?.travelHours?.holiday || 0))}
+                </Text>
               </View>
-              {breakdown?.standby?.travelEarnings?.holiday > 0 && breakdown?.standby?.travelHours?.holiday > 0 && (
-                <Text style={styles.rateCalc}>
+              
+              {/* Lavoro festivo reperibilità */}
+              {breakdown?.standby?.workHours?.holiday > 0 && (
+                <Text style={styles.breakdownDetail}>
                   {(() => {
-                    const base = settings.contract?.hourlyRate || 16.41;
-                    const holidayMultiplier = settings.contract?.overtimeRates?.holiday || 1.3;
-                    const rate = base * holidayMultiplier * (settings.travelCompensationRate || 1.0);
-                    return `${rate.toFixed(2).replace('.', ',')} € x ${formatSafeHours(breakdown?.standby?.travelHours?.holiday)} (Viaggio festivo +30%) = ${breakdown?.standby?.travelEarnings?.holiday.toFixed(2).replace('.', ',')} €`;
+                    // Per i giorni festivi, tutti gli interventi nella giornata festiva appartengono a questa fascia
+                    // Non c'è bisogno di calcolare ore per fasce orarie specifiche
+                    const workDate = new Date(form.date);
+                    const isSunday = workDate.getDay() === 0;
+                    // TODO: Qui dovresti aggiungere la logica per i giorni festivi italiani
+                    const isHoliday = isSunday; // Per ora solo domenica
+                    
+                    if (!isHoliday) return '';
+                    
+                    const festivaInterventions = form.interventi?.filter(intervento => {
+                      // Filtra interventi che hanno lavoro
+                      return (intervento.work_start_1 && intervento.work_end_1) || 
+                             (intervento.work_start_2 && intervento.work_end_2);
+                    }).map(intervento => {
+                      const segments = [];
+                      if (intervento.work_start_1 && intervento.work_end_1) {
+                        segments.push(`${intervento.work_start_1}-${intervento.work_end_1}`);
+                      }
+                      if (intervento.work_start_2 && intervento.work_end_2) {
+                        segments.push(`${intervento.work_start_2}-${intervento.work_end_2}`);
+                      }
+                      return segments.join(', ');
+                    }).filter(segment => segment) || [];
+                    
+                    const orari = festivaInterventions.length > 0 
+                      ? ` (${festivaInterventions.join(', ')})`
+                      : '';
+                    
+                    const isOvertime = breakdown?.standby?.isOvertimeApplied;
+                    const rate = breakdown?.standby?.workEarnings?.holiday && breakdown?.standby?.workHours?.holiday > 0 
+                      ? breakdown.standby.workEarnings.holiday / breakdown.standby.workHours.holiday
+                      : (settings.contract?.hourlyRate || 16.41) * (isOvertime ? 1.35 : 1.30);
+                    const baseRate = settings.contract?.hourlyRate || 16.41;
+                    const percentage = Math.round((rate / baseRate - 1) * 100);
+                    const percentageText = percentage > 0 ? ` (+${percentage}%)` : '';
+                    const earnings = breakdown?.standby?.workEarnings?.holiday || 0;
+                    
+                    const labelText = isOvertime ? `Straordinario festivo` : `Lavoro festivo`;
+                    
+                    return `   ${labelText}${orari}${percentageText}: ${formatSafeHours(breakdown?.standby?.workHours?.holiday)} = €${earnings.toFixed(2).replace('.', ',')}`;
                   })()}
+                </Text>
+              )}
+              
+              {/* Viaggio festivo reperibilità */}
+              {breakdown?.standby?.travelHours?.holiday > 0 && (
+                <Text style={styles.breakdownDetail}>
+                  {'   '}Viaggio festivo: {formatSafeHours(breakdown?.standby?.travelHours?.holiday)} = €{breakdown?.standby?.travelEarnings?.holiday?.toFixed(2)?.replace('.', ',')}
                 </Text>
               )}
             </View>
           )}
+          
+
+          
+
+          
+
+
+
+
+
           
           <View style={[styles.breakdownRow, styles.totalRow]}>
             <Text style={styles.breakdownLabel}>Totale reperibilità</Text>
@@ -1032,7 +2229,7 @@ const EarningsSummary = ({ form, settings, isDateInStandbyCalendar, isStandbyCal
       {!breakdown.isFixedDay && form.reperibilita && !hasStandbyHours && (
         <View style={styles.breakdownSection}>
           <View style={styles.sectionHeaderWithIcon}>
-            <MaterialCommunityIcons name="phone-alert" size={16} color="#9C27B0" />
+            <MaterialCommunityIcons name="phone-alert" size={16} color={styles.infoText.color} />
             <Text style={styles.breakdownSubtitle}>Reperibilità</Text>
           </View>
           <View style={styles.breakdownItem}>
@@ -1049,7 +2246,7 @@ const EarningsSummary = ({ form, settings, isDateInStandbyCalendar, isStandbyCal
       {!breakdown?.isFixedDay && hasAllowances && (
         <View style={styles.breakdownSection}>
           <View style={styles.sectionHeaderWithIcon}>
-            <MaterialCommunityIcons name="gift-outline" size={16} color="#FF5722" />
+            <MaterialCommunityIcons name="gift-outline" size={16} color={styles.infoText.color} />
             <Text style={styles.breakdownSubtitle}>Indennità e Buoni</Text>
           </View>
           
@@ -1149,7 +2346,7 @@ const EarningsSummary = ({ form, settings, isDateInStandbyCalendar, isStandbyCal
       {!breakdown?.isFixedDay && breakdown?.details?.isPartialDay && (
         <View style={styles.breakdownSection}>
           <View style={styles.sectionHeaderWithIcon}>
-            <MaterialCommunityIcons name="clock-check-outline" size={16} color="#795548" />
+            <MaterialCommunityIcons name="clock-check-outline" size={16} color={styles.infoText.color} />
             <Text style={styles.breakdownSubtitle}>Completamento Giornata</Text>
           </View>
           
@@ -1192,7 +2389,7 @@ const EarningsSummary = ({ form, settings, isDateInStandbyCalendar, isStandbyCal
       <View style={styles.totalSection}>
         <View style={styles.breakdownRow}>
           <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-            <MaterialCommunityIcons name="cash-check" size={18} color="#4CAF50" />
+            <MaterialCommunityIcons name="cash-check" size={18} color={styles.infoText.color} />
             <Text style={[styles.totalLabel, { marginLeft: 6 }]}>
               {breakdown?.isFixedDay ? 'Totale Retribuzione Giornaliera' : 'Totale Guadagno Giornaliero'}
             </Text>
@@ -1248,7 +2445,7 @@ const iconsConfig = {
 };
 
 // Componente per mostrare l'icona corretta in base al tipo
-const TypeIcon = ({ type, size = 20, color = '#2196F3' }) => {
+const TypeIcon = ({ type, size = 20, color }) => {
   const iconConfig = iconsConfig[type] || iconsConfig.lavorativa;
   const IconComponent = iconConfig.component;
   
@@ -1284,8 +2481,23 @@ const categoryLabels = {
 };
 
 const TimeEntryForm = ({ route, navigation }) => {
+  const { theme } = useTheme();
   const { settings } = useSettings();
   const calculationService = useCalculationService();
+  
+  // 🔍 DEBUG: Log delle impostazioni ricevute
+  useEffect(() => {
+    console.log('🔍 TimeEntryForm - Settings ricevute:', {
+      hasSettings: !!settings,
+      hasSpecialDayTravelSettings: !!settings?.specialDayTravelSettings,
+      specialDayTravelSettings: settings?.specialDayTravelSettings,
+      keysInSettings: settings ? Object.keys(settings) : 'null'
+    });
+  }, [settings]);
+  
+  // Crea stili dinamici basati sul tema
+  const styles = createStyles(theme);
+  
   const today = new Date();
   const [form, setForm] = useState({
     date: formatDate(today),
@@ -1307,6 +2519,7 @@ const TimeEntryForm = ({ route, navigation }) => {
     extraTurns: [],
     reperibilita: false,
     reperibilityManualOverride: false, // Nuovo flag per tracciare override manuale
+    standbyAllowance: false, // Flag per indennità di reperibilità
     interventi: [],
     pasti: { pranzo: false, cena: false },
     pastipranzoManualOverride: false, // Flag per override manuale pranzo
@@ -1425,6 +2638,7 @@ const TimeEntryForm = ({ route, navigation }) => {
         })(),
         reperibilita: entryToEdit.is_standby_day === 1 || entryToEdit.isStandbyDay === 1,
         reperibilityManualOverride: entryToEdit.reperibilityManualOverride === true || false,
+        standbyAllowance: entryToEdit.standby_allowance === 1 || entryToEdit.standbyAllowance === 1,
         // Carica l'array di interventi direttamente dal DB
         interventi: entryToEdit.interventi && Array.isArray(entryToEdit.interventi) ? entryToEdit.interventi : [],
         pasti: {
@@ -1464,7 +2678,7 @@ const TimeEntryForm = ({ route, navigation }) => {
       console.log('Auto-compilazione attivata per:', dayType);
       
       // Calcola la retribuzione giornaliera secondo CCNL
-      const ccnlDailyRate = settings?.contract?.dailyRate || 107.69;
+      const ccnlDailyRate = settings?.contract?.dailyRate || 109.19;
       
       // Applica i dati di auto-compilazione sempre per giorni di ferie/malattia/riposo/permesso
       setForm(prev => ({
@@ -1698,7 +2912,7 @@ const TimeEntryForm = ({ route, navigation }) => {
         setForm({ ...form, viaggi });
       } else if (dateField.startsWith('intervento')) {
         const [_, idx, field] = dateField.split('-');
-        const interventi = [...form.interventi];
+        const interventi = form.interventi.map(i => ({...i}));
         interventi[parseInt(idx)][field] = timeString;
         
         // Auto-compilazione orari specifici per interventi - sempre attiva
@@ -1880,7 +3094,7 @@ const TimeEntryForm = ({ route, navigation }) => {
     const handleClearTime = (field) => {
       const key = `${isIntervento ? 'intervento' : 'viaggio'}-${idx}-${field}`;
       if (isIntervento) {
-        const interventi = [...form.interventi];
+        const interventi = form.interventi.map(i => ({...i}));
         interventi[idx][field] = '';
         setForm({...form, interventi});
       } else {
@@ -2012,7 +3226,7 @@ const TimeEntryForm = ({ route, navigation }) => {
           setForm({ ...form, viaggi });
         } else if (fieldId.startsWith('intervento')) {
           const [type, idx, field] = fieldId.split('-');
-          const interventi = [...form.interventi];
+          const interventi = form.interventi.map(i => ({...i}));
           interventi[parseInt(idx)][field] = '';
           setForm({ ...form, interventi });
         }
@@ -2032,7 +3246,7 @@ const TimeEntryForm = ({ route, navigation }) => {
         <Text style={styles.timeFieldLabel}>{label}</Text>
         <Text style={styles.timeFieldValue}>{value || '--:--'}</Text>
         <View style={styles.timeFieldActions}>
-          <Ionicons name="time-outline" size={16} color="#2196F3" style={{marginRight: 10}} />
+          <Ionicons name="time-outline" size={16} color={styles.infoText.color} style={{marginRight: 10}} />
           {value && (
             <TouchableOpacity 
               onPress={(e) => handleTimeClear(e)}
@@ -2041,7 +3255,7 @@ const TimeEntryForm = ({ route, navigation }) => {
               accessibilityLabel={`Cancella orario ${label}`}
               accessibilityHint={`Cancella l'orario ${label} impostato a ${value}`}
             >
-              <Ionicons name="close-circle" size={18} color="#f44336" />
+              <Ionicons name="close-circle" size={18} color={styles.iconError.color} />
             </TouchableOpacity>
           )}
         </View>
@@ -2062,8 +3276,8 @@ const TimeEntryForm = ({ route, navigation }) => {
             try {
               await DatabaseService.deleteWorkEntry(entryId);
               Alert.alert('Eliminato', 'Inserimento eliminato con successo.');
-              // Torna alla TimeEntryScreen e refresh automatico sia TimeEntry che Dashboard
-              navigation.navigate('TimeEntryScreen', { refresh: true, refreshDashboard: true });
+              // Torna alla schermata precedente con refresh
+              navigation.navigate('TimeEntryScreen', { refreshFromForm: true });
             } catch (e) {
               Alert.alert('Errore', 'Errore durante la cancellazione dal database.');
             }
@@ -2242,7 +3456,7 @@ const TimeEntryForm = ({ route, navigation }) => {
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor="#f8f9fa" />
+      <StatusBar style={theme.isDark ? 'light' : 'dark'} />
       
       <ScrollView 
         style={styles.scrollView} 
@@ -2255,7 +3469,7 @@ const TimeEntryForm = ({ route, navigation }) => {
             style={styles.backButton}
             onPress={() => navigation.goBack()}
           >
-            <MaterialCommunityIcons name="arrow-left" size={24} color="#333" />
+            <MaterialCommunityIcons name="arrow-left" size={24} color={styles.headerIcon.color} />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>
             {isEdit ? 'Modifica Inserimento' : 'Nuovo Inserimento'}
@@ -2266,7 +3480,7 @@ const TimeEntryForm = ({ route, navigation }) => {
         {/* Messaggio Auto-compilazione */}
         {vacationAutoCompile.autoCompileMessage && (
           <View style={styles.autoCompileNotice}>
-            <MaterialCommunityIcons name="information" size={20} color="#2196F3" />
+            <MaterialCommunityIcons name="information" size={20} color={styles.infoText.color} />
             <Text style={styles.autoCompileMessage}>
               {vacationAutoCompile.autoCompileMessage}
             </Text>
@@ -2274,11 +3488,12 @@ const TimeEntryForm = ({ route, navigation }) => {
         )}
 
         {/* Data e Tipo Giornata Card */}
-        <ModernCard style={styles.cardSpacing}>
+        <ModernCard style={styles.cardSpacing} styles={styles}>
           <SectionHeader 
             title="Data e Tipo Giornata" 
             icon="calendar" 
-            iconColor="#2196F3" 
+            iconColor={styles.infoText.color} 
+            styles={styles}
           />
           
           <View style={styles.dateTypeContainer}>
@@ -2291,9 +3506,9 @@ const TimeEntryForm = ({ route, navigation }) => {
                 style={styles.dateInputField}
                 onPress={() => { setDateField('mainDate'); setShowDatePicker(true); setDatePickerMode('date'); }}
               >
-                <MaterialCommunityIcons name="calendar-outline" size={20} color="#2196F3" />
+                <MaterialCommunityIcons name="calendar-outline" size={20} color={styles.infoText.color} />
                 <Text style={styles.dateText}>{form.date}</Text>
-                <MaterialCommunityIcons name="chevron-down" size={16} color="#666" />
+                <MaterialCommunityIcons name="chevron-down" size={16} color={styles.iconSecondary.color} />
               </TouchableOpacity>
             </View>
 
@@ -2338,7 +3553,7 @@ const TimeEntryForm = ({ route, navigation }) => {
               <MaterialCommunityIcons 
                 name="information" 
                 size={16} 
-                color={dayTypes.find(dt => dt.value === dayType)?.color || '#666'} 
+                color={dayTypes.find(dt => dt.value === dayType)?.color || styles.iconSecondary.color} 
               />
               <Text style={styles.dayTypeInfoText}>
                 {dayType === 'ferie' && 'Giornata di ferie - Retribuzione fissa secondo CCNL'}
@@ -2351,23 +3566,24 @@ const TimeEntryForm = ({ route, navigation }) => {
         </ModernCard>
 
         {/* Informazioni Sito Card */}
-        <ModernCard style={styles.cardSpacing}>
+        <ModernCard style={styles.cardSpacing} styles={styles}>
           <SectionHeader 
             title="Informazioni Sito" 
             icon="map-marker" 
             iconColor="#FF9800" 
+            styles={styles}
           />
-          <InputRow label="Nome cantiere">
+          <InputRow label="Nome cantiere" styles={styles}>
             <TextInput
               style={styles.modernInput}
               value={form.site_name}
               onChangeText={v => handleChange('site_name', v)}
               placeholder="Facoltativo"
-              placeholderTextColor="#999"
+              placeholderTextColor={styles.inputText.color}
             />
           </InputRow>
           
-          <InputRow label="Veicolo usato" required>
+          <InputRow label="Veicolo usato" required styles={styles}>
             <View style={styles.vehicleGrid}>
               {veicoloOptions.map(opt => (
                 <TouchableOpacity
@@ -2381,7 +3597,7 @@ const TimeEntryForm = ({ route, navigation }) => {
                   <MaterialCommunityIcons 
                     name={opt.icon} 
                     size={20} 
-                    color={form.veicolo === opt.value ? 'white' : '#666'} 
+                    color={form.veicolo === opt.value ? 'white' : styles.iconSecondary.color} 
                   />
                   <Text style={[
                     styles.vehicleGridButtonText,
@@ -2396,13 +3612,13 @@ const TimeEntryForm = ({ route, navigation }) => {
           
           {/* Campo targa/numero veicolo - mostra solo se ha guidato */}
           {form.veicolo !== 'non_guidato' && (
-            <InputRow label="Targa/Numero veicolo" icon="card-text-outline">
+            <InputRow label="Targa/Numero veicolo" icon="card-text-outline" styles={styles}>
               <TextInput
                 style={styles.modernInput}
                 value={form.targa_veicolo}
                 onChangeText={v => handleChange('targa_veicolo', v)}
                 placeholder="es. AB123CD o numero aziendale"
-                placeholderTextColor="#999"
+                placeholderTextColor={styles.inputText.color}
                 autoCapitalize="characters"
               />
             </InputRow>
@@ -2410,11 +3626,12 @@ const TimeEntryForm = ({ route, navigation }) => {
         </ModernCard>
 
         {/* Orari Viaggio/Lavoro Card */}
-        <ModernCard style={styles.cardSpacing}>
+        <ModernCard style={styles.cardSpacing} styles={styles}>
           <SectionHeader 
             title="Orari Viaggio e Lavoro" 
             icon="clock-outline" 
             iconColor="#4CAF50" 
+            styles={styles}
           />
           {form.viaggi.map((v, idx) => (
             <View key={idx} style={styles.timeShiftContainer}>
@@ -2458,6 +3675,7 @@ const TimeEntryForm = ({ route, navigation }) => {
                     viaggi[idx].departure_company = '';
                     setForm({...form, viaggi});
                   }}
+                  styles={styles}
                 />
                 <TimeFieldModern 
                   label="Arrivo cantiere" 
@@ -2473,6 +3691,7 @@ const TimeEntryForm = ({ route, navigation }) => {
                     viaggi[idx].arrival_site = '';
                     setForm({...form, viaggi});
                   }}
+                  styles={styles}
                 />
                 <TimeFieldModern 
                   label="Inizio 1° turno" 
@@ -2488,6 +3707,7 @@ const TimeEntryForm = ({ route, navigation }) => {
                     viaggi[idx].work_start_1 = '';
                     setForm({...form, viaggi});
                   }}
+                  styles={styles}
                 />
                 <TimeFieldModern 
                   label="Fine 1° turno" 
@@ -2503,6 +3723,7 @@ const TimeEntryForm = ({ route, navigation }) => {
                     viaggi[idx].work_end_1 = '';
                     setForm({...form, viaggi});
                   }}
+                  styles={styles}
                 />
                 <TimeFieldModern 
                   label="Inizio 2° turno" 
@@ -2518,6 +3739,7 @@ const TimeEntryForm = ({ route, navigation }) => {
                     viaggi[idx].work_start_2 = '';
                     setForm({...form, viaggi});
                   }}
+                  styles={styles}
                 />
                 <TimeFieldModern 
                   label="Fine 2° turno" 
@@ -2533,6 +3755,7 @@ const TimeEntryForm = ({ route, navigation }) => {
                     viaggi[idx].work_end_2 = '';
                     setForm({...form, viaggi});
                   }}
+                  styles={styles}
                 />
                 <TimeFieldModern 
                   label="Partenza rientro" 
@@ -2548,6 +3771,7 @@ const TimeEntryForm = ({ route, navigation }) => {
                     viaggi[idx].departure_return = '';
                     setForm({...form, viaggi});
                   }}
+                  styles={styles}
                 />
                 <TimeFieldModern 
                   label="Arrivo azienda" 
@@ -2563,6 +3787,7 @@ const TimeEntryForm = ({ route, navigation }) => {
                     viaggi[idx].arrival_company = '';
                     setForm({...form, viaggi});
                   }}
+                  styles={styles}
                 />
               </View>
             </View>
@@ -2575,11 +3800,12 @@ const TimeEntryForm = ({ route, navigation }) => {
         </ModernCard>
 
         {/* Reperibilità Card */}
-        <ModernCard style={styles.cardSpacing}>
+        <ModernCard style={styles.cardSpacing} styles={styles}>
           <SectionHeader 
             title="Reperibilità" 
             icon="phone-alert" 
             iconColor="#FF9800" 
+            styles={styles}
           />
           
           <ModernSwitch
@@ -2587,6 +3813,7 @@ const TimeEntryForm = ({ route, navigation }) => {
             value={form.reperibilita}
             onValueChange={toggleReperibilita}
             description="Indica se questo è un giorno di reperibilità"
+            styles={styles}
           />
 
           {isStandbyCalendarInitialized && form.reperibilityManualOverride && (
@@ -2636,6 +3863,7 @@ const TimeEntryForm = ({ route, navigation }) => {
                         interventi[idx].departure_company = '';
                         setForm({...form, interventi});
                       }}
+                      styles={styles}
                     />
                     <TimeFieldModern 
                       label="Arrivo cantiere" 
@@ -2651,6 +3879,7 @@ const TimeEntryForm = ({ route, navigation }) => {
                         interventi[idx].arrival_site = '';
                         setForm({...form, interventi});
                       }}
+                      styles={styles}
                     />
                     <TimeFieldModern 
                       label="Inizio 1° turno" 
@@ -2666,6 +3895,7 @@ const TimeEntryForm = ({ route, navigation }) => {
                         interventi[idx].work_start_1 = '';
                         setForm({...form, interventi});
                       }}
+                      styles={styles}
                     />
                     <TimeFieldModern 
                       label="Fine 1° turno" 
@@ -2749,18 +3979,19 @@ const TimeEntryForm = ({ route, navigation }) => {
               
               <TouchableOpacity style={styles.addButton} onPress={addIntervento}>
                 <MaterialCommunityIcons name="plus" size={20} color="#FF9800" />
-                <Text style={[styles.addButtonText, { color: '#FF9800' }]}>Aggiungi intervento</Text>
+                <Text style={[styles.addButtonText, { color: theme.colors.warning }]}>Aggiungi intervento</Text>
               </TouchableOpacity>
             </>
           )}
         </ModernCard>
 
         {/* Rimborsi Pasti Card */}
-        <ModernCard style={styles.cardSpacing}>
+        <ModernCard style={styles.cardSpacing} styles={styles}>
           <SectionHeader 
             title="Rimborsi Pasti" 
             icon="food" 
             iconColor="#4CAF50" 
+            styles={styles}
           />
           
           <View style={styles.mealsContainer}>
@@ -2769,6 +4000,7 @@ const TimeEntryForm = ({ route, navigation }) => {
               value={form.pasti.pranzo}
               onValueChange={() => togglePasto('pranzo')}
               description="Includi rimborso pranzo"
+              styles={styles}
             />
             
             <ModernSwitch
@@ -2776,12 +4008,13 @@ const TimeEntryForm = ({ route, navigation }) => {
               value={form.pasti.cena}
               onValueChange={() => togglePasto('cena')}
               description="Includi rimborso cena"
+              styles={styles}
             />
           </View>
 
           {/* Cash Pranzo */}
           {(settings?.mealAllowances?.lunch?.cashAmount > 0 || settings?.mealAllowances?.lunch?.allowManualCash) && form.pasti.pranzo && (
-            <InputRow label="Importo cash pranzo">
+            <InputRow label="Importo cash pranzo" styles={styles}>
               <View style={styles.cashInputContainer}>
                 <TextInput
                   style={styles.cashInput}
@@ -2793,6 +4026,7 @@ const TimeEntryForm = ({ route, navigation }) => {
                   }}
                   placeholder="0,00"
                   keyboardType="numeric"
+                  placeholderTextColor={styles.currencySymbol.color}
                 />
                 <Text style={styles.currencySymbol}>€</Text>
               </View>
@@ -2801,7 +4035,7 @@ const TimeEntryForm = ({ route, navigation }) => {
 
           {/* Cash Cena */}
           {(settings?.mealAllowances?.dinner?.cashAmount > 0 || settings?.mealAllowances?.dinner?.allowManualCash) && form.pasti.cena && (
-            <InputRow label="Importo cash cena">
+            <InputRow label="Importo cash cena" styles={styles}>
               <View style={styles.cashInputContainer}>
                 <TextInput
                   style={styles.cashInput}
@@ -2813,7 +4047,7 @@ const TimeEntryForm = ({ route, navigation }) => {
                   }}
                   placeholder="0,00"
                   keyboardType="numeric"
-                  placeholderTextColor="#999"
+                  placeholderTextColor={styles.currencySymbol.color}
                 />
                 <Text style={styles.currencySymbol}>€</Text>
               </View>
@@ -2825,6 +4059,7 @@ const TimeEntryForm = ({ route, navigation }) => {
             title="Indennità Trasferta" 
             icon="map-marker-distance" 
             iconColor="#9C27B0" 
+            styles={styles}
           />
           
           <ModernSwitch
@@ -2832,6 +4067,7 @@ const TimeEntryForm = ({ route, navigation }) => {
             value={form.trasferta}
             onValueChange={toggleTrasferta}
             description="Indennità per lavoro fuori sede"
+            styles={styles}
           />
         </ModernCard>
 
@@ -2901,11 +4137,12 @@ const TimeEntryForm = ({ route, navigation }) => {
           // Mostra la card solo per giorni feriali/sabato lavorativo quando mancano le 8 ore
           if (isWeekday && !hasEightHours) {
             return (
-              <ModernCard style={styles.cardSpacing}>
+              <ModernCard style={styles.cardSpacing} styles={styles}>
                 <SectionHeader 
                   title="Completamento Giornata" 
                   icon="clock-check" 
                   iconColor="#FF5722" 
+                  styles={styles}
                 />
                 <Text style={styles.sectionDescription}>
                   Hai lavorato {totalHours.toFixed(1)} ore su 8 richieste. Come vuoi completare la giornata?
@@ -2946,18 +4183,19 @@ const TimeEntryForm = ({ route, navigation }) => {
         })()}
 
         {/* Note Card */}
-        <ModernCard style={styles.cardSpacing}>
+        <ModernCard style={styles.cardSpacing} styles={styles}>
           <SectionHeader 
             title="Note" 
             icon="note-text" 
             iconColor="#607D8B" 
+            styles={styles}
           />
           <TextInput
             style={styles.notesInput}
             value={form.note}
             onChangeText={v => handleChange('note', v)}
             placeholder="Aggiungi una nota (opzionale)"
-            placeholderTextColor="#999"
+            placeholderTextColor={styles.notesInput.color}
             multiline
             numberOfLines={3}
             textAlignVertical="top"
@@ -2965,7 +4203,7 @@ const TimeEntryForm = ({ route, navigation }) => {
         </ModernCard>
 
         {/* Riepilogo Guadagni */}
-        <ModernCard style={styles.cardSpacing}>
+        <ModernCard style={styles.cardSpacing} styles={styles}>
           <EarningsSummary 
             form={form} 
             settings={settings} 
@@ -2973,6 +4211,7 @@ const TimeEntryForm = ({ route, navigation }) => {
             isStandbyCalendarInitialized={isStandbyCalendarInitialized}
             reperibilityManualOverride={form.reperibilityManualOverride}
             dayType={form.dayType || dayType}
+            styles={styles}
           />
         </ModernCard>
       </ScrollView>
@@ -3046,7 +4285,7 @@ const TimeEntryForm = ({ route, navigation }) => {
                 dayType,
                 // Nuovi campi per giorni fissi
                 isFixedDay: form.isFixedDay || ['ferie', 'malattia', 'riposo', 'permesso'].includes(dayType),
-                fixedEarnings: form.fixedEarnings || ((['ferie', 'malattia', 'riposo', 'permesso'].includes(dayType)) ? (settings?.contract?.dailyRate || 107.69) : 0)
+                fixedEarnings: form.fixedEarnings || ((['ferie', 'malattia', 'riposo', 'permesso'].includes(dayType)) ? (settings?.contract?.dailyRate || 109.19) : 0)
               };
               
               const settingsObj = settings || {};
@@ -3055,7 +4294,7 @@ const TimeEntryForm = ({ route, navigation }) => {
               if (entry.isFixedDay) {
                 entry.totalEarnings = entry.fixedEarnings;
               } else {
-                const result = calculationService.calculateEarningsBreakdown(entry, settingsObj);
+                const result = await calculationService.calculateEarningsBreakdown(entry, settingsObj);
                 entry.totalEarnings = result.totalEarnings || 0;
               }
               
@@ -3099,7 +4338,8 @@ const TimeEntryForm = ({ route, navigation }) => {
                 }
               }
               
-              navigation.navigate('TimeEntryScreen', { refresh: true, refreshDashboard: true });
+              // Torna alla schermata precedente con refresh
+              navigation.navigate('TimeEntryScreen', { refreshFromForm: true });
             } catch (e) {
               console.error('Save Error:', e);
               Alert.alert('Errore', `Errore durante il salvataggio su database: ${e.message}`)
@@ -3125,10 +4365,10 @@ const TimeEntryForm = ({ route, navigation }) => {
   );
 };
 
-const styles = StyleSheet.create({
+const createStyles = (theme) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f8f9fa',
+    backgroundColor: theme.colors.background,
   },
   scrollView: {
     flex: 1,
@@ -3149,20 +4389,16 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: 'white',
+    backgroundColor: theme.colors.card,
     justifyContent: 'center',
     alignItems: 'center',
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
+    ...theme.colors.cardElevation,
   },
   headerTitle: {
     flex: 1,
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#333',
+    color: theme.colors.text,
     textAlign: 'center',
   },
   headerSpacer: {
@@ -3173,33 +4409,29 @@ const styles = StyleSheet.create({
   autoCompileNotice: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#e3f2fd',
+    backgroundColor: theme.colors.info + '20',
     paddingHorizontal: 16,
     paddingVertical: 12,
     marginHorizontal: 16,
     marginBottom: 16,
     borderRadius: 8,
     borderLeftWidth: 4,
-    borderLeftColor: '#2196F3',
+    borderLeftColor: theme.colors.info,
   },
   autoCompileMessage: {
     flex: 1,
     fontSize: 14,
-    color: '#1976d2',
+    color: theme.colors.info,
     marginLeft: 8,
     lineHeight: 18,
   },
 
   // Modern card styles
   modernCard: {
-    backgroundColor: 'white',
+    backgroundColor: theme.colors.card,
     borderRadius: 16,
     padding: 16,
-    elevation: 3,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    ...theme.colors.cardElevation,
   },
   cardSpacing: {
     marginBottom: 16,
@@ -3212,25 +4444,25 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     paddingBottom: 8,
     borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
+    borderBottomColor: theme.colors.border,
   },
   sectionTitle: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#333',
+    color: theme.colors.text,
     marginLeft: 10,
     flex: 1,
   },
   sectionDescription: {
     fontSize: 14,
-    color: '#666',
+    color: theme.colors.primary,
     marginBottom: 16,
     lineHeight: 20,
   },
   subsectionTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#666',
+    color: theme.colors.text,
     marginTop: 12,
     marginBottom: 8,
   },
@@ -3242,33 +4474,34 @@ const styles = StyleSheet.create({
   inputLabel: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#333',
+    color: theme.colors.text,
     marginBottom: 8,
   },
   requiredMark: {
-    color: '#f44336',
+    color: theme.colors.error,
   },
   modernInput: {
-    backgroundColor: '#f8f9fa',
+    backgroundColor: theme.colors.surface,
     borderRadius: 12,
     padding: 16,
     fontSize: 16,
     borderWidth: 1,
-    borderColor: '#e0e0e0',
+    borderColor: theme.colors.border,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    color: theme.colors.text,
   },
   inputText: {
     fontSize: 16,
-    color: '#333',
+    color: theme.colors.text,
     flex: 1,
   },
   pickerContainer: {
-    backgroundColor: '#f8f9fa',
+    backgroundColor: theme.colors.surface,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#e0e0e0',
+    borderColor: theme.colors.border,
     overflow: 'hidden',
   },
   modernPicker: {
@@ -3288,22 +4521,22 @@ const styles = StyleSheet.create({
   fieldLabel: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#333',
+    color: theme.colors.text,
     marginBottom: 8,
   },
   dateInputField: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#f8f9fa',
+    backgroundColor: theme.colors.surface,
     borderRadius: 12,
     padding: 16,
     borderWidth: 1,
-    borderColor: '#e0e0e0',
+    borderColor: theme.colors.border,
     gap: 12,
   },
   dateText: {
     fontSize: 16,
-    color: '#333',
+    color: theme.colors.text,
     flex: 1,
     fontWeight: '500',
   },
@@ -3315,24 +4548,24 @@ const styles = StyleSheet.create({
   typeChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#f8f9fa',
+    backgroundColor: theme.colors.surface,
     borderRadius: 20,
     paddingVertical: 8,
     paddingHorizontal: 12,
     borderWidth: 1.5,
-    borderColor: '#e0e0e0',
+    borderColor: theme.colors.border,
     gap: 6,
     minWidth: 80,
   },
   typeChipText: {
     fontSize: 12,
-    color: '#666',
+    color: theme.colors.textSecondary,
     fontWeight: '500',
   },
   dayTypeInfo: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    backgroundColor: '#f0f8ff',
+    backgroundColor: theme.colors.info + '20',
     borderRadius: 8,
     padding: 12,
     marginTop: 12,
@@ -3340,7 +4573,7 @@ const styles = StyleSheet.create({
   },
   dayTypeInfoText: {
     fontSize: 13,
-    color: '#1976d2',
+    color: theme.colors.info,
     flex: 1,
     lineHeight: 18,
   },
@@ -3354,21 +4587,21 @@ const styles = StyleSheet.create({
   vehicleButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#f8f9fa',
+    backgroundColor: theme.colors.surface,
     borderRadius: 20,
     paddingVertical: 8,
     paddingHorizontal: 12,
     borderWidth: 1,
-    borderColor: '#e0e0e0',
+    borderColor: theme.colors.border,
     minWidth: 100,
   },
   vehicleButtonActive: {
-    backgroundColor: '#4CAF50',
-    borderColor: '#4CAF50',
+    backgroundColor: theme.colors.success,
+    borderColor: theme.colors.success,
   },
   vehicleButtonText: {
     fontSize: 12,
-    color: '#666',
+    color: theme.colors.textSecondary,
     marginLeft: 6,
     flex: 1,
     textAlign: 'center',
@@ -3380,12 +4613,12 @@ const styles = StyleSheet.create({
 
   // Time fields
   timeShiftContainer: {
-    backgroundColor: '#f8f9fa',
+    backgroundColor: theme.colors.surface,
     borderRadius: 12,
     padding: 12,
     marginBottom: 12,
     borderLeftWidth: 4,
-    borderLeftColor: '#4CAF50',
+    borderLeftColor: theme.colors.success,
   },
   shiftHeader: {
     flexDirection: 'row',
@@ -3395,7 +4628,7 @@ const styles = StyleSheet.create({
   shiftTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#4CAF50',
+    color: theme.colors.success,
     marginLeft: 8,
     flex: 1,
   },
@@ -3415,11 +4648,11 @@ const styles = StyleSheet.create({
   modernTimeField: {
     flex: 1,
     minWidth: '45%',
-    backgroundColor: 'white',
+    backgroundColor: theme.colors.card,
     borderRadius: 8,
     padding: 10,
     borderWidth: 1,
-    borderColor: '#e0e0e0',
+    borderColor: theme.colors.border,
   },
   timeFieldHeader: {
     flexDirection: 'row',
@@ -3429,7 +4662,7 @@ const styles = StyleSheet.create({
   },
   timeFieldLabel: {
     fontSize: 12,
-    color: '#666',
+    color: theme.colors.textSecondary,
     marginLeft: 6,
     flex: 1,
     textAlign: 'center',
@@ -3441,7 +4674,7 @@ const styles = StyleSheet.create({
   },
   timeFieldValue: {
     fontSize: 16,
-    color: '#333',
+    color: theme.colors.text,
     fontWeight: '500',
     textAlign: 'center',
     minWidth: 50,
@@ -3455,17 +4688,17 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#f0f8f0',
+    backgroundColor: theme.colors.success + '20',
     borderRadius: 8,
     padding: 12,
     marginTop: 8,
     borderWidth: 1,
-    borderColor: '#4CAF50',
+    borderColor: theme.colors.success,
     borderStyle: 'dashed',
   },
   addButtonText: {
     fontSize: 14,
-    color: '#4CAF50',
+    color: theme.colors.success,
     fontWeight: '600',
     marginLeft: 6,
   },
@@ -3513,12 +4746,12 @@ const styles = StyleSheet.create({
   switchLabel: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#333',
+    color: theme.colors.text,
     marginBottom: 2,
   },
   switchDescription: {
     fontSize: 12,
-    color: '#666',
+    color: theme.colors.textSecondary,
     lineHeight: 16,
   },
 
@@ -3550,21 +4783,21 @@ const styles = StyleSheet.create({
   cashInputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#f8f9fa',
+    backgroundColor: theme.colors.surface,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#e0e0e0',
+    borderColor: theme.colors.border,
     paddingHorizontal: 12,
   },
   cashInput: {
     flex: 1,
     fontSize: 16,
-    color: '#333',
+    color: theme.colors.text,
     paddingVertical: 12,
   },
   currencySymbol: {
     fontSize: 16,
-    color: '#666',
+    color: theme.colors.primary,
     fontWeight: '600',
   },
 
@@ -3577,11 +4810,11 @@ const styles = StyleSheet.create({
   completamentoCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#f8f9fa',
+    backgroundColor: theme.colors.surface,
     borderRadius: 12,
     padding: 12,
     borderWidth: 2,
-    borderColor: '#e0e0e0',
+    borderColor: theme.colors.border,
     minWidth: '45%',
   },
   completamentoCardActive: {
@@ -3590,7 +4823,7 @@ const styles = StyleSheet.create({
   },
   completamentoCardText: {
     fontSize: 14,
-    color: '#333',
+    color: theme.colors.text,
     marginLeft: 8,
     fontWeight: '500',
   },
@@ -3603,13 +4836,13 @@ const styles = StyleSheet.create({
   specialDayInfo: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    backgroundColor: '#e8f5e9',
+    backgroundColor: theme.colors.success + '20',
     borderRadius: 12,
     padding: 16,
   },
   specialDayText: {
     fontSize: 14,
-    color: '#2e7d32',
+    color: theme.colors.success,
     marginLeft: 12,
     flex: 1,
     lineHeight: 20,
@@ -3617,13 +4850,14 @@ const styles = StyleSheet.create({
 
   // Notes input
   notesInput: {
-    backgroundColor: '#f8f9fa',
+    backgroundColor: theme.colors.surface,
     borderRadius: 12,
     padding: 16,
     fontSize: 16,
     borderWidth: 1,
-    borderColor: '#e0e0e0',
+    borderColor: theme.colors.border,
     minHeight: 80,
+    color: theme.colors.text,
   },
 
   // Modern buttons
@@ -3631,27 +4865,22 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#4CAF50',
+    backgroundColor: theme.colors.success,
     borderRadius: 12,
     paddingVertical: 14,
     paddingHorizontal: 20,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
+    ...theme.colors.cardElevation,
   },
   secondaryButton: {
-    backgroundColor: '#f8f9fa',
+    backgroundColor: theme.colors.surface,
     borderWidth: 1,
-    borderColor: '#e0e0e0',
+    borderColor: theme.colors.border,
   },
   dangerButton: {
-    backgroundColor: '#f44336',
+    backgroundColor: theme.colors.error,
   },
   disabledButton: {
-    backgroundColor: '#e0e0e0',
-    backgroundColor: '#e0e0e0',
+    backgroundColor: theme.colors.disabled,
   },
   modernButtonText: {
     fontSize: 16,
@@ -3660,13 +4889,13 @@ const styles = StyleSheet.create({
     marginLeft: 8,
   },
   secondaryButtonText: {
-    color: '#333',
+    color: theme.colors.text,
   },
   dangerButtonText: {
     color: 'white',
   },
   disabledButtonText: {
-    color: '#999',
+    color: theme.colors.primary,
   },
 
   // Action buttons
@@ -3706,7 +4935,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#f8f9fa',
+    backgroundColor: theme.colors.surface,
     borderRadius: 12,
     padding: 16,
     marginBottom: 16,
@@ -3716,13 +4945,13 @@ const styles = StyleSheet.create({
   },
   totalLabel: {
     fontSize: 14,
-    color: '#666',
+    color: theme.colors.text,
     marginBottom: 4,
   },
   totalAmount: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: '#2e7d32',
+    color: theme.colors.success,
   },
   totalHours: {
     flexDirection: 'row',
@@ -3731,7 +4960,7 @@ const styles = StyleSheet.create({
   },
   totalHoursText: {
     fontSize: 14,
-    color: '#666',
+    color: theme.colors.textSecondary,
     fontWeight: '500',
   },
   sectionGroup: {
@@ -3742,17 +4971,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 12,
     paddingHorizontal: 16,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: theme.colors.surface,
     borderRadius: 8,
     marginBottom: 8,
   },
   sectionTitle: {
-    flex: 1,
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: theme.colors.text,
+    marginLeft: 10,
     flex: 1,
   },
   detailHours: {
     fontSize: 12,
-    color: '#666',
+    color: theme.colors.primary,
     marginLeft: 8,
     minWidth: 40,
     textAlign: 'right',
@@ -3760,35 +4992,7 @@ const styles = StyleSheet.create({
   detailAmount: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#333',
-    minWidth: 60,
-    textAlign: 'right',
-  },
-  notesSection: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginTop: 8,
-  },
-  emptyState: {
-    alignItems: 'center',
-    paddingVertical: 32,
-  },
-  emptyTitle: {
-    flex: 1,
-    flex: 1,
-  },
-  detailHours: {
-    fontSize: 12,
-    color: '#666',
-    marginLeft: 8,
-    minWidth: 40,
-    textAlign: 'right',
-  },
-  detailAmount: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#333',
+    color: theme.colors.text,
     minWidth: 60,
     textAlign: 'right',
   },
@@ -3805,13 +5009,13 @@ const styles = StyleSheet.create({
   emptyTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#666',
+    color: theme.colors.primary,
     marginTop: 12,
     marginBottom: 4,
   },
   emptyText: {
     fontSize: 14,
-    color: '#999',
+    color: theme.colors.primary,
     textAlign: 'center',
     lineHeight: 20,
   },
@@ -3821,7 +5025,7 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     fontSize: 14,
-    color: '#999',
+    color: theme.colors.textDisabled,
     marginTop: 8,
   },
   modernEarningsContainer: {
@@ -3833,13 +5037,13 @@ const styles = StyleSheet.create({
   },
   modernEarningsLoadingText: {
     fontSize: 14,
-    color: '#999',
+    color: theme.colors.primary,
     marginTop: 8,
   },
   modernEarningsTotal: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#f8f9fa',
+    backgroundColor: theme.colors.surface,
     borderRadius: 12,
     padding: 16,
     marginBottom: 16,
@@ -3848,7 +5052,7 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: '#4CAF50',
+    backgroundColor: theme.colors.success,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 16,
@@ -3858,17 +5062,17 @@ const styles = StyleSheet.create({
   },
   modernEarningsTotalLabel: {
     fontSize: 14,
-    color: '#666',
+    color: theme.colors.primary,
     marginBottom: 4,
   },
   modernEarningsTotalAmount: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: '#2e7d32',
+    color: theme.colors.success,
   },
   modernEarningsTotalHours: {
     fontSize: 12,
-    color: '#666',
+    color: theme.colors.primary,
     marginTop: 2,
   },
   modernEarningsBreakdown: {
@@ -3879,13 +5083,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
+    borderBottomColor: theme.colors.border,
   },
   modernEarningsItemIcon: {
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: theme.colors.surface,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
@@ -3895,23 +5099,23 @@ const styles = StyleSheet.create({
   },
   modernEarningsItemLabel: {
     fontSize: 14,
-    color: '#333',
+    color: theme.colors.text,
     marginBottom: 2,
   },
   modernEarningsItemAmount: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#333',
+    color: theme.colors.text,
   },
   modernEarningsItemDetail: {
     fontSize: 12,
-    color: '#666',
+    color: theme.colors.primary,
     marginTop: 2,
   },
   modernEarningsNote: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    backgroundColor: '#e3f2fd',
+    backgroundColor: theme.colors.info + '20',
     borderRadius: 8,
     padding: 12,
     marginTop: 8,
@@ -3919,7 +5123,7 @@ const styles = StyleSheet.create({
   modernEarningsNoteText: {
     flex: 1,
     fontSize: 12,
-    color: '#1976D2',
+    color: theme.colors.info,
     marginLeft: 8,
     lineHeight: 16,
   },
@@ -3930,31 +5134,27 @@ const styles = StyleSheet.create({
   modernEarningsEmptyTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#666',
+    color: theme.colors.primary,
     marginTop: 12,
     marginBottom: 4,
   },
   modernEarningsEmptyText: {
     fontSize: 14,
-    color: '#999',
+    color: theme.colors.primary,
     textAlign: 'center',
     lineHeight: 20,
   },
   
   // Earnings card improvements
   earningsCard: {
-    backgroundColor: '#fff',
+    backgroundColor: theme.colors.card,
     borderRadius: 12,
     padding: 16,
     marginHorizontal: 16,
     marginVertical: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 4,
+    ...theme.colors.cardElevation,
     borderLeftWidth: 4,
-    borderLeftColor: '#4CAF50',
+    borderLeftColor: theme.colors.success,
   },
   
   sectionHeaderWithIcon: {
@@ -3963,7 +5163,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   sectionBadge: {
-    backgroundColor: '#e3f2fd',
+    backgroundColor: theme.colors.info + '20',
     paddingHorizontal: 8,
     paddingVertical: 2,
     borderRadius: 8,
@@ -3972,7 +5172,7 @@ const styles = StyleSheet.create({
   sectionBadgeText: {
     fontSize: 10,
     fontWeight: 'bold',
-    color: '#1565C0',
+    color: theme.colors.info,
     letterSpacing: 0.5,
   },
   sectionHeaderWithIcon: {
@@ -3981,21 +5181,21 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     paddingBottom: 8,
     borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
+    borderBottomColor: theme.colors.border,
   },
   
   // Breakdown styles
   breakdownSubtitle: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#333',
+    color: theme.colors.text,
     marginLeft: 6,
   },
   breakdownSection: {
     marginVertical: 8,
     paddingVertical: 8,
     borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
+    borderBottomColor: theme.colors.border,
   },
   breakdownItem: {
     paddingVertical: 6,
@@ -4012,59 +5212,59 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 13,
     fontWeight: '500',
-    color: '#333',
+    color: theme.colors.text,
   },
   breakdownValue: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#4CAF50',
+    color: theme.colors.success,
     minWidth: 60,
     textAlign: 'right',
   },
   breakdownDetail: {
     fontSize: 12,
-    color: '#666',
+    color: theme.colors.textSecondary,
     marginTop: 2,
     fontStyle: 'italic',
   },
   rateCalc: {
     fontSize: 11,
-    color: '#1976D2',
+    color: theme.colors.info,
     marginTop: 4,
-    backgroundColor: '#f3f8ff',
+    backgroundColor: theme.colors.info + '10',
     padding: 6,
     borderRadius: 4,
     fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
   },
   totalRow: {
-    backgroundColor: '#f8f9fa',
+    backgroundColor: theme.colors.surface,
     borderTopWidth: 1,
-    borderTopColor: '#e0e0e0',
+    borderTopColor: theme.colors.border,
     marginTop: 8,
     paddingTop: 8,
   },
   breakdownTotal: {
     fontSize: 14,
     fontWeight: 'bold',
-    color: '#4CAF50',
+    color: theme.colors.success,
   },
   totalSection: {
-    backgroundColor: '#f8fff8',
+    backgroundColor: theme.colors.success + '10',
     borderRadius: 8,
     padding: 12,
     marginTop: 12,
     borderWidth: 1,
-    borderColor: '#e8f5e9',
+    borderColor: theme.colors.success + '20',
   },
   totalLabel: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#333',
+    color: theme.colors.text,
   },
   totalAmount: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#4CAF50',
+    color: theme.colors.success,
   },
   // Nuovi stili per griglia veicolo 2x2
   vehicleGrid: {
@@ -4075,24 +5275,24 @@ const styles = StyleSheet.create({
   },
   vehicleGridButton: {
     width: '48%',
-    backgroundColor: '#f5f5f5',
+    backgroundColor: theme.colors.surface,
     borderRadius: 12,
     padding: 12,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: '#e0e0e0',
+    borderColor: theme.colors.border,
     minHeight: 50,
   },
   vehicleGridButtonActive: {
-    backgroundColor: '#2196F3',
-    borderColor: '#2196F3',
+    backgroundColor: theme.colors.info,
+    borderColor: theme.colors.info,
   },
   vehicleGridButtonText: {
     marginLeft: 8,
     fontSize: 14,
-    color: '#666',
+    color: theme.colors.textSecondary,
     fontWeight: '500',
     textAlign: 'center',
     flex: 1,
@@ -4118,11 +5318,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 16,
     borderRadius: 25,
-    elevation: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
+    ...theme.colors.cardElevation,
     minWidth: 100,
     justifyContent: 'center',
   },
@@ -4130,16 +5326,45 @@ const styles = StyleSheet.create({
     backgroundColor: '#757575',
   },
   deleteButton: {
-    backgroundColor: '#f44336',
+    backgroundColor: theme.colors.error,
   },
   saveButton: {
-    backgroundColor: '#4CAF50',
+    backgroundColor: theme.colors.success,
   },
   floatingButtonText: {
     color: 'white',
     fontWeight: '600',
     fontSize: 14,
     marginLeft: 6,
+  },
+  // Nuovi stili per dark mode
+  iconSecondary: {
+    color: theme.colors.primary,
+  },
+  iconError: {
+    color: theme.colors.error,
+  },
+  infoText: {
+    color: theme.colors.info,
+  },
+  switchTrack: {
+    backgroundColor: theme.colors.border,
+  },
+  switchTrackActive: {
+    backgroundColor: theme.colors.info + '40',
+  },
+  switchThumb: {
+    backgroundColor: theme.colors.surface,
+  },
+  switchThumbActive: {
+    backgroundColor: theme.colors.info,
+  },
+  infoBadgeDefault: {
+    backgroundColor: theme.colors.info + '20',
+    color: theme.colors.info,
+  },
+  headerIcon: {
+    color: theme.colors.text,
   },
 });
 

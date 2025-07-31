@@ -1,881 +1,768 @@
-import * as FileSystem from 'expo-file-system';
-import * as DocumentPicker from 'expo-document-picker';
-import * as Sharing from 'expo-sharing';
+// 🚀 BACKUPSERVICE IBRIDO: NATIVO + JAVASCRIPT
+// Sistema backup con supporto nativo per app builds e fallback JavaScript
+
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import DatabaseService from './DatabaseService';
+import JavaScriptBackupService from './JavaScriptBackupService';
+import NativeBackupService from './NativeBackupService';
+import { Alert, Platform } from 'react-native';
 
 class BackupService {
   constructor() {
-    this.backupDirectory = `${FileSystem.documentDirectory}backups/`;
+    // 🚀 SISTEMA IBRIDO: Prova NATIVO prima, poi fallback JavaScript
+    this.nativeBackupService = NativeBackupService;
+    this.jsBackupService = JavaScriptBackupService;
+    this.useJavaScriptSystem = false; // Inizia con nativo
+    
+    console.log('🚀 BackupService inizializzato con SISTEMA IBRIDO (Nativo + JavaScript)');
+    console.log('📱 Tentativo sistema NATIVO per app builds, fallback JavaScript per Expo');
   }
 
-  async ensureBackupDirectory() {
+  // ✅ INIZIALIZZA BACKUP AUTOMATICO (Nativo o JavaScript)
+  async initialize() {
     try {
-      await FileSystem.makeDirectoryAsync(this.backupDirectory, { intermediateDirectories: true });
-    } catch (error) {
-      // On Android, makeDirectoryAsync can throw an error if the directory already exists.
-      // We check if the directory exists to confirm that this is the case. If it does, we can ignore the error.
-      const dirInfo = await FileSystem.getInfoAsync(this.backupDirectory);
-      if (!dirInfo.exists) {
-        // If the directory doesn't exist, then the error was for a different reason, and we should re-throw it.
-        throw error;
+      // Prova prima il sistema nativo
+      const nativeStatus = this.nativeBackupService.getSystemStatus();
+      
+      if (nativeStatus.isNativeReady) {
+        console.log('🚀 Usando sistema backup NATIVO (expo-notifications)');
+        console.log('✅ Backup automatico funzionerà anche con app chiusa!');
+        this.useJavaScriptSystem = false;
+        // Il sistema nativo si auto-inizializza
+      } else {
+        console.log('📱 Sistema nativo non disponibile, usando fallback JavaScript');
+        console.log('⚠️ Backup automatico solo con app aperta');
+        this.useJavaScriptSystem = true;
+        await this.jsBackupService.initialize();
       }
+      
+      console.log('✅ Sistema backup inizializzato correttamente');
+    } catch (error) {
+      console.error('❌ Errore inizializzazione backup service:', error);
+      // Fallback garantito al sistema JavaScript
+      this.useJavaScriptSystem = true;
+      await this.jsBackupService.initialize();
+    }
+  }
+  
+  // Verifica se il backup automatico è abilitato
+  async isEnabled() {
+    try {
+      // Controlla prima lo stato nelle impostazioni
+      const backupSettings = await AsyncStorage.getItem('backupSettings');
+      if (backupSettings) {
+        const settings = JSON.parse(backupSettings);
+        return settings.autoBackupEnabled === true;
+      }
+      
+      // Se non ci sono impostazioni, controlla i servizi
+      if (this.useJavaScriptSystem) {
+        // Per il sistema JavaScript, verifica che il servizio sia inizializzato
+        return this.jsBackupService.isInitialized === true;
+      } else {
+        // Per il sistema nativo, controlla lo stato del servizio
+        return this.nativeBackupService?.isInitialized === true;
+      }
+    } catch (error) {
+      console.error('❌ Errore verifica stato backup:', error);
+      return false;
     }
   }
 
-  // Create local backup
-  // Permetti di passare dati filtrati già pronti (per evitare di ignorare i dati validi dal chiamante)
+  // ✅ BACKUP LOCALE JAVASCRIPT (AsyncStorage)
   async createLocalBackup(backupName = null, filteredData = null) {
     try {
-      await this.ensureBackupDirectory();
+      console.log('🔄 Creazione backup locale JavaScript...');
+      
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
       const fileName = backupName || `worktracker-backup-${timestamp}.json`;
-      const filePath = `${this.backupDirectory}${fileName}`;
 
       let data;
       if (filteredData && typeof filteredData === 'object') {
         data = filteredData;
-        console.log('✅ Utilizzo dati filtrati forniti dal chiamante per il backup');
+        console.log('✅ Utilizzo dati filtrati forniti dal chiamante');
       } else {
-        // Get all data from database
         data = await DatabaseService.getAllData();
       }
 
-      // Add backup metadata
+      if (!data || Object.keys(data).length === 0) {
+        throw new Error('Nessun dato trovato per il backup');
+      }
+
+      // Metadati backup
       const backupData = {
         ...data,
         backupInfo: {
           name: fileName,
           created: new Date().toISOString(),
-          type: 'local',
+          type: 'javascript_local',
           version: '1.0',
           app: 'WorkTracker'
         }
       };
 
-      // Write to file
-      await FileSystem.writeAsStringAsync(filePath, JSON.stringify(backupData, null, 2));
+      // Salva in AsyncStorage
+      const backupKey = `manual_backup_${timestamp}`;
+      await AsyncStorage.setItem(backupKey, JSON.stringify(backupData));
 
-      // Record backup in database
-      await DatabaseService.recordBackup({
-        backup_name: fileName,
-        backup_type: 'local',
-        file_path: filePath,
-        status: 'completed'
-      });
+      // Aggiorna lista backup
+      await this.updateBackupList(fileName, backupKey, 'manual');
 
-      console.log('Local backup created:', filePath);
+      console.log(`✅ Backup locale JavaScript creato: ${fileName}`);
+      
       return {
         success: true,
-        filePath,
-        fileName,
-        size: (await FileSystem.getInfoAsync(filePath)).size
+        fileName: fileName,
+        backupKey: backupKey,
+        size: JSON.stringify(backupData).length,
+        data: backupData
       };
+      
     } catch (error) {
-      console.error('Error creating local backup:', error);
+      console.error('❌ Errore creazione backup locale:', error);
       throw error;
     }
   }
 
-  // Export backup for sharing
-  // Permetti di passare dati filtrati già pronti (per evitare di ignorare i dati validi dal chiamante)
+  // ✅ EXPORT BACKUP per condivisione
   async exportBackup(backupName = null, filteredData = null) {
     try {
-      const backup = await this.createLocalBackup(backupName, filteredData);
-
-      // Share the backup file
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(backup.filePath, {
-          mimeType: 'application/json',
-          dialogTitle: 'Condividi Backup WorkTracker'
-        });
-      }
-
-      return backup;
-    } catch (error) {
-      console.error('Error exporting backup:', error);
-      throw error;
-    }
-  }
-
-  // Import backup from file
-  async importBackup() {
-    try {
-      // Pick backup file
-      const result = await DocumentPicker.getDocumentAsync({
-        type: 'application/json',
-        copyToCacheDirectory: true
-      });
+      console.log('📤 Export backup per condivisione...');
       
-      if (result.canceled) {
-        return { success: false, message: 'Operazione annullata' };
-      }
+      const result = await this.createLocalBackup(backupName, filteredData);
       
-      // Read file content
-      const fileContent = await FileSystem.readAsStringAsync(result.assets[0].uri);
-      const backupData = JSON.parse(fileContent);
-      
-      // Validate backup format
-      if (!this.validateBackupFormat(backupData)) {
-        throw new Error('Formato backup non valido');
-      }
-      
-      // Restore data to database
-      await DatabaseService.restoreData(backupData);
-      
-      // Record import in backup history
-      await DatabaseService.recordBackup({
-        backup_name: result.assets[0].name,
-        backup_type: 'import',
-        status: 'completed',
-        notes: `Imported from ${result.assets[0].name}`
-      });
-      
-      console.log('Backup imported successfully');
-      return {
-        success: true,
-        fileName: result.assets[0].name,
-        recordsCount: {
-          workEntries: backupData.workEntries?.length || 0,
-          standbyDays: backupData.standbyDays?.length || 0,
-          settings: backupData.settings?.length || 0
-        }
-      };
-    } catch (error) {
-      console.error('Error importing backup:', error);
-      throw error;
-    }
-  }
-
-  // Import backup da percorso locale (senza picker)
-  async importBackupFromPath(filePath) {
-    try {
-      // Read file content
-      const fileContent = await FileSystem.readAsStringAsync(filePath);
-      const backupData = JSON.parse(fileContent);
-      // Validate backup format
-      if (!this.validateBackupFormat(backupData)) {
-        throw new Error('Formato backup non valido');
-      }
-      // Restore data to database
-      await DatabaseService.restoreData(backupData);
-      // Record import in backup history
-      await DatabaseService.recordBackup({
-        backup_name: backupData.backupInfo?.name || 'manual-restore',
-        backup_type: 'import',
-        status: 'completed',
-        notes: `Ripristinato da file locale: ${filePath}`
-      });
-      return {
-        success: true,
-        fileName: backupData.backupInfo?.name || 'manual-restore',
-        recordsCount: {
-          workEntries: backupData.workEntries?.length || 0,
-          standbyDays: backupData.standbyDays?.length || 0,
-          settings: backupData.settings?.length || 0
-        }
-      };
-    } catch (error) {
-      console.error('Error importing backup from path:', error);
-      return { success: false, message: error.message };
-    }
-  }
-
-  // List local backups
-  async listLocalBackups() {
-    return this.listAllBackups();
-  }
-
-  // Lista tutti i backup (locali e personalizzati)
-  async listAllBackups() {
-    try {
-      await this.ensureBackupDirectory();
-      
-      // Prima controlla se la cartella backup è vuota
-      const backupFiles = await FileSystem.readDirectoryAsync(this.backupDirectory);
-      const jsonFiles = backupFiles.filter(file => file.endsWith('.json'));
-      
-      console.log(`📦 BACKUP FOLDER: Found ${jsonFiles.length} JSON files`);
-      
-      const backupList = [];
-      
-      // Se non ci sono file JSON fisici, la cartella è vuota
-      if (jsonFiles.length === 0) {
-        console.log('📦 BACKUP FOLDER: Empty - no JSON files found');
-        
-        // Pulisci anche i record dal database per sicurezza
-        try {
-          const dbRecordsCount = await DatabaseService.clearAllBackupRecords();
-          if (dbRecordsCount > 0) {
-            console.log(`🗄️ Cleaned ${dbRecordsCount} orphaned database records`);
-          }
-        } catch (dbError) {
-          console.warn('⚠️ Error cleaning database records:', dbError);
-        }
-        
-        return []; // Ritorna lista vuota
-      }
-      
-      // Leggi i file fisici nella cartella locale
-      for (const fileName of jsonFiles) {
-        // Validazione del nome file
-        if (!fileName || typeof fileName !== 'string' || fileName.length >= 255) {
-          console.warn('⚠️ Nome file backup non valido ignorato:', fileName);
-          continue;
-        }
-        
-        const filePath = `${this.backupDirectory}${fileName}`;
-        const fileInfo = await FileSystem.getInfoAsync(filePath);
-        
-        if (!fileInfo.exists) {
-          console.warn(`⚠️ File non esiste: ${fileName}`);
-          continue;
-        }
-        
-        try {
-          const fileContent = await FileSystem.readAsStringAsync(filePath);
-          const backupData = JSON.parse(fileContent);
-          
-          // Sanitizza il nome del file per sicurezza
-          const sanitizedFileName = fileName.replace(/[^a-zA-Z0-9.-]/g, '_').substring(0, 100);
-          
-          backupList.push({
-            fileName: sanitizedFileName,
-            originalFileName: fileName, // Mantieni l'originale per debug
-            filePath,
-            size: fileInfo.size,
-            created: fileInfo.modificationTime,
-            backupDate: backupData.backupInfo?.created || backupData.exportDate,
-            recordsCount: {
-              workEntries: backupData.workEntries?.length || 0,
-              standbyDays: backupData.standbyDays?.length || 0,
-              settings: backupData.settings?.length || 0
-            },
-            backupType: backupData.backupInfo?.type || 'local',
-            location: 'App'
-          });
-        } catch (parseError) {
-          console.warn('Could not parse backup file:', fileName, parseError);
-        }
-      }
-      
-      // Leggi anche i backup registrati nel database SOLO se corrispondono a file fisici
-      const dbBackups = await DatabaseService.getAllBackupsFromDb();
-      
-      // Filtra i backup del database mantenendo solo quelli che hanno un file fisico corrispondente
-      const validDbBackups = dbBackups.filter(dbBackup => {
-        return jsonFiles.includes(dbBackup.fileName);
-      });
-      
-      console.log(`🗄️ DATABASE: ${dbBackups.length} total records, ${validDbBackups.length} with physical files`);
-      
-      // Unisci, evitando duplicati (stesso nome e tipo)
-      validDbBackups.forEach(dbB => {
-        const already = backupList.find(b => 
-          b.fileName === dbB.fileName && 
-          b.backupType === dbB.backupType &&
-          Math.abs(new Date(b.created) - new Date(dbB.created)) < 60000 // Differenza < 1 minuto
-        );
-        if (!already) {
-          // Solo se il file fisico esiste realmente
-          if (jsonFiles.includes(dbB.fileName)) {
-            backupList.push({
-              fileName: dbB.fileName,
-              filePath: dbB.filePath,
-              size: null,
-              created: dbB.created,
-              backupDate: dbB.created,
-              recordsCount: {},
-              backupType: dbB.backupType,
-              location: dbB.backupType === 'custom' ? 'Personalizzato' : (dbB.backupType === 'download' ? 'Downloads' : 'App'),
-              status: dbB.status,
-              notes: dbB.notes
-            });
-          }
-        }
-      });
-      
-      // Rimuovi duplicati finali basandoti su fileName e created (timestamp)
-      const uniqueBackups = backupList.filter((backup, index, arr) => {
-        return index === arr.findIndex(b => 
-          b.fileName === backup.fileName && 
-          Math.abs(new Date(b.created) - new Date(backup.created)) < 60000
-        );
-      });
-      
-      // Ordina per data
-      uniqueBackups.sort((a, b) => new Date(b.created) - new Date(a.created));
-      
-      console.log(`📦 BACKUP LIST: Found ${backupList.length} total, ${uniqueBackups.length} unique backups`);
-      
-      return uniqueBackups;
-    } catch (error) {
-      console.error('Error listing all backups:', error);
-      throw error;
-    }
-  }
-
-  // Delete local backup
-  async deleteLocalBackup(fileName) {
-    try {
-      // Validazione e sanitizzazione del nome file
-      if (!fileName || typeof fileName !== 'string') {
-        throw new Error('Nome file backup non valido (non è una stringa)');
-      }
-      
-      // Se il fileName contiene JSON o caratteri non validi, prova a trovare il file reale
-      let actualFileName = fileName;
-      
-      // Se il nome contiene caratteri JSON, è probabilmente corrotto
-      if (fileName.includes('{') || fileName.includes('"') || fileName.length >= 255) {
-        console.log(`⚠️ Nome file corrotto rilevato: ${fileName.substring(0, 100)}...`);
-        
-        // Tenta di trovare il file corrispondente nella directory
-        await this.ensureBackupDirectory();
-        const allFiles = await FileSystem.readDirectoryAsync(this.backupDirectory);
-        
-        // Cerca un file che potrebbe corrispondere
-        const matchingFile = allFiles.find(file => 
-          file.endsWith('.json') && 
-          file.length < 255 &&
-          !file.includes('{') &&
-          !file.includes('"')
-        );
-        
-        if (matchingFile) {
-          actualFileName = matchingFile;
-          console.log(`✅ File corrispondente trovato: ${actualFileName}`);
-        } else {
-          // Se non trova un file valido, prova a eliminare tutti i file corrotti
-          console.log(`🗑️ Tentativo rimozione file corrotti...`);
-          for (const file of allFiles) {
-            if (file.includes('{') || file.includes('"') || file.length >= 255) {
-              try {
-                const corruptedPath = `${this.backupDirectory}${file}`;
-                await FileSystem.deleteAsync(corruptedPath);
-                console.log(`✅ File corrotto rimosso: ${file.substring(0, 50)}...`);
-                return { success: true, message: 'File corrotto rimosso' };
-              } catch (deleteError) {
-                console.error(`❌ Errore rimozione file corrotto: ${deleteError.message}`);
-              }
-            }
-          }
-          throw new Error('Impossibile trovare o rimuovere il file backup');
-        }
-      }
-      
-      const filePath = `${this.backupDirectory}${actualFileName}`;
-      const fileInfo = await FileSystem.getInfoAsync(filePath);
-      
-      if (fileInfo.exists) {
-        await FileSystem.deleteAsync(filePath);
-        console.log(`✅ Backup deleted: ${actualFileName}`);
-        return { success: true };
-      } else {
-        throw new Error(`File backup non trovato: ${actualFileName}`);
-      }
-    } catch (error) {
-      console.error(`❌ Error deleting backup:`, error);
-      throw error;
-    }
-  }
-
-  // Validate backup format
-  validateBackupFormat(backupData) {
-    // Check required fields
-    if (!backupData.exportDate && !backupData.backupInfo?.created) {
-      return false;
-    }
-    
-    // Check if it has expected data structure
-    if (!Array.isArray(backupData.workEntries) && 
-        !Array.isArray(backupData.standbyDays) && 
-        !Array.isArray(backupData.settings)) {
-      return false;
-    }
-    
-    return true;
-  }
-
-  // 🧹 PULIZIA BACKUP CORROTTI
-  async cleanupCorruptedBackups() {
-    try {
-      await this.ensureBackupDirectory();
-      const backupFiles = await FileSystem.readDirectoryAsync(this.backupDirectory);
-      let cleanedCount = 0;
-      let totalSize = 0;
-      
-      for (const fileName of backupFiles) {
-        // Controlla se il nome del file è corrotto (troppo lungo o contiene caratteri non validi)
-        const isCorruptedName = !fileName || 
-                               typeof fileName !== 'string' || 
-                               fileName.length >= 255 ||
-                               fileName.includes('{') ||
-                               fileName.includes('}') ||
-                               fileName.includes('"workEntries"');
-        
-        if (isCorruptedName && fileName.endsWith('.json')) {
-          try {
-            const filePath = `${this.backupDirectory}${fileName}`;
-            const fileInfo = await FileSystem.getInfoAsync(filePath);
-            
-            if (fileInfo.exists) {
-              totalSize += fileInfo.size;
-              await FileSystem.deleteAsync(filePath);
-              cleanedCount++;
-              console.log(`🗑️ Backup corrotto rimosso: ${fileName.substring(0, 50)}...`);
-            }
-          } catch (deleteError) {
-            console.warn(`⚠️ Impossibile rimuovere file corrotto: ${fileName.substring(0, 50)}...`, deleteError);
-          }
-        }
-      }
-      
-      return {
-        success: true,
-        cleanedCount,
-        totalSize,
-        message: cleanedCount > 0 ? 
-          `Rimossi ${cleanedCount} backup corrotti (${(totalSize / 1024 / 1024).toFixed(2)} MB)` :
-          'Nessun backup corrotto trovato'
-      };
-    } catch (error) {
-      console.error('❌ Errore durante pulizia backup corrotti:', error);
-      throw error;
-    }
-  }
-
-  // 🗑️ CANCELLA TUTTI I BACKUP (metodo più robusto)
-  async deleteAllBackups() {
-    try {
-      await this.ensureBackupDirectory();
-      const backupFiles = await FileSystem.readDirectoryAsync(this.backupDirectory);
-      let deletedCount = 0;
-      let totalSize = 0;
-      
-      for (const fileName of backupFiles) {
-        if (fileName.endsWith('.json')) {
-          try {
-            const filePath = `${this.backupDirectory}${fileName}`;
-            const fileInfo = await FileSystem.getInfoAsync(filePath);
-            
-            if (fileInfo.exists) {
-              totalSize += fileInfo.size;
-              await FileSystem.deleteAsync(filePath);
-              deletedCount++;
-              console.log(`🗑️ Backup rimosso: ${fileName.substring(0, 50)}${fileName.length > 50 ? '...' : ''}`);
-            }
-          } catch (deleteError) {
-            console.warn(`⚠️ Errore rimozione backup: ${fileName.substring(0, 50)}...`, deleteError);
-          }
-        }
-      }
-      
-      // Pulisci anche i record dal database
-      try {
-        console.log('🗄️ Pulizia record backup dal database...');
-        const dbDeletedCount = await DatabaseService.clearAllBackupRecords();
-        console.log(`✅ Rimossi ${dbDeletedCount} record backup dal database`);
-      } catch (dbError) {
-        console.warn('⚠️ Errore pulizia database backup:', dbError);
-      }
-      
-      return {
-        success: true,
-        deletedCount,
-        totalSize,
-        message: `Rimossi ${deletedCount} backup fisici (${(totalSize / 1024 / 1024).toFixed(2)} MB)\nPuliti anche i record dal database`
-      };
-    } catch (error) {
-      console.error('❌ Errore durante cancellazione tutti i backup:', error);
-      throw error;
-    }
-  }
-
-  // 💥 PULIZIA FORZATA - Rimuove completamente la cartella backup
-  async forceCleanBackupFolder() {
-    try {
-      console.log('💥 Inizio pulizia forzata cartella backup...');
-      
-      // Controlla se la cartella esiste
-      const dirInfo = await FileSystem.getInfoAsync(this.backupDirectory);
-      let removedSize = 0;
-      
-      if (dirInfo.exists) {
-        // Prova a leggere i file per calcolare lo spazio
-        try {
-          const files = await FileSystem.readDirectoryAsync(this.backupDirectory);
-          for (const file of files) {
-            try {
-              const fileInfo = await FileSystem.getInfoAsync(`${this.backupDirectory}${file}`);
-              removedSize += fileInfo.size || 0;
-            } catch (sizeError) {
-              console.warn(`⚠️ Impossibile ottenere dimensione file: ${file}`);
-            }
-          }
-        } catch (readError) {
-          console.warn('⚠️ Impossibile leggere contenuto cartella:', readError);
-        }
-        
-        // Rimuovi completamente la cartella
-        await FileSystem.deleteAsync(this.backupDirectory, { idempotent: true });
-        console.log('✅ Cartella backup rimossa completamente');
-      }
-      
-      // Pulisci anche i record dal database
-      try {
-        console.log('🗄️ Pulizia record backup dal database...');
-        await DatabaseService.clearAllBackupRecords();
-        console.log('✅ Record backup rimossi dal database');
-      } catch (dbError) {
-        console.warn('⚠️ Errore pulizia database backup:', dbError);
-      }
-      
-      // Ricrea la cartella vuota
-      await this.ensureBackupDirectory();
-      console.log('✅ Cartella backup ricreata vuota');
-      
-      return {
-        success: true,
-        message: `Reset completo eseguito.\nSpazio liberato: ${(removedSize / 1024 / 1024).toFixed(2)} MB\n\nLa cartella backup è stata ricreata vuota e i record dal database sono stati rimossi.`
-      };
-    } catch (error) {
-      console.error('❌ Errore durante pulizia forzata:', error);
-      throw error;
-    }
-  }
-  
-  // Validazione e filtraggio degli inserimenti di lavoro vuoti
-  validateAndFilterWorkEntries(backupData) {
-    if (!backupData || !backupData.workEntries || !Array.isArray(backupData.workEntries)) {
-      return backupData;
-    }
-    
-    const originalCount = backupData.workEntries.length;
-    
-    // Filtra gli inserimenti che non hanno dati significativi
-    backupData.workEntries = backupData.workEntries.filter(entry => {
-      if (!entry) return false;
-      
-      // Verifica se l'entry ha dati significativi
-      // Controlla entrambi i formati possibili (snake_case e camelCase)
-      return (
-        (entry.site_name && entry.site_name.trim() !== '') ||
-        (entry.siteName && entry.siteName.trim() !== '') ||
-        (entry.work_start_1 && entry.work_start_1.trim() !== '') ||
-        (entry.workStart1 && entry.workStart1.trim() !== '') ||
-        (entry.work_end_1 && entry.work_end_1.trim() !== '') ||
-        (entry.workEnd1 && entry.workEnd1.trim() !== '')
-      );
-    });
-    
-    const filteredCount = originalCount - backupData.workEntries.length;
-    console.log(`🧹 BACKUP FILTRO: ${filteredCount} inserimenti vuoti rimossi dal backup (${(filteredCount/originalCount*100).toFixed(1)}%)`);
-    
-    return backupData;
-  }
-  
-  // Importa backup con filtraggio degli inserimenti vuoti
-  async importFilteredBackup(backupData) {
-    try {
-      if (!backupData) {
-        throw new Error('Dati di backup non validi');
-      }
-      
-      // Filtra gli inserimenti vuoti se non è già stato fatto
-      const filteredData = this.validateAndFilterWorkEntries(backupData);
-      
-      // Ripristina i dati filtrati nel database
-      await DatabaseService.restoreData(filteredData);
-      
-      // Registra l'operazione di importazione
-      await DatabaseService.recordBackup({
-        backup_name: filteredData.backupInfo?.name || 'filtered-restore',
-        backup_type: 'filtered-import',
-        status: 'completed',
-        notes: `Ripristino filtrato con ${filteredData.workEntries?.length || 0} inserimenti validi`
-      });
-      
-      return {
-        success: true,
-        fileName: filteredData.backupInfo?.name || 'filtered-restore',
-        recordsCount: {
-          workEntries: filteredData.workEntries?.length || 0,
-          standbyDays: filteredData.standbyDays?.length || 0,
-          settings: filteredData.settings?.length || 0
-        }
-      };
-    } catch (error) {
-      console.error('Errore durante il ripristino filtrato:', error);
-      throw error;
-    }
-  }
-
-  // Get backup statistics
-  async getBackupStats() {
-    try {
-      const allBackups = await this.listAllBackups();
-      const totalSize = allBackups.reduce((sum, backup) => sum + (backup.size || 0), 0);
-      
-      return {
-        totalBackups: allBackups.length,
-        totalSize,
-        latestBackup: allBackups[0]?.created || null,
-        oldestBackup: allBackups[allBackups.length - 1]?.created || null
-      };
-    } catch (error) {
-      console.error('Error getting backup stats:', error);
-      return {
-        totalBackups: 0,
-        totalSize: 0,
-        latestBackup: null,
-        oldestBackup: null
-      };
-    }
-  }
-
-  // Auto backup (called periodically)
-  async autoBackup() {
-    try {
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const backupName = `auto-backup-${timestamp}.json`;
-      
-      const result = await this.createLocalBackup(backupName);
-      
-      // Keep only last 5 auto backups
-      await this.cleanupOldAutoBackups();
-      
-      return result;
-    } catch (error) {
-      console.error('Error in auto backup:', error);
-      throw error;
-    }
-  }
-
-  // Cleanup old auto backups
-  async cleanupOldAutoBackups() {
-    try {
-      const backups = await this.listLocalBackups();
-      const autoBackups = backups.filter(backup => backup.fileName.startsWith('auto-backup-'));
-      
-      // Keep only the 5 most recent auto backups
-      if (autoBackups.length > 5) {
-        const backupsToDelete = autoBackups.slice(5);
-        
-        for (const backup of backupsToDelete) {
-          await this.deleteLocalBackup(backup.fileName);
-        }
-        
-        console.log(`Cleaned up ${backupsToDelete.length} old auto backups`);
-      }
-    } catch (error) {
-      console.error('Error cleaning up old backups:', error);
-    }
-  }
-
-  // Create local backup with custom name and location
-  async createCustomLocalBackup(customName, saveToDownloads = false) {
-    try {
-      await this.ensureBackupDirectory();
-      
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const fileName = customName.endsWith('.json') ? customName : `${customName}.json`;
-      
-      // Determine save location
-      let filePath;
-      if (saveToDownloads) {
-        // Save to Downloads folder (requires permission on Android)
-        filePath = `${FileSystem.documentDirectory}../Downloads/${fileName}`;
-      } else {
-        // Save to app's backup directory
-        filePath = `${this.backupDirectory}${fileName}`;
-      }
-      
-      // Get all data from database
-      const data = await DatabaseService.getAllData();
-      
-      // Add backup metadata
-      const backupData = {
-        ...data,
-        backupInfo: {
-          name: fileName,
-          created: new Date().toISOString(),
-          type: saveToDownloads ? 'download' : 'local',
-          version: '1.0',
-          app: 'WorkTracker'
-        }
-      };
-      
-      // Write to file
-      await FileSystem.writeAsStringAsync(filePath, JSON.stringify(backupData, null, 2));
-      
-      // Record backup in database
-      await DatabaseService.recordBackup({
-        backup_name: fileName,
-        backup_type: saveToDownloads ? 'download' : 'local',
-        file_path: filePath,
-        status: 'completed'
-      });
-      
-      console.log('Custom backup created:', filePath);
-      return {
-        success: true,
-        filePath,
-        fileName,
-        size: (await FileSystem.getInfoAsync(filePath)).size,
-        location: saveToDownloads ? 'Downloads' : 'App Directory'
-      };
-    } catch (error) {
-      console.error('Error creating custom backup:', error);
-      throw error;
-    }
-  }
-
-  // Create backup with folder picker
-  async createBackupWithFolderPicker(customName) {
-    try {
-      // Get all data from database
-      const data = await DatabaseService.getAllData();
-      
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const fileName = customName.endsWith('.json') ? customName : `${customName}.json`;
-      
-      // Add backup metadata
-      const backupData = {
-        ...data,
-        backupInfo: {
-          name: fileName,
-          created: new Date().toISOString(),
-          type: 'custom',
-          version: '1.0',
-          app: 'WorkTracker'
-        }
-      };
-
-      // Convert data to string
-      const jsonContent = JSON.stringify(backupData, null, 2);
-      
-      // Create temporary file
-      const tempPath = `${FileSystem.cacheDirectory}${fileName}`;
-      await FileSystem.writeAsStringAsync(tempPath, jsonContent);
-      
-      // Use sharing to let user choose where to save
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(tempPath, {
-          mimeType: 'application/json',
-          dialogTitle: `Salva ${fileName}`
-        });
-        
-        // Record backup in database
-        await DatabaseService.recordBackup({
-          backup_name: fileName,
-          backup_type: 'custom',
-          file_path: 'user_selected',
-          status: 'completed'
-        });
-        
-        // Clean up temp file
-        await FileSystem.deleteAsync(tempPath, { idempotent: true });
-        
+      if (result.success) {
         return {
           success: true,
-          fileName,
-          location: 'Posizione scelta dall\'utente',
-          size: jsonContent.length
+          fileName: result.fileName,
+          jsonData: JSON.stringify(result.data, null, 2),
+          shareText: `Backup WorkTracker - ${result.fileName}\n\nCreato: ${new Date().toLocaleString('it-IT')}\n\nPer ripristinare: importa questo file nell'app.`,
+          data: result.data
         };
-      } else {
-        throw new Error('Sharing non disponibile su questo dispositivo');
       }
+      
+      throw new Error('Creazione backup fallita');
+      
     } catch (error) {
-      console.error('Error creating backup with folder picker:', error);
+      console.error('❌ Errore export backup:', error);
       throw error;
     }
   }
 
-  // 🗑️ Pulisci backup vecchi
-  async cleanOldBackups(daysToKeep = 7) {
+  // ✅ IMPORT BACKUP da testo/file
+  async importBackup(backupData = null) {
     try {
-      await this.ensureBackupDirectory();
+      console.log('📥 Importazione backup JavaScript...');
       
-      const backupFiles = await FileSystem.readDirectoryAsync(this.backupDirectory);
-      const jsonFiles = backupFiles.filter(file => file.endsWith('.json'));
+      let parsedData;
       
-      let deletedCount = 0;
-      let freedSpace = 0;
-      const cutoffDate = new Date();
-      cutoffDate.setDate(cutoffDate.getDate() - daysToKeep);
-      
-      for (const fileName of jsonFiles) {
-        const filePath = `${this.backupDirectory}${fileName}`;
-        const fileInfo = await FileSystem.getInfoAsync(filePath);
-        
-        if (fileInfo.exists && fileInfo.modificationTime) {
-          const fileDate = new Date(fileInfo.modificationTime * 1000);
-          
-          if (fileDate < cutoffDate) {
-            // Backup più vecchio di daysToKeep giorni
-            freedSpace += fileInfo.size || 0;
-            await FileSystem.deleteAsync(filePath);
-            deletedCount++;
-            console.log(`🗑️ Eliminato backup vecchio: ${fileName}`);
-          }
-        }
+      if (typeof backupData === 'string') {
+        parsedData = JSON.parse(backupData);
+      } else if (typeof backupData === 'object') {
+        parsedData = backupData;
+      } else {
+        throw new Error('Formato backup non valido');
       }
+
+      // Valida formato
+      if (!this.validateBackupFormat(parsedData)) {
+        throw new Error('Formato backup non valido o corrotto');
+      }
+
+      // Ripristina nel database
+      await DatabaseService.restoreFromBackup(parsedData);
+      
+      console.log('✅ Backup importato con successo');
       
       return {
-        deletedCount,
-        freedSpace,
-        remainingBackups: jsonFiles.length - deletedCount
+        success: true,
+        backupName: parsedData.backupInfo?.name || 'backup-importato',
+        importDate: new Date().toISOString()
       };
+      
     } catch (error) {
-      console.error('Error cleaning old backups:', error);
+      console.error('❌ Errore importazione backup:', error);
       throw error;
     }
   }
 
-  // Legge il contenuto di un file di backup con log dettagliati
-  async readBackupFile(filePath, autoFilter = false) {
+  // ✅ LISTA BACKUP JAVASCRIPT (AsyncStorage)
+  async listLocalBackups() {
     try {
-      console.log(`🔍 Lettura file di backup: ${filePath}`);
-      const fileContent = await FileSystem.readAsStringAsync(filePath);
+      // 1. Carica backup JavaScript tradizionali
+      const jsBackups = await AsyncStorage.getItem('javascript_backups');
+      const parsedJsBackups = jsBackups ? JSON.parse(jsBackups) : [];
       
-      try {
-        const backupData = JSON.parse(fileContent);
-
-        // Validazione del contenuto del backup
-        if (!backupData || typeof backupData !== 'object') {
-          console.error('❌ Il file di backup non contiene dati validi');
-          throw new Error('Il file di backup non contiene dati validi');
-        }
-        
-        // Gestisce entrambi i tipi possibili di backup: con workEntries come array o come proprietà di un oggetto
-        if (!Array.isArray(backupData.workEntries) && (!backupData.data || !Array.isArray(backupData.data.workEntries))) {
-          console.warn('⚠️ Il backup non contiene array workEntries valido');
-          
-          // Cerca di ricostruire la struttura se possibile
-          if (!backupData.workEntries) {
-            backupData.workEntries = [];
-            console.warn('⚠️ Creato array workEntries vuoto');
+      // 2. Carica backup nativi (chiavi che iniziano con backup_)
+      const allKeys = await AsyncStorage.getAllKeys();
+      const nativeBackupKeys = allKeys.filter(key => 
+        key.startsWith('backup_auto_') || key.startsWith('backup_manual_')
+      );
+      
+      // 3. Costruisci array backup nativi
+      const nativeBackups = await Promise.all(
+        nativeBackupKeys.map(async (key) => {
+          try {
+            const data = await AsyncStorage.getItem(key);
+            if (!data) return null;
+            
+            const backupData = JSON.parse(data);
+            
+            // Estrai timestamp dal nome del backup e convertilo in formato ISO
+            const timestampMatch = key.match(/(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2})/);
+            let timestamp;
+            
+            if (timestampMatch) {
+              // Converte 2025-07-30T19-36-58 → 2025-07-30T19:36:58.000Z
+              const rawTimestamp = timestampMatch[1];
+              const isoTimestamp = rawTimestamp.replace(/-(\d{2})-(\d{2})$/, ':$1:$2') + '.000Z';
+              timestamp = isoTimestamp;
+              
+              console.log(`🕐 Backup ${key}: ${rawTimestamp} → ${isoTimestamp}`);
+            } else {
+              timestamp = new Date().toISOString();
+              console.log(`⚠️ Backup ${key}: formato timestamp non riconosciuto, usando data corrente`);
+            }
+            
+            return {
+              key: key,
+              fileName: key + '.json',
+              createdAt: timestamp,
+              type: key.includes('auto') ? 'automatic' : 'manual',
+              system: 'native',
+              size: data.length,
+              entries: backupData?.metadata?.entries || backupData?.workEntries?.length || 0
+            };
+          } catch (error) {
+            console.error(`Errore lettura backup nativo ${key}:`, error);
+            return null;
           }
-        }
-        
-        // Applica il filtro se richiesto
-        if (autoFilter) {
-          return this.validateAndFilterWorkEntries(backupData);
-        }
+        })
+      );
+      
+      // 4. Filtra backup nativi validi e combina con JavaScript
+      const validNativeBackups = nativeBackups.filter(backup => backup !== null);
+      const allBackups = [...parsedJsBackups, ...validNativeBackups];
+      
+      console.log(`📂 Lista backup: ${parsedJsBackups.length} JS + ${validNativeBackups.length} Native = ${allBackups.length} totali`);
+      
+      return allBackups;
+    } catch (error) {
+      console.error('Errore lettura lista backup:', error);
+      return [];
+    }
+  }
 
-        console.log(`✅ Contenuto del backup validato con successo: ${backupData.workEntries?.length || 0} inserimenti trovati`);
-        return backupData;
-      } catch (jsonError) {
-        console.error('❌ Errore nella conversione del file JSON:', jsonError);
-        throw new Error(`Il file di backup non è in formato JSON valido: ${jsonError.message}`);
+  // Lista tutti i backup (alias per compatibilità)
+  async listAllBackups() {
+    return await this.listLocalBackups();
+  }
+
+  // ✅ ELIMINA BACKUP JAVASCRIPT
+  async deleteLocalBackup(backupKey) {
+    try {
+      console.log(`🗑️ Eliminazione backup: ${backupKey}`);
+      
+      // Rimuovi da AsyncStorage
+      await AsyncStorage.removeItem(backupKey);
+      
+      // Aggiorna lista
+      const backups = await this.listLocalBackups();
+      const updatedBackups = backups.filter(backup => backup.key !== backupKey);
+      await AsyncStorage.setItem('javascript_backups', JSON.stringify(updatedBackups));
+      
+      console.log('✅ Backup eliminato con successo');
+      return true;
+      
+    } catch (error) {
+      console.error('❌ Errore eliminazione backup:', error);
+      throw error;
+    }
+  }
+
+  // ✅ AGGIORNA LISTA BACKUP
+  async updateBackupList(fileName, backupKey, type = 'manual') {
+    try {
+      const currentBackups = await AsyncStorage.getItem('javascript_backups');
+      const backups = currentBackups ? JSON.parse(currentBackups) : [];
+      
+      const backupData = await AsyncStorage.getItem(backupKey);
+      const size = backupData ? backupData.length : 0;
+      
+      const newBackup = {
+        name: fileName,
+        key: backupKey,
+        date: new Date().toISOString(),
+        type: type,
+        size: size
+      };
+
+      const updatedBackups = [newBackup, ...backups];
+      await AsyncStorage.setItem('javascript_backups', JSON.stringify(updatedBackups));
+      
+      console.log(`📝 Lista backup aggiornata: ${updatedBackups.length} backup totali`);
+    } catch (error) {
+      console.error('Errore aggiornamento lista backup:', error);
+    }
+  }
+
+  // ✅ VALIDA FORMATO BACKUP
+  validateBackupFormat(backupData) {
+    try {
+      if (!backupData || typeof backupData !== 'object') {
+        console.log('❌ Backup non è un oggetto valido');
+        return false;
+      }
+
+      if (!backupData.backupInfo) {
+        console.log('❌ Metadati backup mancanti');
+        return false;
+      }
+
+      const requiredFields = ['name', 'created', 'version', 'app'];
+      for (const field of requiredFields) {
+        if (!backupData.backupInfo[field]) {
+          console.log(`❌ Campo richiesto mancante: ${field}`);
+          return false;
+        }
+      }
+
+      console.log('✅ Formato backup valido');
+      return true;
+      
+    } catch (error) {
+      console.error('❌ Errore validazione backup:', error);
+      return false;
+    }
+  }
+
+  // ✅ BACKUP AUTOMATICO (delega a JavaScriptBackupService)
+  async autoBackup() {
+    try {
+      console.log('🔄 Backup automatico JavaScript...');
+      return await this.jsBackupService.executeBackup();
+    } catch (error) {
+      console.error('❌ Errore backup automatico:', error);
+      throw error;
+    }
+  }
+
+  // ✅ PULIZIA BACKUP VECCHI
+  async cleanupOldAutoBackups() {
+    try {
+      return await this.jsBackupService.cleanupOldBackups();
+    } catch (error) {
+      console.error('❌ Errore pulizia backup:', error);
+    }
+  }
+
+  // ✅ CONFIGURA BACKUP AUTOMATICO
+  async setupAutoBackup(enabled, time = '02:00') {
+    try {
+      await AsyncStorage.setItem('auto_backup_enabled', JSON.stringify(enabled));
+      await AsyncStorage.setItem('auto_backup_time', time);
+      
+      if (enabled) {
+        await this.jsBackupService.restartAutoBackup();
+        console.log(`✅ Backup automatico attivato per le ${time}`);
+      } else {
+        await this.jsBackupService.stopAutoBackup();
+        console.log('🛑 Backup automatico disattivato');
+      }
+      
+      return true;
+    } catch (error) {
+      console.error('❌ Errore configurazione backup automatico:', error);
+      throw error;
+    }
+  }
+
+  // ✅ OTTIENI STATISTICHE BACKUP
+  async getBackupStats() {
+    try {
+      // Assicurati che il servizio sia inizializzato
+      if (!this.jsBackupService.isInitialized) {
+        console.log('📱 Inizializzazione JavaScriptBackupService per statistiche...');
+        await this.jsBackupService.initialize();
+      }
+      
+      const localBackups = await this.listLocalBackups();
+      const jsStats = await this.jsBackupService.getBackupStats();
+      
+      return {
+        totalBackups: localBackups.length,
+        manualBackups: localBackups.filter(b => b.type === 'manual').length,
+        automaticBackups: localBackups.filter(b => b.type === 'automatic').length,
+        lastBackup: jsStats?.lastBackup,
+        nextBackup: jsStats?.nextBackup,
+        autoBackupEnabled: jsStats?.enabled || false,
+        isActive: jsStats?.isActive || false,
+        system: 'javascript_only',
+        debug: {
+          jsServiceInitialized: this.jsBackupService.isInitialized,
+          hasBackupTimer: jsStats?.isActive,
+          settings: await this.jsBackupService.getBackupSettings()
+        }
+      };
+    } catch (error) {
+      console.error('Errore calcolo statistiche backup:', error);
+      return null;
+    }
+  }
+
+  // ✅ CONDIVIDI BACKUP (React Native Share)
+  async shareBackup(backupKey) {
+    try {
+      console.log('📱 Condivisione backup JavaScript...');
+      
+      const backupData = await AsyncStorage.getItem(backupKey);
+      if (!backupData) {
+        throw new Error('Backup non trovato');
+      }
+
+      const parsedBackup = JSON.parse(backupData);
+      const fileName = parsedBackup.backupInfo?.name || 'backup.json';
+      
+      // Usa React Native Share se disponibile
+      if (Platform.OS === 'android' || Platform.OS === 'ios') {
+        try {
+          const { Share } = require('react-native');
+          
+          await Share.share({
+            message: `Backup WorkTracker - ${fileName}\n\nCreato: ${new Date(parsedBackup.backupInfo.created).toLocaleString('it-IT')}\n\nDati JSON:\n${backupData}`,
+            title: `Backup ${fileName}`
+          });
+          
+          console.log('✅ Backup condiviso tramite Share nativo');
+          return true;
+        } catch (shareError) {
+          console.warn('⚠️ Share nativo non disponibile:', shareError);
+        }
+      }
+      
+      // Fallback: mostra i dati in un alert (per debug)
+      Alert.alert(
+        'Backup Pronto',
+        `Il backup è stato preparato. Nome: ${fileName}\n\nUsa la funzione di esportazione per salvare in file.`,
+        [{ text: 'OK' }]
+      );
+      
+      return true;
+      
+    } catch (error) {
+      console.error('❌ Errore condivisione backup:', error);
+      throw error;
+    }
+  }
+
+  // ✅ TEST BACKUP SYSTEM
+  async testBackupSystem() {
+    try {
+      console.log('🧪 Test sistema backup JavaScript...');
+      
+      // Test creazione backup
+      const testResult = await this.createLocalBackup('test-backup');
+      
+      if (testResult.success) {
+        // Test importazione
+        const importResult = await this.importBackup(testResult.data);
+        
+        if (importResult.success) {
+          // Pulizia test
+          await this.deleteLocalBackup(testResult.backupKey);
+          
+          Alert.alert(
+            '✅ Test Backup Riuscito',
+            'Il sistema backup JavaScript funziona correttamente!',
+            [{ text: 'OK' }]
+          );
+          
+          console.log('✅ Test backup JavaScript completato con successo');
+          return true;
+        }
+      }
+      
+      throw new Error('Test fallito');
+      
+    } catch (error) {
+      console.error('❌ Test backup fallito:', error);
+      
+      Alert.alert(
+        '❌ Test Backup Fallito',
+        `Errore durante il test: ${error.message}`,
+        [{ text: 'OK' }]
+      );
+      
+      return false;
+    }
+  }
+
+  // 📊 STATISTICHE BACKUP (Nativo o JavaScript)
+  async getBackupStats() {
+    try {
+      if (!this.useJavaScriptSystem && this.nativeBackupService.getSystemStatus().isNativeReady) {
+        // Usa sistema nativo
+        const nativeStats = await this.nativeBackupService.getBackupStats();
+        return {
+          ...nativeStats,
+          systemInfo: {
+            type: 'native',
+            description: 'Sistema backup NATIVO - Funziona anche con app chiusa',
+            isReliable: true,
+            hasNotifications: true
+          }
+        };
+      } else {
+        // Usa sistema JavaScript
+        const jsStats = await this.jsBackupService.getBackupStats();
+        return {
+          ...jsStats,
+          systemInfo: {
+            type: 'javascript',
+            description: 'Sistema backup JavaScript - Solo app aperta',
+            isReliable: false,
+            hasNotifications: false
+          }
+        };
       }
     } catch (error) {
-      console.error('Errore durante la lettura del file di backup:', error);
-      throw error;
+      console.error('❌ Errore calcolo statistiche backup:', error);
+      return null;
+    }
+  }
+
+  // ⚙️ AGGIORNA IMPOSTAZIONI BACKUP (Nativo o JavaScript)
+  async updateBackupSettings(enabled, time) {
+    try {
+      if (!this.useJavaScriptSystem && this.nativeBackupService.getSystemStatus().isNativeReady) {
+        // Usa sistema nativo
+        console.log('🔄 Aggiornamento impostazioni backup NATIVO');
+        return await this.nativeBackupService.updateBackupSettings(enabled, time);
+      } else {
+        // Usa sistema JavaScript
+        console.log('🔄 Aggiornamento impostazioni backup JavaScript');
+        return await this.jsBackupService.updateBackupSettings(enabled, time);
+      }
+    } catch (error) {
+      console.error('❌ Errore aggiornamento impostazioni backup:', error);
+      return false;
+    }
+  }
+
+  // 📋 OTTIENI IMPOSTAZIONI BACKUP (Nativo o JavaScript)
+  async getBackupSettings() {
+    try {
+      if (!this.useJavaScriptSystem && this.nativeBackupService.getSystemStatus().isNativeReady) {
+        // Usa sistema nativo
+        return await this.nativeBackupService.getBackupSettings();
+      } else {
+        // Usa sistema JavaScript
+        return await this.jsBackupService.getBackupSettings();
+      }
+    } catch (error) {
+      console.error('❌ Errore lettura impostazioni backup:', error);
+      return { enabled: false, time: '02:00' };
+    }
+  }
+
+  // 💾 BACKUP MANUALE (Nativo o JavaScript)
+  async createManualBackup() {
+    try {
+      if (!this.useJavaScriptSystem && this.nativeBackupService.getSystemStatus().isNativeReady) {
+        // Usa sistema nativo
+        console.log('💾 Creazione backup manuale NATIVO');
+        return await this.nativeBackupService.executeBackup(false);
+      } else {
+        // Usa sistema JavaScript standard
+        console.log('💾 Creazione backup manuale JavaScript');
+        return await this.createLocalBackup('manual-backup');
+      }
+    } catch (error) {
+      console.error('❌ Errore backup manuale:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  // 💾 BACKUP MANUALE CON SELEZIONE DESTINAZIONE (Expo-friendly)
+  async createManualBackupWithDestinationChoice() {
+    try {
+      console.log('💾 Creazione backup manuale con selezione destinazione...');
+      
+      // Ottieni dati dal database
+      const data = await DatabaseService.getAllData();
+      
+      if (!data || Object.keys(data).length === 0) {
+        throw new Error('Nessun dato trovato per il backup');
+      }
+
+      // Crea metadati backup
+      const timestamp = new Date().toISOString();
+      const now = new Date();
+      const fileName = `WorkT-backup-${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}-${String(now.getMinutes()).padStart(2, '0')}-${String(now.getSeconds()).padStart(2, '0')}.json`;
+      
+      const backupData = {
+        backupInfo: {
+          name: fileName,
+          created: timestamp,
+          type: 'manual',
+          version: '1.0',
+          app: 'WorkTracker',
+          entries: data.work_entries?.length || 0
+        },
+        ...data
+      };
+
+      // Prova prima expo-sharing se disponibile
+      try {
+        const jsonString = JSON.stringify(backupData, null, 2);
+        
+        // Prova expo-sharing per salvare direttamente
+        try {
+          const Sharing = await import('expo-sharing');
+          const FileSystem = await import('expo-file-system');
+          
+          // Crea file temporaneo
+          const fileUri = `${FileSystem.documentDirectory}${fileName}`;
+          await FileSystem.writeAsStringAsync(fileUri, jsonString);
+          
+          console.log('📁 File backup creato:', fileUri);
+          
+          // Condividi/Salva con expo-sharing
+          if (await Sharing.isAvailableAsync()) {
+            await Sharing.shareAsync(fileUri, {
+              mimeType: 'application/json',
+              dialogTitle: `Backup WorkT - ${new Date().toLocaleDateString('it-IT')}`,
+              UTI: 'public.json'
+            });
+            
+            console.log('✅ Backup condiviso con expo-sharing');
+            return { 
+              success: true, 
+              method: 'expo-sharing', 
+              fileName,
+              path: fileUri,
+              message: 'Backup salvato e condiviso con successo!'
+            };
+          }
+        } catch (expoError) {
+          console.log('📱 expo-sharing non disponibile, uso Share API');
+        }
+        
+        // Fallback: React Native Share API
+        try {
+          const { Share } = require('react-native');
+          const shareResult = await Share.share({
+            message: `Backup WorkT - ${new Date().toLocaleDateString('it-IT')}\\n\\nFile: ${fileName}`,
+            title: 'Backup WorkT',
+          });
+          
+          if (shareResult.action === Share.sharedAction) {
+            // Salva anche in AsyncStorage per riferimento
+            const backupKey = `manual_backup_${timestamp.replace(/[:.]/g, '_')}`;
+            await AsyncStorage.setItem(backupKey, jsonString);
+            await this.updateBackupList(fileName, backupKey, 'manual');
+            
+            console.log('✅ Backup condiviso con Share API');
+            return { 
+              success: true, 
+              method: 'share-api', 
+              fileName,
+              backupKey,
+              message: 'Backup condiviso con successo!'
+            };
+          }
+        } catch (shareError) {
+          console.log('📱 Share API fallita:', shareError.message);
+        }
+        
+      } catch (shareError) {
+        console.log('📱 Sistemi di condivisione non disponibili, salvo in AsyncStorage');
+      }
+      
+      // Ultimo fallback: AsyncStorage
+      const backupKey = `manual_backup_${timestamp.replace(/[:.]/g, '_')}`;
+      await AsyncStorage.setItem(backupKey, JSON.stringify(backupData));
+      
+      // Aggiorna lista backup
+      await this.updateBackupList(fileName, backupKey, 'manual');
+      
+      console.log('✅ Backup salvato in AsyncStorage');
+      return { 
+        success: true, 
+        method: 'asyncstorage', 
+        fileName,
+        backupKey,
+        message: 'Backup salvato nella memoria dell\'app!'
+      };
+      
+    } catch (error) {
+      console.error('❌ Errore backup manuale con destinazione:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  // 📱 STATO SISTEMA (Diagnostica)
+  getSystemStatus() {
+    const nativeStatus = this.nativeBackupService.getSystemStatus();
+    const jsStatus = this.jsBackupService.getSystemStatus();
+    
+    return {
+      current: this.useJavaScriptSystem ? 'javascript' : 'native',
+      native: nativeStatus,
+      javascript: jsStatus,
+      recommendation: nativeStatus.isNativeReady 
+        ? 'Sistema NATIVO attivo - Backup affidabile 24/7'
+        : 'Sistema JavaScript attivo - Backup solo app aperta'
+    };
+  }
+
+  // 📁 GESTIONE DESTINAZIONI BACKUP (Solo sistema nativo)
+  getAvailableDestinations() {
+    if (!this.useJavaScriptSystem && this.nativeBackupService.getSystemStatus().isNativeReady) {
+      return this.nativeBackupService.getAvailableDestinations();
+    } else {
+      // Sistema JavaScript supporta solo AsyncStorage
+      return [{
+        id: 'asyncstorage',
+        name: 'Memoria App (AsyncStorage)',
+        description: 'Salva nella memoria interna dell\'app (solo opzione disponibile in JavaScript)',
+        icon: 'phone-portrait-outline',
+        available: true,
+        reliable: true
+      }];
+    }
+  }
+
+  // ⚙️ AGGIORNA DESTINAZIONE BACKUP
+  async updateBackupDestination(destination, customPath = null) {
+    try {
+      if (!this.useJavaScriptSystem && this.nativeBackupService.getSystemStatus().isNativeReady) {
+        return await this.nativeBackupService.updateBackupDestination(destination, customPath);
+      } else {
+        console.log('📱 Sistema JavaScript: destinazione backup fissa (AsyncStorage)');
+        return true; // JavaScript usa sempre AsyncStorage
+      }
+    } catch (error) {
+      console.error('❌ Errore aggiornamento destinazione backup:', error);
+      return false;
+    }
+  }
+
+  // 🔄 AGGIORNA TUTTE LE IMPOSTAZIONI BACKUP
+  async updateAllBackupSettings(enabled, time, destination = null, customPath = null) {
+    try {
+      if (!this.useJavaScriptSystem && this.nativeBackupService.getSystemStatus().isNativeReady) {
+        // Sistema nativo supporta destinazioni multiple
+        return await this.nativeBackupService.updateAllBackupSettings(enabled, time, destination, customPath);
+      } else {
+        // Sistema JavaScript usa solo enabled e time
+        return await this.updateBackupSettings(enabled, time);
+      }
+    } catch (error) {
+      console.error('❌ Errore aggiornamento completo impostazioni backup:', error);
+      return false;
     }
   }
 }
 
-// Crea e esporta una singola istanza (Singleton Pattern)
-const BackupServiceInstance = new BackupService();
-export default BackupServiceInstance;
+export default new BackupService();

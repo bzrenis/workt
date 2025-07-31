@@ -215,6 +215,62 @@ class DatabaseService {
         console.log("Migrazione 'viaggi' completata per supporto multi-turno.");
       }
 
+      // Migrazione robusta: aggiungi colonna is_fixed_day per giorni fissi se manca
+      if (!await columnExists(DATABASE_TABLES.WORK_ENTRIES, 'is_fixed_day')) {
+        console.log(`Migrazione: la colonna 'is_fixed_day' non esiste nella tabella ${DATABASE_TABLES.WORK_ENTRIES}. Aggiungo...`);
+        await db.execAsync(`ALTER TABLE ${DATABASE_TABLES.WORK_ENTRIES} ADD COLUMN is_fixed_day INTEGER DEFAULT 0`);
+        console.log("Migrazione 'is_fixed_day' completata per supporto giorni fissi (ferie, permessi, malattia).");
+      }
+
+      // Migrazione robusta: aggiungi colonna fixed_earnings per guadagni fissi se manca
+      if (!await columnExists(DATABASE_TABLES.WORK_ENTRIES, 'fixed_earnings')) {
+        console.log(`Migrazione: la colonna 'fixed_earnings' non esiste nella tabella ${DATABASE_TABLES.WORK_ENTRIES}. Aggiungo...`);
+        await db.execAsync(`ALTER TABLE ${DATABASE_TABLES.WORK_ENTRIES} ADD COLUMN fixed_earnings REAL DEFAULT 0`);
+        console.log("Migrazione 'fixed_earnings' completata per supporto guadagni fissi.");
+      }
+
+      // ✅ PULIZIA AUTOMATICA: Rimuovi voci duplicate vuote create da ripristini backup falliti
+      console.log('🔍 Verifica voci duplicate vuote...');
+      const duplicateEntries = await db.getAllAsync(`
+        SELECT date, COUNT(*) as count 
+        FROM ${DATABASE_TABLES.WORK_ENTRIES} 
+        WHERE total_earnings = 0 
+          AND (work_start_1 = '' OR work_start_1 IS NULL)
+          AND (work_end_1 = '' OR work_end_1 IS NULL)
+          AND (site_name = '' OR site_name IS NULL)
+        GROUP BY date 
+        HAVING count > 1
+      `);
+      
+      if (duplicateEntries.length > 0) {
+        console.log(`🗑️ Trovate ${duplicateEntries.length} date con voci duplicate vuote, pulizia in corso...`);
+        
+        for (const duplicate of duplicateEntries) {
+          // Mantieni solo la voce più recente per ogni data
+          await db.runAsync(`
+            DELETE FROM ${DATABASE_TABLES.WORK_ENTRIES} 
+            WHERE date = ? 
+              AND total_earnings = 0 
+              AND (work_start_1 = '' OR work_start_1 IS NULL)
+              AND (work_end_1 = '' OR work_end_1 IS NULL)
+              AND (site_name = '' OR site_name IS NULL)
+              AND id NOT IN (
+                SELECT MAX(id) FROM ${DATABASE_TABLES.WORK_ENTRIES} 
+                WHERE date = ? 
+                  AND total_earnings = 0 
+                  AND (work_start_1 = '' OR work_start_1 IS NULL)
+                  AND (work_end_1 = '' OR work_end_1 IS NULL)
+                  AND (site_name = '' OR site_name IS NULL)
+              )
+          `, [duplicate.date, duplicate.date]);
+          
+          console.log(`✅ Pulite voci duplicate per data ${duplicate.date}`);
+        }
+        console.log('✅ Pulizia voci duplicate completata');
+      } else {
+        console.log('✅ Nessuna voce duplicata vuota trovata');
+      }
+
       // NOTA: Le vecchie colonne standby_* non vengono rimosse per retrocompatibilità,
       // ma non verranno più popolate dalle nuove versioni dell'app.
 
@@ -762,6 +818,12 @@ class DatabaseService {
     }, 'Delete work entry');
   }
   // Standby calendar methods
+  /**
+   * Imposta un giorno come giorno di reperibilità
+   * @param {string} date - La data in formato ISO (YYYY-MM-DD)
+   * @param {boolean} isStandby - Se il giorno è di reperibilità o meno
+   * @returns {Promise<void>}
+   */
   async setStandbyDay(date, isStandby) {
     return await this.safeExecute(async () => {
       await this.db.runAsync(`
@@ -770,7 +832,13 @@ class DatabaseService {
       `, [date, isStandby ? 1 : 0]);
     }, 'Set standby day');
   }
-
+  
+  /**
+   * Ottiene i giorni di reperibilità per un mese specifico
+   * @param {number} year - L'anno
+   * @param {number} month - Il mese (1-12)
+   * @returns {Promise<Array>} I giorni di reperibilità per il mese specificato
+   */
   async getStandbyDays(year, month) {
     return await this.safeExecute(async () => {
       const result = await this.db.getAllAsync(`
@@ -779,6 +847,166 @@ class DatabaseService {
       `, [`${year}-${month.toString().padStart(2, '0')}`]);
       return result || [];
     }, 'Get standby days');
+  }
+  
+  /**
+   * Verifica se un giorno specifico è di reperibilità
+   * @param {string} date - La data in formato ISO (YYYY-MM-DD)
+   * @returns {Promise<boolean>} True se il giorno è di reperibilità, false altrimenti
+   */
+  async isStandbyDay(date) {
+    return await this.safeExecute(async () => {
+      const result = await this.db.getFirstAsync(`
+        SELECT is_standby FROM ${DATABASE_TABLES.STANDBY_CALENDAR}
+        WHERE date = ?
+      `, [date]);
+      return result ? result.is_standby === 1 : false;
+    }, 'Check if standby day');
+  }
+  
+  /**
+   * Imposta reperibilità per un intervallo di date
+   * @param {string} startDate - La data di inizio in formato ISO (YYYY-MM-DD)
+   * @param {string} endDate - La data di fine in formato ISO (YYYY-MM-DD)
+   * @param {boolean} isStandby - Se i giorni sono di reperibilità o meno
+   * @returns {Promise<number>} Il numero di giorni impostati
+   */
+  async setStandbyRange(startDate, endDate, isStandby) {
+    return await this.safeExecute(async () => {
+      const start = new Date(startDate);
+      const end = new Date(endDate);
+      
+      if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+        throw new Error('Date non valide');
+      }
+      
+      let current = new Date(start);
+      let count = 0;
+      
+      // Usa una transazione per eseguire tutto in batch
+      await this.db.withTransactionAsync(async () => {
+        while (current <= end) {
+          const dateStr = current.toISOString().split('T')[0];
+          await this.db.runAsync(`
+            INSERT OR REPLACE INTO ${DATABASE_TABLES.STANDBY_CALENDAR} (date, is_standby)
+            VALUES (?, ?)
+          `, [dateStr, isStandby ? 1 : 0]);
+          
+          current.setDate(current.getDate() + 1);
+          count++;
+        }
+      });
+      
+      return count;
+    }, 'Set standby range');
+  }  /**
+   * Ottiene i giorni di reperibilità per i prossimi 7 giorni
+   * @returns {Promise<Array>} I giorni di reperibilità per i prossimi 7 giorni
+   */
+  async getStandbyScheduleForNext7Days() {
+    return await this.safeExecute(async () => {
+      const today = new Date();
+      const nextWeek = new Date();
+      nextWeek.setDate(today.getDate() + 7);
+      
+      const todayStr = today.toISOString().split('T')[0];
+      const nextWeekStr = nextWeek.toISOString().split('T')[0];
+      
+      const result = await this.db.getAllAsync(`
+        SELECT * FROM ${DATABASE_TABLES.STANDBY_CALENDAR}
+        WHERE date >= ? AND date <= ? AND is_standby = 1
+        ORDER BY date ASC
+      `, [todayStr, nextWeekStr]);
+      
+      // Trasforma i dati nel formato atteso dal service di notifica
+      return (result || []).map(record => {
+        const date = new Date(record.date);
+        
+        // Crea oggetto con startDate alle 20:00 e endDate alle 8:00 del giorno dopo
+        const startDate = new Date(date);
+        startDate.setHours(20, 0, 0, 0);
+        
+        const endDate = new Date(date);
+        endDate.setDate(endDate.getDate() + 1);
+        endDate.setHours(8, 0, 0, 0);
+        
+        return {
+          id: `standby-${record.date}`,
+          startDate: startDate.toISOString(),
+          endDate: endDate.toISOString(),
+          date: record.date,
+          isStandby: record.is_standby === 1
+        };
+      });
+    }, 'Get standby schedule for next 7 days');
+  }
+  
+  /**
+   * Genera dati di esempio per la reperibilità
+   * Utile per testare il sistema di notifiche
+   * @param {boolean} clearExisting - Se cancellare i dati esistenti
+   * @returns {Promise<Array>} I giorni di reperibilità creati
+   */
+  async generateSampleStandbyData(clearExisting = false) {
+    return await this.safeExecute(async () => {
+      // Opzionalmente cancella i dati esistenti
+      if (clearExisting) {
+        await this.db.runAsync(`DELETE FROM ${DATABASE_TABLES.STANDBY_CALENDAR}`);
+      }
+      
+      const today = new Date();
+      const createdDays = [];
+      
+      // Usa una transazione per eseguire tutto in batch
+      await this.db.withTransactionAsync(async () => {
+        // Crea reperibilità per oggi e tra 2 giorni
+        const dates = [
+          today,
+          new Date(today.getTime() + 2 * 24 * 60 * 60 * 1000)
+        ];
+        
+        for (const date of dates) {
+          const dateStr = date.toISOString().split('T')[0];
+          await this.db.runAsync(`
+            INSERT OR REPLACE INTO ${DATABASE_TABLES.STANDBY_CALENDAR} (date, is_standby)
+            VALUES (?, ?)
+          `, [dateStr, 1]);
+          
+          createdDays.push(dateStr);
+        }
+      });
+      
+      console.log(`✅ Creati ${createdDays.length} giorni di reperibilità di esempio: ${createdDays.join(', ')}`);
+      return createdDays;
+    }, 'Generate sample standby data');
+  }
+  
+  /**
+   * Ottiene le impostazioni di reperibilità
+   * @returns {Promise<Object>} Le impostazioni di reperibilità
+   */
+  async getStandbySettings() {
+    return await this.safeExecute(async () => {
+      // Prima cerca impostazioni specifiche per la reperibilità
+      let settings = await this.getSetting('standbySettings', null);
+      
+      // Se non esistono impostazioni specifiche, recupera dalle impostazioni generali
+      if (!settings) {
+        const appSettings = await this.getSetting('appSettings', {});
+        settings = {
+          compensoReperibilita: appSettings.standbyAllowance || 0,
+          orarioInizio: '20:00',
+          orarioFine: '08:00',
+          notificaAnticipo: 60, // minuti prima
+          notificationsEnabled: true // Per compatibilità con scheduleStandbyReminders
+        };
+      } else if (settings.notificationsEnabled === undefined) {
+        // Assicurati che l'impostazione notificationsEnabled sia presente
+        settings.notificationsEnabled = true;
+      }
+      
+      return settings;
+    }, 'Get standby settings');
   }
 
   // Settings methods
@@ -802,7 +1030,19 @@ class DatabaseService {
         const result = await this.db.getFirstAsync(`
           SELECT value FROM ${DATABASE_TABLES.SETTINGS} WHERE key = ?
         `, [key]);
-        return result ? JSON.parse(result.value) : defaultValue;
+        const settingValue = result ? JSON.parse(result.value) : defaultValue;
+        
+        // Log per debugging contratto dopo ripristino
+        if (key === 'appSettings' && settingValue?.contract) {
+          console.log(`🔍 getSetting appSettings: Contract found`, {
+            name: settingValue.contract.name,
+            dailyRate: settingValue.contract.dailyRate,
+            hourlyRate: settingValue.contract.hourlyRate,
+            timestamp: new Date().toISOString()
+          });
+        }
+        
+        return settingValue;
       }, 'Get setting');
     });
   }  // Backup methods
@@ -816,15 +1056,38 @@ class DatabaseService {
       const { createWorkEntryFromData } = require('../utils/earningsHelper');
       
       // Trasforma ogni entry grezza in workEntry completo
-      const processedWorkEntries = rawWorkEntries.map(entry => createWorkEntryFromData(entry));
+      const processedWorkEntries = rawWorkEntries.map(entry => {
+        const processed = createWorkEntryFromData(entry);
+        
+        // 🔥 DEBUG MULTI-TURNO: Log specifico per viaggi durante export
+        if (processed.viaggi && processed.viaggi.length > 0) {
+          console.log(`📤 EXPORT: Entry ${processed.date} con multi-turno:`, {
+            viaggiCount: processed.viaggi.length,
+            workStart1: processed.workStart1,
+            workEnd1: processed.workEnd1,
+            workStart2: processed.workStart2,
+            workEnd2: processed.workEnd2,
+            viaggi: processed.viaggi
+          });
+        }
+        
+        return processed;
+      });
       
       const standbyDays = await this.db.getAllAsync(`SELECT * FROM ${DATABASE_TABLES.STANDBY_CALENDAR}`);
       const settings = await this.db.getAllAsync(`SELECT * FROM ${DATABASE_TABLES.SETTINGS}`);
+      
+      // Conta le entry con interventi per il debug
+      const entriesWithInterventi = processedWorkEntries.filter(entry => 
+        entry.interventi && Array.isArray(entry.interventi) && entry.interventi.length > 0
+      );
       
       // 🔍 DEBUG: Log dei dati estratti
       console.log('🔍 getAllData() - Work entries processati:', {
         rawCount: rawWorkEntries?.length || 0,
         processedCount: processedWorkEntries?.length || 0,
+        entriesWithInterventi: entriesWithInterventi.length,
+        totalInterventi: entriesWithInterventi.reduce((sum, entry) => sum + entry.interventi.length, 0),
         sample: processedWorkEntries?.[0] ? {
           id: processedWorkEntries[0].id,
           date: processedWorkEntries[0].date,
@@ -832,8 +1095,24 @@ class DatabaseService {
           hasInterventi: !!processedWorkEntries[0].interventi,
           interventiLength: Array.isArray(processedWorkEntries[0].interventi) ? processedWorkEntries[0].interventi.length : 'not array',
           hasWorkTimes: !!(processedWorkEntries[0].workStart1 && processedWorkEntries[0].workEnd1)
-        } : 'no entries'
+        } : 'no entries',
+        interventiDetails: entriesWithInterventi.length > 0 ? {
+          datesWithInterventi: entriesWithInterventi.map(e => `${e.date}(${e.interventi.length})`).join(', ')
+        } : 'none'
       });
+      
+      // 🚨 BACKUP INTERVENTI: Log dettagliato per debug backup
+      if (entriesWithInterventi.length > 0) {
+        console.log(`🚨 BACKUP INTERVENTI: Trovate ${entriesWithInterventi.length} entry con interventi da includere nel backup`);
+        entriesWithInterventi.forEach((entry, index) => {
+          console.log(`🚨 BACKUP INTERVENTI: ${index + 1}. Data: ${entry.date}, Interventi: ${entry.interventi.length}`);
+          entry.interventi.forEach((intervento, i) => {
+            console.log(`🚨 BACKUP INTERVENTI:    - Intervento ${i + 1}: ${intervento.start_time} - ${intervento.end_time}`);
+          });
+        });
+      } else {
+        console.log('🚨 BACKUP INTERVENTI: Nessun intervento trovato da includere nel backup');
+      }
       
       return {
         workEntries: processedWorkEntries || [],
@@ -859,10 +1138,41 @@ class DatabaseService {
       await this.db.execAsync(`DELETE FROM ${DATABASE_TABLES.SETTINGS}`);
 
       // Restore work entries
+      console.log(`🔄 RESTORE: Inizio ripristino ${data.workEntries?.length || 0} work entries...`);
+      
+      // Conta gli interventi nel backup prima del ripristino
+      const entriesWithInterventiInBackup = (data.workEntries || []).filter(entry => 
+        entry.interventi && (
+          (Array.isArray(entry.interventi) && entry.interventi.length > 0) ||
+          (typeof entry.interventi === 'string' && entry.interventi !== '[]')
+        )
+      );
+      
+      console.log(`� RESTORE INTERVENTI: Nel backup ci sono ${entriesWithInterventiInBackup.length} entry con interventi`);
+      if (entriesWithInterventiInBackup.length > 0) {
+        console.log(`� RESTORE INTERVENTI: Date con interventi: ${entriesWithInterventiInBackup.map(e => e.date).join(', ')}`);
+        
+        // Log dettagliato del primo intervento per debug
+        const firstEntryWithInterventi = entriesWithInterventiInBackup[0];
+        console.log(`🚨 RESTORE INTERVENTI: Esempio entry con interventi:`, {
+          date: firstEntryWithInterventi.date,
+          interventiType: typeof firstEntryWithInterventi.interventi,
+          interventiValue: firstEntryWithInterventi.interventi,
+          interventiCount: Array.isArray(firstEntryWithInterventi.interventi) ? firstEntryWithInterventi.interventi.length : 'not array'
+        });
+      }
+      
       for (const entry of data.workEntries || []) {
         // Normalizza l'entry per gestire snake_case/camelCase e parsing array/string
         const normalized = createWorkEntryFromData(entry);
-        console.log('🔄 RESTORE: Entry normalizzata per insert:', normalized);
+        
+        // Log dettagliato solo per entry con interventi
+        if (normalized.interventi && normalized.interventi.length > 0) {
+          console.log(`� RESTORE INTERVENTI: Entry ${normalized.date} con ${normalized.interventi.length} interventi:`, 
+            normalized.interventi.map(i => `${i.start_time}-${i.end_time}`).join(', ')
+          );
+        }
+        
         await this.insertWorkEntry(normalized);
       }
 
@@ -872,11 +1182,61 @@ class DatabaseService {
       }
 
       // Restore settings
+      console.log(`🔄 RESTORE: Inizio ripristino ${data.settings?.length || 0} settings...`);
       for (const setting of data.settings || []) {
-        await this.setSetting(setting.key, JSON.parse(setting.value));
+        try {
+          const parsedValue = JSON.parse(setting.value);
+          console.log(`🔄 RESTORE: Setting "${setting.key}" - Size: ${JSON.stringify(parsedValue).length} chars`);
+          
+          // Log speciale per appSettings
+          if (setting.key === 'appSettings') {
+            console.log(`🔄 RESTORE: appSettings contract info:`, {
+              hasContract: !!parsedValue.contract,
+              contractName: parsedValue.contract?.name,
+              dailyRate: parsedValue.contract?.dailyRate,
+              hourlyRate: parsedValue.contract?.hourlyRate,
+              monthlySalary: parsedValue.contract?.monthlySalary
+            });
+          }
+          
+          await this.setSetting(setting.key, parsedValue);
+          console.log(`✅ RESTORE: Setting "${setting.key}" ripristinato`);
+        } catch (error) {
+          console.error(`❌ RESTORE: Error ripristinando setting "${setting.key}":`, error);
+        }
       }
 
       console.log('🔄 RESTORE: Ripristino completato con successo');
+      
+      // 🚨 VERIFICA INTERVENTI: Controllo post-ripristino che gli interventi siano stati salvati
+      console.log('🚨 VERIFICA INTERVENTI: Controllo post-ripristino...');
+      const restoredEntries = await this.getAllWorkEntries();
+      const restoredEntriesWithInterventi = restoredEntries.filter(entry => {
+        const normalized = createWorkEntryFromData(entry);
+        return normalized.interventi && Array.isArray(normalized.interventi) && normalized.interventi.length > 0;
+      });
+      
+      console.log(`🚨 VERIFICA INTERVENTI: Dopo ripristino, trovate ${restoredEntriesWithInterventi.length} entry con interventi nel database`);
+      
+      if (restoredEntriesWithInterventi.length > 0) {
+        restoredEntriesWithInterventi.forEach((entry, index) => {
+          const normalized = createWorkEntryFromData(entry);
+          console.log(`🚨 VERIFICA INTERVENTI: ${index + 1}. Data: ${normalized.date}, Interventi: ${normalized.interventi.length}`);
+        });
+      } else if (entriesWithInterventiInBackup.length > 0) {
+        console.log('❌ VERIFICA INTERVENTI: PROBLEMA! Interventi erano nel backup ma non sono stati ripristinati!');
+      }
+      
+      // Verifica che le impostazioni siano state ripristinate correttamente
+      console.log('🔍 RESTORE: Verifica post-ripristino...');
+      const verifyAppSettings = await this.getSetting('appSettings');
+      console.log('🔍 RESTORE: AppSettings dopo ripristino:', {
+        exists: !!verifyAppSettings,
+        hasContract: !!verifyAppSettings?.contract,
+        contractName: verifyAppSettings?.contract?.name,
+        dailyRate: verifyAppSettings?.contract?.dailyRate,
+        hourlyRate: verifyAppSettings?.contract?.hourlyRate
+      });
     }, 'Restore data');
   }
 
@@ -1184,7 +1544,7 @@ class DatabaseService {
         console.log('📞 FORCE SYNC: Aggiornamento notifiche dopo sincronizzazione...');
         
         // Importa NotificationService dinamicamente per evitare dipendenze circolari
-        const { default: NotificationService } = await import('./NotificationService');
+        const { default: NotificationService } = await import('./FixedNotificationService');
         await NotificationService.updateStandbyNotifications();
         
         console.log('✅ FORCE SYNC: Sincronizzazione e aggiornamento notifiche completati');
@@ -1227,6 +1587,403 @@ class DatabaseService {
         }
       };
     }, 'Debug database content');
+  }
+
+  // 🔄 RIPRISTINO DA BACKUP: Importa dati da backup JavaScript
+  async restoreFromBackup(backupData) {
+    console.log('🔄 DatabaseService.restoreFromBackup: Avvio ripristino...');
+    
+    try {
+      // Validazione dati backup
+      if (!backupData || typeof backupData !== 'object') {
+        throw new Error('Dati backup non validi');
+      }
+
+      const { workEntries = [], standbyDays = [], settings = [] } = backupData;
+      
+      console.log(`📊 Ripristino: ${workEntries.length} work entries, ${standbyDays.length} standby days, ${settings.length} settings`);
+
+      await this.safeExecute(async () => {
+        // Inizia una transazione per garantire atomicità
+        await this.db.withTransactionAsync(async () => {
+          
+          // 1. ✅ PULIZIA COMPLETA: Cancella tutti i dati esistenti prima del ripristino
+          console.log('🗑️ Cancellazione dati esistenti per ripristino completo...');
+          
+          await this.db.runAsync(`DELETE FROM ${DATABASE_TABLES.WORK_ENTRIES}`);
+          console.log('✅ Tabella work_entries svuotata');
+          
+          await this.db.runAsync(`DELETE FROM ${DATABASE_TABLES.STANDBY_CALENDAR}`);
+          console.log('✅ Tabella standby_calendar svuotata');
+          
+          await this.db.runAsync(`DELETE FROM ${DATABASE_TABLES.SETTINGS}`);
+          console.log('✅ Tabella settings svuotata');
+          
+          // 2. Ripristina work_entries
+          if (workEntries.length > 0) {
+            console.log(`📝 Ripristino ${workEntries.length} work entries...`);
+            
+            for (const entry of workEntries) {
+              // Prepara i dati per l'inserimento
+              // ✅ CORREZIONE RIPRISTINO BACKUP: Preserva total_earnings per backup vecchi
+              const hasNewColumns = entry.hasOwnProperty('is_fixed_day') || entry.hasOwnProperty('fixed_earnings');
+              
+              // ✅ SUPPORTO DOPPIO FORMATO: Gestisce sia camelCase che snake_case
+              const insertData = {
+                date: entry.date,
+                site_name: entry.site_name || entry.siteName || '',
+                vehicle_driven: entry.vehicle_driven || entry.vehicleDriven || 'non_guidato',
+                departure_company: entry.departure_company || entry.departureCompany || '',
+                arrival_site: entry.arrival_site || entry.arrivalSite || '',
+                work_start_1: entry.work_start_1 || entry.workStart1 || '',
+                work_end_1: entry.work_end_1 || entry.workEnd1 || '',
+                work_start_2: entry.work_start_2 || entry.workStart2 || '',
+                work_end_2: entry.work_end_2 || entry.workEnd2 || '',
+                departure_return: entry.departure_return || entry.departureReturn || '',
+                arrival_company: entry.arrival_company || entry.arrivalCompany || '',
+                meal_lunch_voucher: entry.meal_lunch_voucher || entry.mealLunchVoucher || 0,
+                meal_lunch_cash: entry.meal_lunch_cash || entry.mealLunchCash || 0,
+                meal_dinner_voucher: entry.meal_dinner_voucher || entry.mealDinnerVoucher || 0,
+                meal_dinner_cash: entry.meal_dinner_cash || entry.mealDinnerCash || 0,
+                travel_allowance: entry.travel_allowance || entry.travelAllowance || 0,
+                standby_allowance: entry.standby_allowance || entry.standbyAllowance || 0,
+                is_standby_day: entry.is_standby_day || (entry.isStandbyDay ? 1 : 0) || 0,
+                total_earnings: entry.total_earnings || entry.totalEarnings || 0,
+                notes: entry.notes || '',
+                day_type: entry.day_type || entry.dayType || 'lavorativa',
+                interventi: (() => {
+                  if (entry.interventi) {
+                    if (Array.isArray(entry.interventi)) {
+                      return JSON.stringify(entry.interventi);
+                    } else if (typeof entry.interventi === 'string') {
+                      return entry.interventi; // Assume it's already a valid JSON string
+                    }
+                  }
+                  return '[]';
+                })(),
+                travel_allowance_percent: entry.travel_allowance_percent || entry.travelAllowancePercent || 1,
+                trasferta_manual_override: entry.trasferta_manual_override || (entry.trasfertaManualOverride ? 1 : 0) || 0,
+                targa_veicolo: entry.targa_veicolo || entry.targaVeicolo || '',
+                vehiclePlate: entry.vehiclePlate || entry.vehiclePlate || '',
+                completamento_giornata: entry.completamento_giornata || entry.completamentoGiornata || 'nessuno',
+                // ✅ SMART RESTORE: Se il backup è vecchio e ha total_earnings > 0, non è un giorno fisso
+                is_fixed_day: hasNewColumns ? (entry.is_fixed_day || (entry.isFixedDay ? 1 : 0) || 0) : 0,
+                fixed_earnings: hasNewColumns ? (entry.fixed_earnings || entry.fixedEarnings || 0) : 0,
+                // 🔥 MULTI-TURNO FIX: Gestione corretta viaggi nel ripristino
+                viaggi: (() => {
+                  if (entry.viaggi) {
+                    if (Array.isArray(entry.viaggi)) {
+                      console.log(`🔄 RIPRISTINO: Entry ${entry.date} - viaggi già array:`, entry.viaggi.length, 'elementi');
+                      return JSON.stringify(entry.viaggi);
+                    } else if (typeof entry.viaggi === 'string') {
+                      console.log(`🔄 RIPRISTINO: Entry ${entry.date} - viaggi stringa JSON:`, entry.viaggi.substring(0, 100));
+                      return entry.viaggi;
+                    }
+                  }
+                  console.log(`🔄 RIPRISTINO: Entry ${entry.date} - viaggi vuoti o non validi`);
+                  return '[]';
+                })()
+              };
+              
+              console.log(`🔄 Ripristino entry ${entry.date}: total_earnings=${insertData.total_earnings}, is_fixed_day=${insertData.is_fixed_day}, hasNewColumns=${hasNewColumns}`);
+              
+              // 🔥 DEBUG MULTI-TURNO: Log dettagliato per ripristino viaggi
+              if (insertData.viaggi && insertData.viaggi !== '[]') {
+                try {
+                  const viaggiParsed = JSON.parse(insertData.viaggi);
+                  console.log(`🔄 RIPRISTINO: Entry ${entry.date} - DEBUG viaggi:`, {
+                    originalViaggi: entry.viaggi,
+                    processedViaggi: insertData.viaggi,
+                    viaggiParsed: viaggiParsed,
+                    viaggiCount: viaggiParsed.length,
+                    work_start_1: insertData.work_start_1,
+                    work_end_1: insertData.work_end_1,
+                    work_start_2: insertData.work_start_2,
+                    work_end_2: insertData.work_end_2
+                  });
+                } catch (e) {
+                  console.warn(`🔄 RIPRISTINO: Errore parsing viaggi per ${entry.date}:`, e);
+                }
+              }
+
+              // ✅ RIPRISTINO ROBUSTO: Verifica colonne disponibili dinamicamente
+              const columnExists = async (tableName, columnName) => {
+                const columns = await this.db.getAllAsync(`PRAGMA table_info(${tableName})`);
+                return columns.some(col => col.name === columnName);
+              };
+
+              // Costruisci query dinamicamente basandoti sulle colonne disponibili
+              const baseColumns = [
+                'date', 'site_name', 'vehicle_driven', 'departure_company', 'arrival_site',
+                'work_start_1', 'work_end_1', 'work_start_2', 'work_end_2',
+                'departure_return', 'arrival_company', 'meal_lunch_voucher', 'meal_lunch_cash',
+                'meal_dinner_voucher', 'meal_dinner_cash', 'travel_allowance', 'standby_allowance',
+                'is_standby_day', 'total_earnings', 'notes'
+              ];
+              
+              const baseValues = [
+                insertData.date, insertData.site_name, insertData.vehicle_driven,
+                insertData.departure_company, insertData.arrival_site,
+                insertData.work_start_1, insertData.work_end_1,
+                insertData.work_start_2, insertData.work_end_2,
+                insertData.departure_return, insertData.arrival_company,
+                insertData.meal_lunch_voucher, insertData.meal_lunch_cash,
+                insertData.meal_dinner_voucher, insertData.meal_dinner_cash,
+                insertData.travel_allowance, insertData.standby_allowance,
+                insertData.is_standby_day, insertData.total_earnings,
+                insertData.notes
+              ];
+
+              // Aggiungi colonne opzionali se esistono
+              const optionalColumns = [
+                { name: 'day_type', value: insertData.day_type },
+                { name: 'interventi', value: insertData.interventi },
+                { name: 'travel_allowance_percent', value: insertData.travel_allowance_percent },
+                { name: 'trasferta_manual_override', value: insertData.trasferta_manual_override },
+                { name: 'targa_veicolo', value: insertData.targa_veicolo },
+                { name: 'vehiclePlate', value: insertData.vehiclePlate },
+                { name: 'completamento_giornata', value: insertData.completamento_giornata },
+                { name: 'is_fixed_day', value: insertData.is_fixed_day },
+                { name: 'fixed_earnings', value: insertData.fixed_earnings },
+                { name: 'viaggi', value: insertData.viaggi }
+              ];
+
+              const finalColumns = [...baseColumns];
+              const finalValues = [...baseValues];
+
+              for (const col of optionalColumns) {
+                if (await columnExists(DATABASE_TABLES.WORK_ENTRIES, col.name)) {
+                  finalColumns.push(col.name);
+                  finalValues.push(col.value);
+                }
+              }
+
+              const placeholders = finalColumns.map(() => '?').join(', ');
+
+              // ✅ INSERIMENTO PULITO: Usa INSERT semplice dopo pulizia tabelle
+              await this.db.runAsync(`
+                INSERT INTO ${DATABASE_TABLES.WORK_ENTRIES} (
+                  ${finalColumns.join(', ')}
+                ) VALUES (${placeholders})
+              `, finalValues);
+            }
+          }
+
+          // 3. Ripristina standby_calendar
+          if (standbyDays.length > 0) {
+            console.log(`📅 Ripristino ${standbyDays.length} standby days...`);
+            
+            for (const standby of standbyDays) {
+              // ✅ FIX: Utilizza il metodo `setStandbyDay` esistente per garantire un ripristino corretto
+              // e disaccoppiare la logica di ripristino dalla struttura esatta della tabella.
+              await this.setStandbyDay(standby.date, standby.is_standby);
+            }
+          }
+
+          // 4. Ripristina settings
+          if (settings.length > 0) {
+            console.log(`⚙️ Ripristino ${settings.length} impostazioni...`);
+            
+            for (const setting of settings) {
+              await this.db.runAsync(`
+                INSERT INTO ${DATABASE_TABLES.SETTINGS} (
+                  key, value, created_at, updated_at
+                ) VALUES (?, ?, ?, ?)
+              `, [
+                setting.key,
+                setting.value,
+                setting.created_at || new Date().toISOString(),
+                new Date().toISOString()
+              ]);
+            }
+          }
+
+          console.log('✅ Transazione ripristino completata');
+        });
+
+        console.log('✅ DatabaseService.restoreFromBackup: Ripristino completato con successo');
+        
+        // � NOTIFICA GLOBALE: Notifica a tutta l'app che i dati sono cambiati
+        console.log('🚀 RESTORE: Invio notifica di aggiornamento globale...');
+        DataUpdateService.notifyWorkEntriesUpdated('restore', { year: null, month: null });
+
+        // �🚨 FORCE RELOAD: Notifica il sistema di ricaricare le impostazioni
+        console.log('🔄 RESTORE: Forzando ricaricamento impostazioni...');
+        try {
+          // Verifica che le impostazioni siano state ripristinate
+          const verifyAppSettings = await this.getSetting('appSettings');
+          console.log('🔍 RESTORE: Verifica post-ripristino:', {
+            exists: !!verifyAppSettings,
+            hasContract: !!verifyAppSettings?.contract,
+            contractName: verifyAppSettings?.contract?.name,
+            dailyRate: verifyAppSettings?.contract?.dailyRate,
+            hourlyRate: verifyAppSettings?.contract?.hourlyRate
+          });
+          
+          // Se non esistono le appSettings, potrebbe essere un backup vecchio
+          if (!verifyAppSettings) {
+            console.log('⚠️ RESTORE: AppSettings non trovate, backup potrebbe essere vecchio');
+          }
+        } catch (error) {
+          console.error('❌ RESTORE: Errore verifica post-ripristino:', error);
+        }
+        
+        return true;
+
+      }, 'Restore from backup');
+
+    } catch (error) {
+      console.error('❌ DatabaseService.restoreFromBackup: Errore durante il ripristino:', error);
+      throw error;
+    }
+  }
+
+  // 🧹 FUNZIONI DI OTTIMIZZAZIONE DATABASE
+  
+  /**
+   * Ottimizza il database con VACUUM per liberare spazio
+   */
+  async vacuum() {
+    try {
+      console.log('🧹 Avvio VACUUM database...');
+      await this.ensureInitialized();
+      
+      const startTime = Date.now();
+      await this.db.runAsync('VACUUM');
+      const endTime = Date.now();
+      
+      console.log(`✅ VACUUM completato in ${endTime - startTime}ms`);
+      return true;
+    } catch (error) {
+      console.error('❌ Errore durante VACUUM:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Ricostruisce gli indici del database per migliorare le performance
+   */
+  async reindex() {
+    try {
+      console.log('🔧 Avvio REINDEX database...');
+      await this.ensureInitialized();
+      
+      const startTime = Date.now();
+      await this.db.runAsync('REINDEX');
+      const endTime = Date.now();
+      
+      console.log(`✅ REINDEX completato in ${endTime - startTime}ms`);
+      return true;
+    } catch (error) {
+      console.error('❌ Errore durante REINDEX:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Pulisce log e dati vecchi per liberare spazio
+   */
+  async cleanupOldData(daysToKeep = 30) {
+    try {
+      console.log(`🗑️ Pulizia dati più vecchi di ${daysToKeep} giorni...`);
+      await this.ensureInitialized();
+      
+      // Pulisci eventuali log vecchi (se esistono)
+      try {
+        const logResult = await this.db.runAsync(
+          'DELETE FROM logs WHERE created_at < date("now", "-" || ? || " days")',
+          [daysToKeep]
+        );
+        console.log(`🗑️ Rimossi ${logResult.changes} log vecchi`);
+      } catch (error) {
+        // Tabella logs potrebbe non esistere
+        console.log('ℹ️ Tabella logs non presente o già pulita');
+      }
+      
+      // Pulisci backup vecchi dal database (se esistono)
+      try {
+        const backupResult = await this.db.runAsync(
+          'DELETE FROM backups WHERE created_at < date("now", "-7 days")'
+        );
+        console.log(`🗑️ Rimossi ${backupResult.changes} backup vecchi`);
+      } catch (error) {
+        // Tabella backups potrebbe non esistere
+        console.log('ℹ️ Tabella backups non presente o già pulita');
+      }
+      
+      return true;
+    } catch (error) {
+      console.error('❌ Errore durante pulizia dati vecchi:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Ottimizzazione completa del database
+   */
+  async optimizeDatabase() {
+    try {
+      console.log('🚀 Avvio ottimizzazione completa database...');
+      const startTime = Date.now();
+      
+      // 1. Pulisci dati vecchi
+      await this.cleanupOldData();
+      
+      // 2. Ricostruisci indici
+      await this.reindex();
+      
+      // 3. Compatta database
+      await this.vacuum();
+      
+      const endTime = Date.now();
+      console.log(`✅ Ottimizzazione database completata in ${endTime - startTime}ms`);
+      
+      return true;
+    } catch (error) {
+      console.error('❌ Errore durante ottimizzazione database:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Verifica la salute del database e statistiche di utilizzo
+   */
+  async getDatabaseStats() {
+    try {
+      await this.ensureInitialized();
+      
+      // Ottieni statistiche principali
+      const stats = {
+        tables: {},
+        totalSize: 0,
+        freeSpace: 0
+      };
+      
+      // Conta record per ogni tabella principale
+      const mainTables = ['work_entries', 'settings', 'standby_calendar'];
+      
+      for (const table of mainTables) {
+        try {
+          const result = await this.db.getFirstAsync(`SELECT COUNT(*) as count FROM ${table}`);
+          stats.tables[table] = result?.count || 0;
+        } catch (error) {
+          stats.tables[table] = 'N/A';
+        }
+      }
+      
+      // Ottieni informazioni spazio database
+      try {
+        const pragmaInfo = await this.db.getAllAsync('PRAGMA database_list');
+        console.log('📊 Info database:', pragmaInfo);
+      } catch (error) {
+        console.log('ℹ️ Impossibile ottenere info spazio database');
+      }
+      
+      return stats;
+    } catch (error) {
+      console.error('❌ Errore recupero statistiche database:', error);
+      throw error;
+    }
   }
 }
 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { 
   View, 
   Text, 
@@ -18,10 +18,11 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useWorkEntries, useSettings, useCalculationService } from '../hooks';
 import { formatDate, formatTime, formatCurrency, getDayName, formatSafeHours } from '../utils';
 import { createWorkEntryFromData } from '../utils/earningsHelper';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import DatabaseService from '../services/DatabaseService';
 import DataUpdateService from '../services/DataUpdateService';
 import { PressableAnimated, FadeInCard, CardSkeleton, EnhancedTimeSlot, QuickStat } from '../components/AnimatedComponents';
+import { useTheme } from '../contexts/ThemeContext';
 
 const { width } = Dimensions.get('window');
 
@@ -44,7 +45,7 @@ const completamentoLabels = {
 };
 
 // Componente per il badge informativo migliorato
-const InfoBadge = ({ icon, label, value, color, backgroundColor, onPress }) => {
+const InfoBadge = ({ icon, label, value, color, backgroundColor, onPress, styles }) => {
   const [scale] = useState(new Animated.Value(1));
 
   const handlePress = () => {
@@ -71,7 +72,7 @@ const InfoBadge = ({ icon, label, value, color, backgroundColor, onPress }) => {
 };
 
 // Componente per gli orari migliorato
-const TimeSlot = ({ icon, label, startTime, endTime, duration, color = '#666' }) => {
+const TimeSlot = ({ icon, label, startTime, endTime, duration, color = '#666', styles }) => {
   if (!startTime || !endTime) return null;
   
   return (
@@ -93,7 +94,7 @@ const TimeSlot = ({ icon, label, startTime, endTime, duration, color = '#666' })
 };
 
 // Componente per il breakdown guadagni
-const EarningsBreakdown = ({ breakdown, onPress }) => {
+const EarningsBreakdown = ({ breakdown, onPress, styles }) => {
   const [expanded, setExpanded] = useState(false);
 
   const components = [];
@@ -146,7 +147,7 @@ const EarningsBreakdown = ({ breakdown, onPress }) => {
   );
 };
 
-const ActionMenu = ({ visible, entry, onClose, onDeleted }) => {
+const ActionMenu = ({ visible, entry, onClose, onDeleted, styles }) => {
   const date = entry ? formatDate(entry.date) : '';
   const navigation = useNavigation();
 
@@ -210,7 +211,7 @@ const ActionMenu = ({ visible, entry, onClose, onDeleted }) => {
 };
 
 // Componente DetailSection per sezioni organizzate come nel form
-const DetailSection = ({ title, icon, iconColor, children, isLast = false, expanded = false, onToggle }) => (
+const DetailSection = ({ title, icon, iconColor, children, isLast = false, expanded = false, onToggle, styles }) => (
   <View style={[styles.detailSection, isLast && styles.lastDetailSection]}>
     <TouchableOpacity 
       style={styles.sectionHeader}
@@ -236,7 +237,7 @@ const DetailSection = ({ title, icon, iconColor, children, isLast = false, expan
 );
 
 // Componente DetailRow per singole righe di dettaglio
-const DetailRow = ({ label, value, duration, highlight = false, isSubitem = false, calculation }) => (
+const DetailRow = ({ label, value, duration, highlight = false, isSubitem = false, calculation, styles }) => (
   <View style={[styles.detailRow, isSubitem && styles.subDetailRow]}>
     <Text style={[styles.detailLabel, isSubitem && styles.subDetailLabel]}>{label}</Text>
     <View style={styles.detailValueContainer}>
@@ -258,7 +259,7 @@ const DetailRow = ({ label, value, duration, highlight = false, isSubitem = fals
 );
 
 // Componente per breakdown avanzato degli orari
-const AdvancedHoursBreakdown = ({ breakdown, settings }) => {
+const AdvancedHoursBreakdown = ({ breakdown, settings, styles }) => {
   const [expanded, setExpanded] = useState(false);
   
   if (!breakdown || !breakdown.ordinary) return null;
@@ -292,6 +293,7 @@ const AdvancedHoursBreakdown = ({ breakdown, settings }) => {
       iconColor="#FF5722"
       expanded={expanded}
       onToggle={() => setExpanded(!expanded)}
+      styles={styles}
     >
       {/* Attività Ordinarie */}
       {hasOrdinaryHours && (
@@ -319,12 +321,14 @@ const AdvancedHoursBreakdown = ({ breakdown, settings }) => {
                       return `${dailyRate.toFixed(2).replace('.', ',')} € × ${percentage}% = ${breakdown.ordinary.earnings.giornaliera.toFixed(2).replace('.', ',')} €`;
                     }
                   })()}
+                  styles={styles}
                 />
                 {breakdown.ordinary.hours.lavoro_giornaliera > 0 && (
                   <DetailRow 
                     label="- Lavoro" 
                     value={formatSafeHours(breakdown.ordinary.hours.lavoro_giornaliera)}
                     isSubitem={true}
+                    styles={styles}
                   />
                 )}
                 {breakdown.ordinary.hours.viaggio_giornaliera > 0 && (
@@ -332,6 +336,7 @@ const AdvancedHoursBreakdown = ({ breakdown, settings }) => {
                     label="- Viaggio" 
                     value={formatSafeHours(breakdown.ordinary.hours.viaggio_giornaliera)}
                     isSubitem={true}
+                    styles={styles}
                   />
                 )}
               </View>
@@ -354,6 +359,7 @@ const AdvancedHoursBreakdown = ({ breakdown, settings }) => {
                             (breakdown.ordinary.hours.viaggio_giornaliera || 0);
                   return `${base.toFixed(2).replace('.', ',')} € × ${multiplier.toFixed(2).replace('.', ',')} × ${formatSafeHours(ore)} = ${(base * multiplier * ore).toFixed(2).replace('.', ',')} €`;
                 })()}
+                styles={styles}
               />
           )}
 
@@ -377,6 +383,7 @@ const AdvancedHoursBreakdown = ({ breakdown, settings }) => {
                 const rate = base * overtime;
                 return `${rate.toFixed(2).replace('.', ',')} € × ${formatSafeHours(breakdown.ordinary.hours.lavoro_extra)} = ${breakdown.ordinary.earnings.lavoro_extra.toFixed(2).replace('.', ',')} €`;
               })()}
+              styles={styles}
             />
           )}
 
@@ -389,6 +396,7 @@ const AdvancedHoursBreakdown = ({ breakdown, settings }) => {
                 const rate = base * (settings.travelCompensationRate || 1.0);
                 return `${rate.toFixed(2).replace('.', ',')} € × ${formatSafeHours(breakdown.ordinary.hours.viaggio_extra)} = ${breakdown.ordinary.earnings.viaggio_extra.toFixed(2).replace('.', ',')} €`;
               })()}
+              styles={styles}
             />
           )}
 
@@ -396,6 +404,7 @@ const AdvancedHoursBreakdown = ({ breakdown, settings }) => {
             label="Totale ordinario" 
             value={formatSafeAmount(breakdown.ordinary.total || 0)}
             highlight={true}
+            styles={styles}
           />
         </>
       )}
@@ -414,6 +423,7 @@ const AdvancedHoursBreakdown = ({ breakdown, settings }) => {
                 settings.contract?.hourlyRate || 16.41,
                 breakdown.standby.workEarnings?.ordinary || 0
               )}
+              styles={styles}
             />
           )}
           
@@ -426,6 +436,7 @@ const AdvancedHoursBreakdown = ({ breakdown, settings }) => {
                 (settings.contract?.hourlyRate || 16.41) * 1.25,
                 breakdown.standby.workEarnings?.night || 0
               )}
+              styles={styles}
             />
           )}
           
@@ -439,6 +450,7 @@ const AdvancedHoursBreakdown = ({ breakdown, settings }) => {
                 (settings.contract?.hourlyRate || 16.41) * (settings.travelCompensationRate || 1.0),
                 breakdown.standby.travelEarnings?.ordinary || 0
               )}
+              styles={styles}
             />
           )}
           
@@ -452,6 +464,7 @@ const AdvancedHoursBreakdown = ({ breakdown, settings }) => {
                 (settings.contract?.hourlyRate || 16.41) * 1.25 * (settings.travelCompensationRate || 1.0),
                 breakdown.standby.travelEarnings?.night || 0
               )}
+              styles={styles}
             />
           )}
 
@@ -467,6 +480,7 @@ const AdvancedHoursBreakdown = ({ breakdown, settings }) => {
                 label={`Totale reperibilità (${formatSafeHours(totalStandbyHours)})`}
                 value={formatSafeAmount(totalStandbyEarnings)}
                 highlight={true}
+                styles={styles}
               />
             );
           })()}
@@ -478,16 +492,86 @@ const AdvancedHoursBreakdown = ({ breakdown, settings }) => {
 
 const TimeEntryScreen = () => {
   const navigation = useNavigation();
+  const { theme } = useTheme();
   const currentDate = new Date();
-  const [selectedYear] = useState(currentDate.getFullYear());
-  const [selectedMonth] = useState(currentDate.getMonth() + 1);
+  const [selectedYear, setSelectedYear] = useState(currentDate.getFullYear());
+  const [selectedMonth, setSelectedMonth] = useState(currentDate.getMonth() + 1);
   const [showActionMenu, setShowActionMenu] = useState(false);
   const [selectedEntry, setSelectedEntry] = useState(null);
   const [standbyAllowances, setStandbyAllowances] = useState([]);
+  const [breakdowns, setBreakdowns] = useState({});
 
   const { entries, isLoading, error, refreshEntries, canRetry } = useWorkEntries(selectedYear, selectedMonth, true);
   const { settings } = useSettings();
   const calculationService = useCalculationService();
+
+  // Refresh automatico solo quando cambiano le impostazioni o all'avvio
+  const initializedRef = useRef(false);
+  useEffect(() => {
+    if (
+      settings &&
+      calculationService &&
+      entries &&
+      !initializedRef.current
+    ) {
+      initializedRef.current = true;
+      setBreakdowns({});
+      refreshEntries();
+    }
+  }, [settings, calculationService, entries, refreshEntries]);
+  
+  // Wrapper per refresh manuale: svuota breakdowns PRIMA di aggiornare entries
+  const handleManualRefresh = useCallback(() => {
+    setBreakdowns({});
+    refreshEntries();
+  }, [refreshEntries]);
+
+  // Listener per il ritorno dal form
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('focus', () => {
+      // Solo se stiamo tornando da una navigazione (non al primo caricamento)
+      const navigationState = navigation.getState();
+      const currentRoute = navigationState.routes[navigationState.index];
+      
+      // Se abbiamo un parametro refreshFromForm, significa che stiamo tornando dal form
+      if (currentRoute.params?.refreshFromForm) {
+        console.log('🔄 TimeEntryScreen: Ritorno dal form, refreshing entries');
+        handleManualRefresh();
+        // Rimuovi il parametro per evitare refresh multipli
+        navigation.setParams({ refreshFromForm: undefined });
+      }
+    });
+
+    return unsubscribe;
+  }, [navigation, handleManualRefresh]);
+
+  // Funzioni per navigazione mesi
+  const goToPreviousMonth = useCallback(() => {
+    const newDate = new Date(selectedYear, selectedMonth - 2, 1); // -2 perché selectedMonth è 1-based
+    const newYear = newDate.getFullYear();
+    const newMonth = newDate.getMonth() + 1;
+    setSelectedYear(newYear);
+    setSelectedMonth(newMonth);
+    setBreakdowns({}); // Reset breakdowns per nuovo mese
+  }, [selectedYear, selectedMonth]);
+
+  const goToNextMonth = useCallback(() => {
+    const newDate = new Date(selectedYear, selectedMonth, 1); // selectedMonth è già 1-based
+    const newYear = newDate.getFullYear();
+    const newMonth = newDate.getMonth() + 1;
+    setSelectedYear(newYear);
+    setSelectedMonth(newMonth);
+    setBreakdowns({}); // Reset breakdowns per nuovo mese
+  }, [selectedYear, selectedMonth]);
+
+  // Formatta il titolo del mese
+  const formatMonthYear = useCallback(() => {
+    const date = new Date(selectedYear, selectedMonth - 1, 1);
+    return date.toLocaleDateString('it-IT', { month: 'long', year: 'numeric' });
+  }, [selectedYear, selectedMonth]);
+
+  // Crea stili dinamici basati sul tema
+  const styles = createStyles(theme);
 
   // Carica le indennità di reperibilità quando cambiano anno/mese o settings
   useEffect(() => {
@@ -502,6 +586,77 @@ const TimeEntryScreen = () => {
       setStandbyAllowances([]);
     }
   }, [selectedYear, selectedMonth, settings, calculationService]);
+
+  // Calcola breakdown solo al primo caricamento o quando mancano
+  useEffect(() => {
+    const calculateMissingBreakdowns = async () => {
+      if (!entries?.length || !settings) return;
+      
+      // Trova solo le entries che non hanno ancora il breakdown
+      const missingEntries = entries.filter(item => 
+        item.type !== 'standby_only' && !breakdowns[item.id]
+      );
+      
+      if (missingEntries.length === 0) {
+        return; // Nessun calcolo necessario, esattamente come il refresh manuale
+      }
+      
+      console.log(`📊 Calcolando breakdown per ${missingEntries.length} entries mancanti...`);
+      
+      // Copia i breakdown esistenti
+      const newBreakdowns = { ...breakdowns };
+      
+      // Calcola solo quelli mancanti
+      for (const item of missingEntries) {
+        try {
+          const workEntry = createWorkEntryFromData(item, calculationService);
+          const breakdown = await calculationService.calculateEarningsBreakdown(workEntry, settings);
+          newBreakdowns[item.id] = breakdown;
+        } catch (error) {
+          console.error(`Errore calcolo breakdown per entry ${item.id}:`, error);
+          try {
+            const workEntry = createWorkEntryFromData(item, calculationService);
+            const breakdown = calculationService.calculateEarningsBreakdownSync(workEntry, settings);
+            newBreakdowns[item.id] = breakdown;
+          } catch (syncError) {
+            console.error(`Errore anche con metodo sincrono per entry ${item.id}:`, syncError);
+          }
+        }
+      }
+      
+      setBreakdowns(newBreakdowns);
+    };
+    
+    calculateMissingBreakdowns();
+  }, [entries]); // Solo quando cambiano le entries, ma calcola solo i mancanti
+
+  // Pulisce breakdown di entries eliminate e forza ricalcolo solo se cambiano davvero le impostazioni  
+  const lastSettingsHashRef = useRef();
+  useEffect(() => {
+    if (!settings) return;
+    
+    const settingsHash = JSON.stringify(settings);
+    const settingsChanged = settingsHash !== lastSettingsHashRef.current;
+    
+    // Solo se le impostazioni sono davvero cambiate, forza il ricalcolo
+    if (settingsChanged && lastSettingsHashRef.current !== undefined) {
+      console.log('🔄 Impostazioni cambiate, forzo ricalcolo completo...');
+      setBreakdowns({}); // Svuota tutto per forzare il ricalcolo
+    } else {
+      // Pulisci solo i breakdown di entries che non esistono più
+      const currentEntryIds = entries?.map(e => e.id) || [];
+      const existingBreakdownIds = Object.keys(breakdowns);
+      const toRemove = existingBreakdownIds.filter(id => !currentEntryIds.includes(id));
+      
+      if (toRemove.length > 0) {
+        const cleanedBreakdowns = { ...breakdowns };
+        toRemove.forEach(id => delete cleanedBreakdowns[id]);
+        setBreakdowns(cleanedBreakdowns);
+      }
+    }
+    
+    lastSettingsHashRef.current = settingsHash;
+  }, [settings, entries]);
 
   // 🔄 Listener per aggiornamenti automatici dei dati dal database
   useEffect(() => {
@@ -575,8 +730,20 @@ const TimeEntryScreen = () => {
     }
 
     // Card dettagliata simile al form per inserimenti normali
+    const breakdown = breakdowns[item.id] || {
+      ordinary: { total: 0, hours: {}, earnings: {} },
+      overtime: { total: 0, hours: {}, earnings: {} },
+      nightWork: { total: 0, hours: {}, earnings: {} },
+      travel: { total: 0, hours: {}, earnings: {} },
+      standby: { total: 0, totalEarnings: 0, earnings: {}, workHours: {}, travelHours: {} },
+      mealAllowances: { total: 0, count: 0, details: [] },
+      allowances: { standby: 0, travel: 0 },
+      totalEarnings: item.totalEarnings || 0, // Usa il totale salvato nel DB
+      details: {}
+    };
+    
+    // Crea workEntry per accedere ai dati dell'entry
     const workEntry = createWorkEntryFromData(item, calculationService);
-    const breakdown = calculationService.calculateEarningsBreakdown(workEntry, settings);
     
     const dayTypeInfo = dayTypeLabels[item.day_type] || dayTypeLabels.lavorativa;
     const isSpecialDay = item.day_type !== 'lavorativa';
@@ -619,20 +786,23 @@ const TimeEntryScreen = () => {
             title="Informazioni Lavoro"
             icon="briefcase"
             iconColor="#2196F3"
+            styles={styles}
           >
             {item.site_name && (
-              <DetailRow label="Sito" value={item.site_name} />
+              <DetailRow label="Sito" value={item.site_name} styles={styles} />
             )}
             {item.vehicle_driven && (
               <DetailRow 
                 label="Veicolo" 
                 value={item.vehicle_driven === 'andata_ritorno' ? 'Andata/Ritorno' : item.vehicle_driven} 
+                styles={styles}
               />
             )}
             {(item.targa_veicolo || item.vehiclePlate) && (
               <DetailRow 
                 label="Targa Veicolo" 
                 value={item.targa_veicolo || item.vehiclePlate} 
+                styles={styles}
               />
             )}
           </DetailSection>
@@ -643,6 +813,7 @@ const TimeEntryScreen = () => {
           title="Orari Turni"
           icon="clock"
           iconColor="#2196F3"
+          styles={styles}
         >
           {workEntry.workStart1 && workEntry.workEnd1 && (
             <DetailRow 
@@ -651,10 +822,17 @@ const TimeEntryScreen = () => {
               duration={(() => {
                 if (!calculationService.calculateWorkHours) return null;
                 const start1 = new Date(`2000-01-01T${workEntry.workStart1}`);
-                const end1 = new Date(`2000-01-01T${workEntry.workEnd1}`);
+                let end1 = new Date(`2000-01-01T${workEntry.workEnd1}`);
+                
+                // Se l'orario di fine è minore dell'orario di inizio, significa che attraversa la mezzanotte
+                if (end1 <= start1) {
+                  end1.setDate(end1.getDate() + 1);
+                }
+                
                 const duration1 = (end1 - start1) / (1000 * 60 * 60);
                 return formatSafeHours(duration1);
               })()}
+              styles={styles}
             />
           )}
           {workEntry.workStart2 && workEntry.workEnd2 && (
@@ -663,10 +841,17 @@ const TimeEntryScreen = () => {
               value={`${workEntry.workStart2} - ${workEntry.workEnd2}`}
               duration={(() => {
                 const start2 = new Date(`2000-01-01T${workEntry.workStart2}`);
-                const end2 = new Date(`2000-01-01T${workEntry.workEnd2}`);
+                let end2 = new Date(`2000-01-01T${workEntry.workEnd2}`);
+                
+                // Se l'orario di fine è minore dell'orario di inizio, significa che attraversa la mezzanotte
+                if (end2 <= start2) {
+                  end2.setDate(end2.getDate() + 1);
+                }
+                
                 const duration2 = (end2 - start2) / (1000 * 60 * 60);
                 return formatSafeHours(duration2);
               })()}
+              styles={styles}
             />
           )}
           {/* 🚀 MULTI-TURNO: Mostra turni aggiuntivi */}
@@ -680,10 +865,17 @@ const TimeEntryScreen = () => {
                     value={`${viaggio.work_start_1} - ${viaggio.work_end_1}`}
                     duration={(() => {
                       const start = new Date(`2000-01-01T${viaggio.work_start_1}`);
-                      const end = new Date(`2000-01-01T${viaggio.work_end_1}`);
+                      let end = new Date(`2000-01-01T${viaggio.work_end_1}`);
+                      
+                      // Se l'orario di fine è minore dell'orario di inizio, significa che attraversa la mezzanotte
+                      if (end <= start) {
+                        end.setDate(end.getDate() + 1);
+                      }
+                      
                       const duration = (end - start) / (1000 * 60 * 60);
                       return formatSafeHours(duration);
                     })()}
+                    styles={styles}
                   />
                 )}
                 {viaggio.work_start_2 && viaggio.work_end_2 && (
@@ -692,10 +884,17 @@ const TimeEntryScreen = () => {
                     value={`${viaggio.work_start_2} - ${viaggio.work_end_2}`}
                     duration={(() => {
                       const start = new Date(`2000-01-01T${viaggio.work_start_2}`);
-                      const end = new Date(`2000-01-01T${viaggio.work_end_2}`);
+                      let end = new Date(`2000-01-01T${viaggio.work_end_2}`);
+                      
+                      // Se l'orario di fine è minore dell'orario di inizio, significa che attraversa la mezzanotte
+                      if (end <= start) {
+                        end.setDate(end.getDate() + 1);
+                      }
+                      
                       const duration = (end - start) / (1000 * 60 * 60);
                       return formatSafeHours(duration);
                     })()}
+                    styles={styles}
                   />
                 )}
               </React.Fragment>
@@ -706,6 +905,7 @@ const TimeEntryScreen = () => {
               label="Totale Ore Lavoro" 
               value={formatSafeHours(calculationService.calculateWorkHours(workEntry))}
               highlight={true}
+              styles={styles}
             />
           )}
         </DetailSection>
@@ -716,6 +916,7 @@ const TimeEntryScreen = () => {
             title="Viaggi"
             icon="car"
             iconColor="#FF9800"
+            styles={styles}
           >
             {workEntry.departureCompany && workEntry.arrivalSite && (
               <DetailRow 
@@ -730,6 +931,7 @@ const TimeEntryScreen = () => {
                   );
                   return formatSafeHours(calculationService.minutesToHours(andataMinutes));
                 })()}
+                styles={styles}
               />
             )}
             {workEntry.departureReturn && workEntry.arrivalCompany && (
@@ -745,6 +947,7 @@ const TimeEntryScreen = () => {
                   );
                   return formatSafeHours(calculationService.minutesToHours(ritornoMinutes));
                 })()}
+                styles={styles}
               />
             )}
             {/* 🚀 MULTI-TURNO: Mostra viaggi aggiuntivi */}
@@ -762,6 +965,7 @@ const TimeEntryScreen = () => {
                         const duration = (end - start) / (1000 * 60 * 60);
                         return formatSafeHours(duration);
                       })()}
+                      styles={styles}
                     />
                   )}
                   {viaggio.departure_return && viaggio.arrival_company && (
@@ -774,6 +978,7 @@ const TimeEntryScreen = () => {
                         const duration = (end - start) / (1000 * 60 * 60);
                         return formatSafeHours(duration);
                       })()}
+                      styles={styles}
                     />
                   )}
                   {!viaggio.departure_return && !viaggio.arrival_company && viaggioNumber++}
@@ -785,6 +990,7 @@ const TimeEntryScreen = () => {
                 label="Totale Viaggio" 
                 value={formatSafeHours(calculationService.calculateTravelHours(workEntry))}
                 highlight={true}
+                styles={styles}
               />
             )}
           </DetailSection>
@@ -796,6 +1002,7 @@ const TimeEntryScreen = () => {
             title="Reperibilità"
             icon="phone-in-talk"
             iconColor="#4CAF50"
+            styles={styles}
           >
             {workEntry.interventi && Array.isArray(workEntry.interventi) && workEntry.interventi.length > 0 && (
               <>
@@ -811,6 +1018,7 @@ const TimeEntryScreen = () => {
                           return formatSafeHours(durationHours);
                         })()})`}
                         isSubitem={true}
+                        styles={styles}
                       />
                     )}
                     {intervento.work_start_1 && intervento.work_end_1 && (
@@ -822,6 +1030,7 @@ const TimeEntryScreen = () => {
                           return formatSafeHours(durationHours);
                         })()})`}
                         isSubitem={true}
+                        styles={styles}
                       />
                     )}
                     {intervento.work_start_2 && intervento.work_end_2 && (
@@ -833,6 +1042,7 @@ const TimeEntryScreen = () => {
                           return formatSafeHours(durationHours);
                         })()})`}
                         isSubitem={true}
+                        styles={styles}
                       />
                     )}
                     {intervento.departure_return && intervento.arrival_company && (
@@ -844,6 +1054,7 @@ const TimeEntryScreen = () => {
                           return formatSafeHours(durationHours);
                         })()})`}
                         isSubitem={true}
+                        styles={styles}
                       />
                     )}
                   </View>
@@ -886,6 +1097,7 @@ const TimeEntryScreen = () => {
                         label={label}
                         value={formatSafeHours(totalAllInterventiHours)}
                         highlight={true}
+                        styles={styles}
                       />
                     );
                   }
@@ -896,6 +1108,7 @@ const TimeEntryScreen = () => {
                     label="Totale Ore Viaggio Interventi" 
                     value={formatSafeHours(calculationService.calculateStandbyTravelHours(workEntry))}
                     highlight={true}
+                    styles={styles}
                   />
                 )}
               </>
@@ -908,12 +1121,14 @@ const TimeEntryScreen = () => {
           title="Riepilogo Guadagni"
           icon="calculator"
           iconColor="#4CAF50"
+          styles={styles}
         >
           {/* Breakdown componenti principali */}
           {breakdown.ordinary?.total > 0 && (
             <DetailRow 
               label="Attività Ordinarie" 
               value={formatCurrency(breakdown.ordinary.total)}
+              styles={styles}
             />
           )}
           
@@ -922,11 +1137,13 @@ const TimeEntryScreen = () => {
               <DetailRow 
                 label="Interventi Reperibilità" 
                 value={formatCurrency((breakdown.standby.totalEarnings || 0) - (breakdown.standby.dailyIndemnity || 0))}
+                styles={styles}
               />
               {breakdown.allowances?.standby > 0 && (
                 <DetailRow 
                   label="Indennità Reperibilità" 
                   value={formatCurrency(breakdown.allowances.standby)}
+                  styles={styles}
                 />
               )}
             </>
@@ -936,6 +1153,7 @@ const TimeEntryScreen = () => {
             <DetailRow 
               label="Indennità Reperibilità" 
               value={formatCurrency(breakdown.allowances.standby)}
+              styles={styles}
             />
           )}
           
@@ -943,6 +1161,7 @@ const TimeEntryScreen = () => {
             <DetailRow 
               label="Indennità Trasferta" 
               value={formatCurrency(breakdown.allowances.travel)}
+              styles={styles}
             />
           )}
           
@@ -996,6 +1215,7 @@ const TimeEntryScreen = () => {
               <DetailRow 
                 label="Rimborsi Pasti (non tassabili)" 
                 value={formatCurrency(breakdown.allowances.meal)}
+                styles={styles}
               />
               {/* Dettaglio composizione rimborsi pasti con logica uguale al form */}
               {(workEntry.mealLunchVoucher || workEntry.mealLunchCash > 0) && (
@@ -1022,6 +1242,7 @@ const TimeEntryScreen = () => {
                     }
                   })()}
                   isSubitem={true}
+                  styles={styles}
                 />
               )}
               
@@ -1049,6 +1270,7 @@ const TimeEntryScreen = () => {
                     }
                   })()}
                   isSubitem={true}
+                  styles={styles}
                 />
               )}
             </>
@@ -1065,7 +1287,7 @@ const TimeEntryScreen = () => {
         </DetailSection>
 
         {/* Breakdown avanzato degli orari */}
-        <AdvancedHoursBreakdown breakdown={breakdown} settings={settings} />
+        <AdvancedHoursBreakdown breakdown={breakdown} settings={settings} styles={styles} />
 
         {/* Note se presenti */}
         {item.notes && (
@@ -1074,57 +1296,63 @@ const TimeEntryScreen = () => {
             icon="note-text"
             iconColor="#666"
             isLast={true}
+            styles={styles}
           >
             <Text style={styles.notesText}>{item.notes}</Text>
           </DetailSection>
         )}
       </TouchableOpacity>
     );
-  }, [settings, navigation, handleLongPress, calculationService]);
+  }, [settings, navigation, handleLongPress, calculationService, styles]);
 
-  // Raggruppamento entries per mese
+  // Raggruppamento entries per mese - mostra solo il mese selezionato
   const sections = useMemo(() => {
-    const entriesByMonth = {};
+    const selectedMonthLabel = formatMonthYear();
+    const entriesForSelectedMonth = [];
     
+    // Filtra solo gli entries del mese selezionato
     entries?.forEach(entry => {
-      const monthYear = getMonthLabel(entry.date);
-      if (!entriesByMonth[monthYear]) entriesByMonth[monthYear] = [];
-      entriesByMonth[monthYear].push({
-        ...entry,
-        type: 'work_entry'
-      });
-    });
-
-    standbyAllowances?.forEach(standby => {
-      const monthYear = getMonthLabel(standby.date);
-      if (!entriesByMonth[monthYear]) entriesByMonth[monthYear] = [];
+      const entryDate = new Date(entry.date);
+      const entryYear = entryDate.getFullYear();
+      const entryMonth = entryDate.getMonth() + 1;
       
-      const existingEntry = entriesByMonth[monthYear].find(
-        e => e.date === standby.date
-      );
-      
-      if (!existingEntry) {
-        entriesByMonth[monthYear].push({
-          id: `standby-${standby.date}`,
-          date: standby.date,
-          type: 'standby_only',
-          standbyAllowance: standby.allowance,
-          isStandbyDay: true
+      if (entryYear === selectedYear && entryMonth === selectedMonth) {
+        entriesForSelectedMonth.push({
+          ...entry,
+          type: 'work_entry'
         });
       }
     });
 
-    return Object.keys(entriesByMonth)
-      .sort((a, b) => {
-        const dateA = new Date(entriesByMonth[a][0].date);
-        const dateB = new Date(entriesByMonth[b][0].date);
-        return dateB - dateA;
-      })
-      .map(month => ({
-        title: month,
-        data: entriesByMonth[month].sort((a, b) => new Date(b.date) - new Date(a.date))
-      }));
-  }, [entries, standbyAllowances, getMonthLabel]);
+    // Filtra anche i standby allowances per il mese selezionato
+    standbyAllowances?.forEach(standby => {
+      const standbyDate = new Date(standby.date);
+      const standbyYear = standbyDate.getFullYear();
+      const standbyMonthNum = standbyDate.getMonth() + 1;
+      
+      if (standbyYear === selectedYear && standbyMonthNum === selectedMonth) {
+        const existingEntry = entriesForSelectedMonth.find(
+          e => e.date === standby.date
+        );
+        
+        if (!existingEntry) {
+          entriesForSelectedMonth.push({
+            id: `standby-${standby.date}`,
+            date: standby.date,
+            type: 'standby_only',
+            standbyAllowance: standby.allowance,
+            isStandbyDay: true
+          });
+        }
+      }
+    });
+
+    // Restituisci sempre una sezione per il mese selezionato (anche se vuota)
+    return [{
+      title: selectedMonthLabel,
+      data: entriesForSelectedMonth.sort((a, b) => new Date(b.date) - new Date(a.date))
+    }];
+  }, [entries, standbyAllowances, selectedYear, selectedMonth, formatMonthYear]);
 
   // Calcolo delle statistiche del mese per l'header sezione
   const getSectionStats = (data) => {
@@ -1132,9 +1360,8 @@ const TimeEntryScreen = () => {
       if (item.type === 'standby_only') {
         return sum + (item.standbyAllowance || 0);
       }
-      const workEntry = createWorkEntryFromData(item, calculationService);
-      const breakdown = calculationService.calculateEarningsBreakdown(workEntry, settings);
-      return sum + breakdown.totalEarnings;
+      const breakdown = breakdowns[item.id];
+      return sum + (breakdown?.totalEarnings || 0);
     }, 0);
 
     const workDays = data.filter(item => item.type !== 'standby_only').length;
@@ -1207,7 +1434,16 @@ const TimeEntryScreen = () => {
     
     return (
       <View style={styles.modernSectionHeader}>
-        <View style={styles.sectionHeaderContent}>
+        {/* Freccia sinistra per mese precedente */}
+        <TouchableOpacity 
+          style={styles.monthNavButton} 
+          onPress={goToPreviousMonth}
+        >
+          <MaterialCommunityIcons name="chevron-left" size={36} color={theme.colors.primary} />
+        </TouchableOpacity>
+
+        {/* Contenuto centrale con scritte centrate */}
+        <View style={styles.sectionHeaderContentCentered}>
           <Text style={styles.modernSectionTitle}>{section.title}</Text>
           <View style={styles.sectionStats}>
             <Text style={styles.sectionStatsText}>
@@ -1220,6 +1456,16 @@ const TimeEntryScreen = () => {
             )}
           </View>
         </View>
+
+        {/* Freccia destra per mese successivo */}
+        <TouchableOpacity 
+          style={styles.monthNavButton} 
+          onPress={goToNextMonth}
+        >
+          <MaterialCommunityIcons name="chevron-right" size={36} color={theme.colors.primary} />
+        </TouchableOpacity>
+
+        {/* Calendario rimane nella sua posizione originale */}
         <MaterialCommunityIcons name="calendar-month" size={24} color="#4CAF50" />
       </View>
     );
@@ -1253,16 +1499,54 @@ const TimeEntryScreen = () => {
 
   return (
     <SafeAreaView style={styles.container}>
+      {/* Header di navigazione mensile fisso - mantiene aspetto originale */}
+      {sections.length > 0 && (
+        <View style={styles.modernSectionHeader}>
+          {/* Freccia sinistra per mese precedente */}
+          <TouchableOpacity 
+            style={styles.monthNavButton} 
+            onPress={goToPreviousMonth}
+          >
+            <MaterialCommunityIcons name="chevron-left" size={36} color={theme.colors.primary} />
+          </TouchableOpacity>
+
+          {/* Contenuto centrale con scritte centrate */}
+          <View style={styles.sectionHeaderContentCentered}>
+            <Text style={styles.modernSectionTitle}>{sections[0].title}</Text>
+            <View style={styles.sectionStats}>
+              <Text style={styles.sectionStatsText}>
+                {sections[0].data.length} giorni • {formatCurrency(getSectionStats(sections[0].data).totalEarnings)}
+              </Text>
+              {getSectionStats(sections[0].data).standbyDays > 0 && (
+                <Text style={styles.sectionStatsSubtext}>
+                  {getSectionStats(sections[0].data).standbyDays} giorni reperibilità
+                </Text>
+              )}
+            </View>
+          </View>
+
+          {/* Freccia destra per mese successivo */}
+          <TouchableOpacity 
+            style={styles.monthNavButton} 
+            onPress={goToNextMonth}
+          >
+            <MaterialCommunityIcons name="chevron-right" size={36} color={theme.colors.primary} />
+          </TouchableOpacity>
+
+          {/* Calendario rimane nella sua posizione originale */}
+          <MaterialCommunityIcons name="calendar-month" size={24} color="#4CAF50" />
+        </View>
+      )}
+
       <SectionList
         sections={sections}
         keyExtractor={(item) => item.id?.toString() || `${item.date}-${item.type}`}
         renderItem={renderItem}
-        renderSectionHeader={renderSectionHeader}
         style={styles.list}
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
         refreshControl={
-          <RefreshControl refreshing={isLoading} onRefresh={refreshEntries} colors={['#4CAF50']} />
+          <RefreshControl refreshing={isLoading} onRefresh={handleManualRefresh} colors={['#4CAF50']} />
         }
         ListEmptyComponent={() => (
           <View style={styles.emptyContainer}>
@@ -1289,53 +1573,110 @@ const TimeEntryScreen = () => {
         visible={showActionMenu}
         entry={selectedEntry}
         onClose={() => setShowActionMenu(false)}
-        onDeleted={refreshEntries}
+        onDeleted={handleManualRefresh}
+        styles={styles}
       />
     </SafeAreaView>
   );
 };
 
-const styles = StyleSheet.create({
+const createStyles = (theme) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f8f9fa',
+    backgroundColor: theme.colors.background,
     paddingTop: 0,
     marginBottom: -45, // Riduce ulteriormente lo spazio con la tab bar
+  },
+
+  // Header fisso fluttuante con aspetto card
+  fixedFloatingHeader: {
+    position: 'absolute',
+    top: 10,
+    left: 16,
+    right: 16,
+    backgroundColor: theme.colors.card,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    zIndex: 1000,
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    borderRadius: 16,
+    ...theme.colors.cardElevation,
+  },
+  headerContentCentered: {
+    flex: 1,
+    alignItems: 'center',
+    marginHorizontal: 8,
+  },
+  fixedHeaderTitle: {
+    fontWeight: 'bold',
+    fontSize: 18,
+    color: theme.colors.primary,
+    marginBottom: 4,
+    textAlign: 'center',
+    textTransform: 'capitalize',
+  },
+  headerStats: {
+    flexDirection: 'column',
+    alignItems: 'center',
+  },
+  headerStatsText: {
+    color: theme.colors.success,
+    fontSize: 14,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  headerStatsSubtext: {
+    color: theme.colors.textSecondary,
+    fontSize: 12,
+    marginTop: 2,
+    textAlign: 'center',
+  },
+  listContentWithHeader: {
+    paddingTop: 100, // Spazio per l'header card fisso (top: 10 + altezza card ~90)
+    padding: 6,
+    paddingBottom: 90, // Spazio per il FAB
   },
   
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#f8f9fa',
+    backgroundColor: theme.colors.background,
   },
   loadingText: {
     marginTop: 16,
     fontSize: 16,
-    color: '#666',
+    color: theme.colors.textSecondary,
   },
   errorContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 40,
-    backgroundColor: '#f8f9fa',
+    backgroundColor: theme.colors.background,
   },
   errorTitle: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#F44336',
+    color: theme.colors.error,
     marginTop: 16,
     marginBottom: 8,
   },
   errorText: {
     fontSize: 16,
-    color: '#666',
+    color: theme.colors.textSecondary,
     textAlign: 'center',
     marginBottom: 24,
   },
   retryButton: {
-    backgroundColor: '#4CAF50',
+    backgroundColor: theme.colors.success,
     paddingHorizontal: 24,
     paddingVertical: 12,
     borderRadius: 8,
@@ -1355,13 +1696,13 @@ const styles = StyleSheet.create({
   emptyTitle: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#333',
+    color: theme.colors.text,
     marginTop: 20,
     marginBottom: 10,
   },
   emptyText: {
     fontSize: 16,
-    color: '#666',
+    color: theme.colors.textSecondary,
     textAlign: 'center',
     lineHeight: 24,
   },
@@ -1371,26 +1712,41 @@ const styles = StyleSheet.create({
   },
   listContent: {
     padding: 6,
+    paddingTop: 105, // Spazio maggiore per abbassare di più le card sottostanti
     paddingBottom: 90, // Spazio per il FAB ripristinato
   },
 
-  // Stili per le sezioni moderne
+  // Stili per le sezioni moderne - ora fissa e fluttuante
   modernSectionHeader: {
-    backgroundColor: '#ffffff',
+    position: 'absolute',
+    top: 8,
+    left: 4,
+    right: 4,
+    backgroundColor: theme.colors.card,
     paddingVertical: 12,
     paddingHorizontal: 16,
-    marginTop: 16,
-    marginBottom: 8,
-    marginHorizontal: 4,
-    borderRadius: 12,
+    borderRadius: 16,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    elevation: 2,
+    zIndex: 1000,
+    elevation: 8,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    ...theme.colors.cardElevation,
+  },
+  // Pulsanti di navigazione mese nella card - frecce grandi senza sfondo
+  monthNavButton: {
+    padding: 16,
+    marginHorizontal: 8,
+  },
+  // Contenuto centrale della sezione header (centrato)
+  sectionHeaderContentCentered: {
+    flex: 1,
+    alignItems: 'center',
+    marginHorizontal: 8,
   },
   sectionHeaderContent: {
     flex: 1,
@@ -1398,40 +1754,39 @@ const styles = StyleSheet.create({
   modernSectionTitle: {
     fontWeight: 'bold',
     fontSize: 18,
-    color: '#1b5e20',
+    color: theme.colors.primary,
     marginBottom: 4,
+    textAlign: 'center',
   },
   sectionStats: {
     flexDirection: 'column',
+    alignItems: 'center',
   },
   sectionStatsText: {
-    color: '#4CAF50',
+    color: theme.colors.success,
     fontSize: 14,
     fontWeight: '600',
+    textAlign: 'center',
   },
   sectionStatsSubtext: {
-    color: '#888',
+    color: theme.colors.textSecondary,
     fontSize: 12,
     marginTop: 2,
   },
 
   // Stili per le card moderne
   modernCard: {
-    backgroundColor: 'white',
+    backgroundColor: theme.colors.card,
     borderRadius: 16,
     marginHorizontal: 4,
     marginVertical: 3, // Ridotto da 6 a 3 per alzare la visuale
     padding: 16,
-    elevation: 3,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    ...theme.colors.cardElevation,
   },
   standbyOnlyCard: {
     borderLeftWidth: 4,
-    borderLeftColor: '#4CAF50',
-    backgroundColor: '#f8fff9',
+    borderLeftColor: theme.colors.success,
+    backgroundColor: theme.colors.surface,
   },
   modernCardHeader: {
     flexDirection: 'row',
@@ -1450,7 +1805,7 @@ const styles = StyleSheet.create({
   modernDayName: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#333',
+    color: theme.colors.text,
   },
   dayTypeBadge: {
     marginLeft: 8,
@@ -1462,13 +1817,13 @@ const styles = StyleSheet.create({
   },
   modernDate: {
     fontSize: 14,
-    color: '#666',
+    color: theme.colors.textSecondary,
     marginTop: 2,
   },
 
   // Stili per il breakdown guadagni
   earningsBreakdownContainer: {
-    backgroundColor: '#f8f9fa',
+    backgroundColor: theme.colors.surface,
     borderRadius: 12,
     padding: 12,
     minWidth: 120,
@@ -1481,7 +1836,7 @@ const styles = StyleSheet.create({
   earningsTotal: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#4CAF50',
+    color: theme.colors.success,
     marginRight: 8,
   },
   earningsComponents: {
@@ -1502,12 +1857,12 @@ const styles = StyleSheet.create({
   componentLabel: {
     flex: 1,
     fontSize: 12,
-    color: '#666',
+    color: theme.colors.textSecondary,
   },
   componentValue: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#333',
+    color: theme.colors.text,
   },
 
   // Stili per le sezioni dettagliate (come nel form)
@@ -1523,12 +1878,12 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     paddingBottom: 8,
     borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
+    borderBottomColor: theme.colors.border,
   },
   sectionTitle: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#333',
+    color: theme.colors.text,
     marginLeft: 8,
     flex: 1,
   },
@@ -1548,13 +1903,13 @@ const styles = StyleSheet.create({
   },
   detailLabel: {
     fontSize: 14,
-    color: '#666',
+    color: theme.colors.textSecondary,
     flex: 1,
     marginRight: 8,
   },
   subDetailLabel: {
     fontSize: 13,
-    color: '#888',
+    color: theme.colors.textDisabled,
     fontStyle: 'italic',
   },
   detailValueContainer: {
@@ -1564,26 +1919,26 @@ const styles = StyleSheet.create({
   },
   detailValue: {
     fontSize: 14,
-    color: '#333',
+    color: theme.colors.text,
     fontWeight: '500',
   },
   subDetailValue: {
     fontSize: 13,
-    color: '#555',
+    color: theme.colors.textSecondary,
   },
   highlightValue: {
-    color: '#4CAF50',
+    color: theme.colors.success,
     fontWeight: 'bold',
   },
   durationText: {
     fontSize: 12,
-    color: '#666',
+    color: theme.colors.textSecondary,
     marginLeft: 4,
     fontStyle: 'italic',
   },
   calculationText: {
     fontSize: 11,
-    color: '#888',
+    color: theme.colors.textDisabled,
     fontStyle: 'italic',
     marginTop: 2,
     width: '100%',
@@ -1596,17 +1951,17 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     marginTop: 8,
     borderTopWidth: 2,
-    borderTopColor: '#4CAF50',
+    borderTopColor: theme.colors.success,
   },
   totalLabel: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#333',
+    color: theme.colors.text,
   },
   totalValue: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#4CAF50',
+    color: theme.colors.success,
   },
   hoursRow: {
     flexDirection: 'row',
@@ -1615,17 +1970,17 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     marginBottom: 8,
     borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
+    borderBottomColor: theme.colors.border,
   },
   hoursLabel: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#555',
+    color: theme.colors.textSecondary,
   },
   hoursValue: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#2196F3',
+    color: theme.colors.info,
   },
   standbyTotalRow: {
     flexDirection: 'row',
@@ -1634,26 +1989,26 @@ const styles = StyleSheet.create({
     paddingTop: 8,
     marginTop: 8,
     borderTopWidth: 1,
-    borderTopColor: '#e0e0e0',
+    borderTopColor: theme.colors.border,
   },
   standbyTotalLabel: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#4CAF50',
+    color: theme.colors.success,
   },
   standbyTotalValue: {
     fontSize: 15,
     fontWeight: 'bold',
-    color: '#4CAF50',
+    color: theme.colors.success,
   },
   standbyTotalEarnings: {
     fontSize: 13,
-    color: '#4CAF50',
+    color: theme.colors.success,
     fontStyle: 'italic',
   },
   specialDayNote: {
     fontSize: 12,
-    color: '#2e7d32',
+    color: theme.colors.success,
     fontStyle: 'italic',
     marginTop: 8,
     textAlign: 'center',
@@ -1663,7 +2018,7 @@ const styles = StyleSheet.create({
   breakdownSubtitle: {
     fontSize: 14,
     fontWeight: 'bold',
-    color: '#2196F3',
+    color: theme.colors.info,
     marginBottom: 8,
     marginTop: 4,
   },
@@ -1671,22 +2026,22 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     paddingLeft: 8,
     borderLeftWidth: 2,
-    borderLeftColor: '#e3f2fd',
+    borderLeftColor: theme.colors.border,
   },
 
   // Stili per interventi
   interventoContainer: {
-    backgroundColor: '#f5f5f5',
+    backgroundColor: theme.colors.surface,
     borderRadius: 8,
     padding: 12,
     marginVertical: 8,
     borderLeftWidth: 3,
-    borderLeftColor: '#4CAF50',
+    borderLeftColor: theme.colors.success,
   },
   interventoTitle: {
     fontSize: 14,
     fontWeight: 'bold',
-    color: '#4CAF50',
+    color: theme.colors.success,
     marginBottom: 8,
   },
 
@@ -1694,7 +2049,7 @@ const styles = StyleSheet.create({
   standbyEarningsContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#E8F5E9',
+    backgroundColor: theme.colors.surface,
     borderRadius: 12,
     padding: 12,
   },
@@ -1702,10 +2057,10 @@ const styles = StyleSheet.create({
     marginLeft: 8,
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#4CAF50',
+    color: theme.colors.success,
   },
   standbyInfoContainer: {
-    marginTop: 12,
+    marginTop:  12,
   },
 
   // Stili per il body delle card
@@ -1717,7 +2072,7 @@ const styles = StyleSheet.create({
   siteInfoContainer: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    backgroundColor: '#f8f9fa',
+    backgroundColor: theme.colors.surface,
     borderRadius: 8,
     padding: 12,
   },
@@ -1728,12 +2083,12 @@ const styles = StyleSheet.create({
   siteName: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#333',
+    color: theme.colors.text,
     marginBottom: 4,
   },
   vehicleInfo: {
     fontSize: 14,
-    color: '#666',
+    color: theme.colors.textSecondary,
   },
 
   // Stili per gli slot temporali
@@ -1741,11 +2096,11 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   timeSlotContainer: {
-    backgroundColor: '#f8f9fa',
+    backgroundColor: theme.colors.surface,
     borderRadius: 8,
     padding: 12,
     borderLeftWidth: 3,
-    borderLeftColor: '#ddd',
+    borderLeftColor: theme.colors.border,
   },
   timeSlotHeader: {
     flexDirection: 'row',
@@ -1760,12 +2115,12 @@ const styles = StyleSheet.create({
   },
   timeSlotDuration: {
     fontSize: 12,
-    color: '#888',
+    color: theme.colors.textDisabled,
     fontStyle: 'italic',
   },
   timeSlotTime: {
     fontSize: 16,
-    color: '#333',
+    color: theme.colors.text,
     fontWeight: '500',
     marginLeft: 26,
   },
@@ -1790,7 +2145,7 @@ const styles = StyleSheet.create({
   },
   efficiencyDetails: {
     fontSize: 11,
-    color: '#666',
+    color: theme.colors.textSecondary,
     marginTop: 4,
     marginLeft: 4,
   },
@@ -1809,21 +2164,40 @@ const styles = StyleSheet.create({
     gap: 8,
     marginTop: 12,
   },
+  modernBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    marginRight: 8,
+    marginBottom: 4,
+  },
+  modernBadgeLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    marginLeft: 4,
+  },
+  modernBadgeValue: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    marginLeft: 6,
+  },
 
   // Stili per le note
   notesSection: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    backgroundColor: '#f8f9fa',
+    backgroundColor: theme.colors.surface,
     borderRadius: 8,
     padding: 12,
     borderLeftWidth: 3,
-    borderLeftColor: '#FFC107',
+    borderLeftColor: theme.colors.warning,
   },
   notesText: {
     marginLeft: 12,
     fontSize: 14,
-    color: '#666',
+    color: theme.colors.textSecondary,
     flex: 1,
     lineHeight: 20,
   },
@@ -1833,18 +2207,14 @@ const styles = StyleSheet.create({
     position: 'absolute',
     bottom: 70, // Spostato più in alto
     right: 20,
-    backgroundColor: '#4CAF50',
+    backgroundColor: theme.colors.success,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 16,
     paddingHorizontal: 24,
     borderRadius: 30,
-    elevation: 8,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 6,
+    ...theme.colors.cardElevation,
   },
   fabText: {
     color: 'white',
@@ -1861,16 +2231,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   actionMenu: {
-    backgroundColor: 'white',
+    backgroundColor: theme.colors.card,
     borderRadius: 16,
     padding: 8,
     width: '80%',
     maxWidth: 300,
-    elevation: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 6,
+    ...theme.colors.cardElevation,
   },
   actionMenuItem: {
     flexDirection: 'row',
@@ -1881,7 +2247,7 @@ const styles = StyleSheet.create({
   actionMenuText: {
     fontSize: 16,
     marginLeft: 16,
-    color: '#333',
+    color: theme.colors.text,
     fontWeight: '500',
   },
 
@@ -1892,18 +2258,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 8,
     borderBottomWidth: 1,
-    borderBottomColor: '#eee',
+    borderBottomColor: theme.colors.divider,
   },
   subDetailRow: {
-    backgroundColor: '#f9f9f9',
+    backgroundColor: theme.colors.surface,
   },
   detailLabel: {
     fontSize: 14,
-    color: '#333',
+    color: theme.colors.text,
   },
   subDetailLabel: {
     fontSize: 12,
-    color: '#666',
+    color: theme.colors.textSecondary,
   },
   detailValueContainer: {
     flexDirection: 'row',
@@ -1911,30 +2277,26 @@ const styles = StyleSheet.create({
   },
   detailValue: {
     fontSize: 14,
-    color: '#4CAF50',
+    color: theme.colors.success,
     fontWeight: '500',
   },
   highlightValue: {
-    color: '#d32f2f',
+    color: theme.colors.error,
     fontWeight: 'bold',
   },
   durationText: {
     fontSize: 12,
-    color: '#888',
+    color: theme.colors.textDisabled,
     marginLeft: 4,
   },
 
   // Stili per le sezioni di dettaglio
   detailSection: {
-    backgroundColor: 'white',
+    backgroundColor: theme.colors.card,
     borderRadius: 12,
     marginBottom: 16,
     padding: 16,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
+    ...theme.colors.cardElevation,
   },
   lastDetailSection: {
     marginBottom: 90, // Spazio per il FAB
@@ -1947,7 +2309,7 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#333',
+    color: theme.colors.text,
     marginLeft: 8,
   },
   sectionContent: {
@@ -1961,27 +2323,23 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     paddingHorizontal: 12,
     borderRadius: 8,
-    backgroundColor: '#f1f8e9',
+    backgroundColor: theme.colors.surface,
   },
   interventoTitle: {
     fontSize: 14,
     fontWeight: '500',
-    color: '#2e7d32',
+    color: theme.colors.success,
     marginBottom: 4,
   },
 
   // Stili per le card moderne dettagliate
   detailedCard: {
-    backgroundColor: 'white',
+    backgroundColor: theme.colors.card,
     borderRadius: 16,
     marginHorizontal: 4,
     marginVertical: 8,
     padding: 16,
-    elevation: 3,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    ...theme.colors.cardElevation,
   },
   cardHeader: {
     flexDirection: 'row',
@@ -1995,11 +2353,11 @@ const styles = StyleSheet.create({
   dayName: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#333',
+    color: theme.colors.text,
   },
   dateText: {
     fontSize: 14,
-    color: '#666',
+    color: theme.colors.textSecondary,
     marginTop: 2,
   },
   headerRight: {
@@ -2022,7 +2380,7 @@ const styles = StyleSheet.create({
   completamentoContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#f8f9fa',
+    backgroundColor: theme.colors.surface,
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 8,
@@ -2039,18 +2397,18 @@ const styles = StyleSheet.create({
   totalEarnings: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#4CAF50',
+    color: theme.colors.success,
   },
   standbyBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#E8F5E9',
+    backgroundColor: theme.colors.surface,
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 20,
   },
   standbyBadgeText: {
-    color: '#4CAF50',
+    color: theme.colors.success,
     fontSize: 14,
     fontWeight: '600',
     marginLeft: 6,
@@ -2061,7 +2419,7 @@ const styles = StyleSheet.create({
   standbyAmount: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#4CAF50',
+    color: theme.colors.success,
   },
   
   // Stile semplificato per card reperibilità come nella foto
@@ -2072,20 +2430,20 @@ const styles = StyleSheet.create({
   standbySimpleAmount: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#4CAF50',
+    color: theme.colors.success,
   },
   
   // Stile per separatore rimborsi pasti
   mealSeparator: {
     height: 1,
-    backgroundColor: '#e0e0e0',
+    backgroundColor: theme.colors.border,
     marginVertical: 12,
   },
   
   // Stile per nota informativa interventi
   interventoNote: {
     fontSize: 12,
-    color: '#666',
+    color: theme.colors.textSecondary,
     fontStyle: 'italic',
     marginTop: 8,
     marginBottom: 4,

@@ -6,29 +6,44 @@ import {
   ScrollView, 
   TouchableOpacity,
   Animated,
-  Dimensions
+  Dimensions,
+  Image,
+  Alert
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { PressableAnimated, FadeInCard } from '../components/AnimatedComponents';
 import { useTheme } from '../contexts/ThemeContext';
+import UpdateService from '../services/UpdateService';
+
+// Importa la versione dell'app dal package.json
+import { version } from '../../package.json';
+import { expo } from '../../app.json';
 
 const { width } = Dimensions.get('window');
 
 // Componente moderno per gli elementi delle impostazioni
-const ModernSettingItem = ({ item, onPress, index, theme }) => {
+const ModernSettingItem = ({ item, onPress, index, theme, isLoading = false }) => {
   return (
     <FadeInCard delay={index * 100} style={[styles.modernSettingItem, { backgroundColor: theme.colors.card }]}>
-      <PressableAnimated onPress={onPress} style={styles.settingPressable}>
+      <PressableAnimated onPress={onPress} style={styles.settingPressable} disabled={isLoading}>
         <View style={[styles.modernIconContainer, { backgroundColor: item.color }]}>
           <MaterialCommunityIcons name={item.icon} size={28} color="white" />
         </View>
         <View style={styles.modernSettingContent}>
           <Text style={[styles.modernSettingTitle, { color: theme.colors.text }]}>{item.title}</Text>
-          <Text style={[styles.modernSettingSubtitle, { color: theme.colors.textSecondary }]}>{item.subtitle}</Text>
+          <Text style={[styles.modernSettingSubtitle, { color: theme.colors.textSecondary }]}>
+            {isLoading ? 'Controllo aggiornamenti...' : item.subtitle}
+          </Text>
         </View>
         <View style={styles.chevronContainer}>
-          <Ionicons name="chevron-forward" size={24} color={theme.colors.textDisabled} />
+          {isLoading ? (
+            <Animated.View style={{ transform: [{ rotate: '360deg' }] }}>
+              <MaterialCommunityIcons name="loading" size={24} color={theme.colors.primary} />
+            </Animated.View>
+          ) : (
+            <Ionicons name="chevron-forward" size={24} color={theme.colors.textDisabled} />
+          )}
         </View>
       </PressableAnimated>
     </FadeInCard>
@@ -52,6 +67,41 @@ const ModernHeader = ({ theme }) => (
 
 const SettingsScreen = ({ navigation }) => {
   const { theme } = useTheme();
+  const [isCheckingUpdates, setIsCheckingUpdates] = useState(false);
+
+  // Gestisce il controllo aggiornamenti
+  const handleCheckUpdates = async () => {
+    if (isCheckingUpdates) return;
+    
+    setIsCheckingUpdates(true);
+    try {
+      const hasUpdate = await UpdateService.checkManually();
+      if (!hasUpdate) {
+        Alert.alert(
+          '✅ App Aggiornata',
+          'Stai già utilizzando la versione più recente dell\'app.',
+          [{ text: 'OK' }]
+        );
+      }
+    } catch (error) {
+      Alert.alert(
+        'Errore',
+        'Impossibile controllare gli aggiornamenti. Verifica la connessione internet.',
+        [{ text: 'OK' }]
+      );
+    } finally {
+      setIsCheckingUpdates(false);
+    }
+  };
+
+  // Gestisce l'azione dei menu
+  const handleMenuPress = (item) => {
+    if (item.action === 'checkUpdates') {
+      handleCheckUpdates();
+    } else if (item.screen) {
+      navigation.navigate(item.screen);
+    }
+  };
   const settingsOptions = [
     {
       title: 'Contratto CCNL',
@@ -66,6 +116,20 @@ const SettingsScreen = ({ navigation }) => {
       icon: 'calculator-variant',
       screen: 'NetCalculationSettings',
       color: '#1a73e8'
+    },
+    {
+      title: 'Fasce Orarie Avanzate',
+      subtitle: 'Configurazione fasce orarie e maggiorazioni',
+      icon: 'clock-time-eight',
+      screen: 'HourlyRatesSettings',
+      color: '#00BCD4'
+    },
+    {
+      title: 'Metodo di Calcolo',
+      subtitle: 'CCNL conforme vs. tariffe orarie pure',
+      icon: 'function-variant',
+      screen: 'CalculationMethodSettings',
+      color: '#795548'
     },
     {
       title: 'Ore di Viaggio',
@@ -117,13 +181,6 @@ const SettingsScreen = ({ navigation }) => {
       color: '#673AB7'
     },
     {
-      title: 'Export PDF',
-      subtitle: 'Genera report PDF dei tuoi orari di lavoro',
-      icon: 'file-pdf-box',
-      screen: 'PDFExport',
-      color: '#D32F2F'
-    },
-    {
       title: 'Backup e Ripristino',
       subtitle: 'Salvataggio e ripristino dati',
       icon: 'cloud-sync',
@@ -131,11 +188,11 @@ const SettingsScreen = ({ navigation }) => {
       color: '#F44336'
     },
     {
-      title: 'Debug Settings',
-      subtitle: 'Test sincronizzazione e notifiche',
-      icon: 'bug',
-      screen: 'DebugSettings',
-      color: '#9C27B0'
+      title: 'Aggiornamenti App',
+      subtitle: 'Controlla e installa aggiornamenti',
+      icon: 'update',
+      action: 'checkUpdates',
+      color: '#4CAF50'
     }
   ];
 
@@ -147,22 +204,46 @@ const SettingsScreen = ({ navigation }) => {
         <View style={styles.modernSettingsContainer}>
           {settingsOptions.map((item, index) => (
             <ModernSettingItem
-              key={item.screen}
+              key={item.screen || item.action}
               item={item}
               index={index}
               theme={theme}
-              onPress={() => navigation.navigate(item.screen)}
+              onPress={() => handleMenuPress(item)}
+              isLoading={item.action === 'checkUpdates' && isCheckingUpdates}
             />
           ))}
         </View>
 
         <FadeInCard delay={700} style={[styles.modernFooter, { backgroundColor: theme.colors.card }]}>
           <View style={styles.footerContent}>
-            <MaterialCommunityIcons name="information" size={24} color={theme.colors.primary} />
-            <Text style={[styles.modernFooterText, { color: theme.colors.text }]}>WorkTracker v1.0</Text>
-            <Text style={[styles.modernFooterSubtext, { color: theme.colors.textSecondary }]}>
-              App per il tracciamento ore di lavoro
-            </Text>
+            <View style={styles.appInfoSection}>
+              <View style={styles.appIcon}>
+                <Image 
+                  source={require('../../assets/icon.png')} 
+                  style={styles.appIconImage}
+                  resizeMode="contain"
+                />
+              </View>
+              <View style={styles.appTextInfo}>
+                <Text style={[styles.modernFooterText, { color: theme.colors.text }]}>
+                  {expo.name} v{expo.version}
+                </Text>
+                <Text style={[styles.modernFooterSubtext, { color: theme.colors.textSecondary }]}>
+                  Tracking ore lavoro con calcoli CCNL conformi e personalizzabili
+                </Text>
+              </View>
+            </View>
+            
+            <TouchableOpacity 
+              style={[styles.infoButton, { backgroundColor: theme.colors.primary + '15' }]}
+              onPress={() => navigation.navigate('AppInfo')}
+              activeOpacity={0.7}
+            >
+              <MaterialCommunityIcons name="information" size={20} color={theme.colors.primary} />
+              <Text style={[styles.infoButtonText, { color: theme.colors.primary }]}>
+                Info e Aggiornamenti
+              </Text>
+            </TouchableOpacity>
           </View>
         </FadeInCard>
       </ScrollView>
@@ -282,19 +363,51 @@ const styles = StyleSheet.create({
   },
   footerContent: {
     padding: 24,
+  },
+  appInfoSection: {
+    flexDirection: 'row',
     alignItems: 'center',
+    marginBottom: 16,
+  },
+  appIcon: {
+    width: 96,
+    height: 96,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 16,
+  },
+  appIconImage: {
+    width: 96,
+    height: 96,
+    borderRadius: 24,
+  },
+  appTextInfo: {
+    flex: 1,
   },
   modernFooterText: {
     fontSize: 18,
-    fontWeight: '600',
+    fontWeight: '700',
     color: '#1a1a1a',
-    marginTop: 12,
     marginBottom: 4,
   },
   modernFooterSubtext: {
     fontSize: 14,
     color: '#666',
-    textAlign: 'center',
+    lineHeight: 20,
+  },
+  infoButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    alignSelf: 'stretch',
+  },
+  infoButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginLeft: 8,
   },
   // Stili legacy mantenuti per compatibilità (se necessari)
   container: {
