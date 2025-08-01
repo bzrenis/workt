@@ -156,12 +156,16 @@ src/
 - Rimborsi in contanti
 - Attivazione automatica in base agli orari
 
+
 ## 💾 Sistema Backup
 
 - **Backup Locale**: Salvataggio file JSON sul dispositivo
 - **Esportazione**: Condivisione backup via email/cloud
 - **Ripristino**: Importazione dati da file backup
 - **Auto-backup**: Backup automatici periodici
+- **Backup automatico in background**: Su build native, l'app esegue backup automatici anche in background tramite task periodici, notificando l'utente ad ogni salvataggio completato.
+
+Per dettagli sulla privacy e la gestione dei dati consulta il file [INFORMATIVA_PRIVACY.md](./INFORMATIVA_PRIVACY.md).
 
 ## 🔧 Tecnologie Utilizzate
 

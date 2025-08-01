@@ -1,6 +1,11 @@
 # Changelog - WorkT Tracker Ore Lavoro
 
-## [1.0.3] - 2025-01-15
+
+## [1.0.4] - 2025-01-16
+
+### 🚀 Nuove funzionalità
+- **Backup automatico in background**: ora l'app esegue backup automatici anche in background (solo build native), notificando l'utente ad ogni salvataggio.
+- **Informativa privacy aggiornata**: aggiunto file INFORMATIVA_PRIVACY.md con dettagli su trattamento dati e privacy.
 
 ### 🐛 Correzioni
 - **Fix calcolo MULTI_SHIFT_OPTIMIZED**: Risolto problema calcolo proporzionale per giornate parziali (6.6h ora = 90.94€ invece di 109.34€)
