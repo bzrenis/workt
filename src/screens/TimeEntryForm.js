@@ -3746,6 +3746,22 @@ const TimeEntryForm = ({ route, navigation }) => {
                       .switch-thumb.off {
                         left: 2px;
                       }
+                      .switch-status {
+                        font-size: 12px;
+                        font-weight: 600;
+                        padding: 4px 8px;
+                        border-radius: 4px;
+                        text-align: center;
+                        min-width: 60px;
+                      }
+                      .switch-status.on {
+                        background-color: #E8F5E8;
+                        color: #4CAF50;
+                      }
+                      .switch-status.off {
+                        background-color: #F5F5F5;
+                        color: #999;
+                      }
                       .picker-value {
                         background-color: #F2F2F7;
                         padding: 12px 16px;
@@ -3784,6 +3800,7 @@ const TimeEntryForm = ({ route, navigation }) => {
                         font-weight: 500;
                         margin-top: 15px;
                         width: 100%;
+                        display: none !important; /* Nasconde i pulsanti nella stampa */
                       }
                       .shift-item {
                         background-color: #F2F2F7;
@@ -3940,7 +3957,7 @@ const TimeEntryForm = ({ route, navigation }) => {
 
                     <!-- Orari di Lavoro TURNO PRINCIPALE -->
                     <div class="container">
-                      <div class="section-title">⏰ Orari di Lavoro</div>
+                      <div class="section-title">Orari di Lavoro</div>
                       <div class="field">
                         <div class="field-label">Lavoro Ordinario</div>
                         <div class="time-row">
@@ -3982,7 +3999,7 @@ const TimeEntryForm = ({ route, navigation }) => {
 
                     <!-- TURNI AGGIUNTIVI - SEZIONE COMPLETA -->
                     <div class="container">
-                      <div class="section-title">🔄 Turni Aggiuntivi</div>
+                      <div class="section-title">Turni Aggiuntivi</div>
                       ${additionalShifts.length > 0 ? 
                         additionalShifts.map((shift, index) => `
                           <div class="shift-item">
@@ -4029,7 +4046,7 @@ const TimeEntryForm = ({ route, navigation }) => {
 
                     <!-- INTERVENTI - SEZIONE COMPLETA -->
                     <div class="container">
-                      <div class="section-title">🛠️ Interventi</div>
+                      <div class="section-title">Interventi</div>
                       ${interventions.length > 0 ? 
                         interventions.map((intervention, index) => `
                           <div class="intervention-item">
@@ -4085,24 +4102,18 @@ const TimeEntryForm = ({ route, navigation }) => {
 
                     <!-- Indennità -->
                     <div class="container">
-                      <div class="section-title">💰 Indennità</div>
+                      <div class="section-title">Indennita</div>
                       <div class="switch-row">
                         <span class="switch-label">Trasferta</span>
-                        <div class="switch-container ${form.trasferta ? 'switch-on' : 'switch-off'}">
-                          <div class="switch-thumb ${form.trasferta ? 'on' : 'off'}"></div>
-                        </div>
+                        <span class="switch-status ${form.trasferta ? 'on' : 'off'}">${form.trasferta ? 'ATTIVA' : 'NON ATTIVA'}</span>
                       </div>
                       <div class="switch-row">
                         <span class="switch-label">Pasti</span>
-                        <div class="switch-container ${form.pasti.pranzo || form.pasti.cena ? 'switch-on' : 'switch-off'}">
-                          <div class="switch-thumb ${form.pasti.pranzo || form.pasti.cena ? 'on' : 'off'}"></div>
-                        </div>
+                        <span class="switch-status ${form.pasti.pranzo || form.pasti.cena ? 'on' : 'off'}">${form.pasti.pranzo || form.pasti.cena ? 'ATTIVI' : 'NON ATTIVI'}</span>
                       </div>
                       <div class="switch-row">
                         <span class="switch-label">Standby</span>
-                        <div class="switch-container ${form.standby ? 'switch-on' : 'switch-off'}">
-                          <div class="switch-thumb ${form.standby ? 'on' : 'off'}"></div>
-                        </div>
+                        <span class="switch-status ${form.standby ? 'on' : 'off'}">${form.standby ? 'ATTIVA' : 'NON ATTIVA'}</span>
                       </div>
                       ${form.standby ? `
                       <div class="field" style="margin-top: 20px;">
@@ -4117,7 +4128,7 @@ const TimeEntryForm = ({ route, navigation }) => {
 
                     <!-- Note libere -->
                     <div class="container">
-                      <div class="section-title">📝 Note Libere</div>
+                      <div class="section-title">Note Libere</div>
                       <div class="field">
                         <div class="textarea ${!form.note_libere ? 'placeholder' : ''}">${form.note_libere || 'Aggiungi note aggiuntive...'}</div>
                       </div>
@@ -4127,7 +4138,7 @@ const TimeEntryForm = ({ route, navigation }) => {
 
                     <!-- TURNI AGGIUNTIVI - SEZIONE COMPLETA -->
                     <div class="container full-width">
-                      <div class="section-title">🔄 Turni Aggiuntivi</div>
+                      <div class="section-title">Turni Aggiuntivi</div>
                       ${additionalShifts.length > 0 ? 
                         additionalShifts.map((shift, index) => `
                           <div class="shift-item">
@@ -4174,7 +4185,7 @@ const TimeEntryForm = ({ route, navigation }) => {
 
                     <!-- INTERVENTI - SEZIONE COMPLETA -->
                     <div class="container full-width">
-                      <div class="section-title">🛠️ Interventi</div>
+                      <div class="section-title">Interventi</div>
                       ${interventions.length > 0 ? 
                         interventions.map((intervention, index) => `
                           <div class="intervention-item">
@@ -4230,7 +4241,7 @@ const TimeEntryForm = ({ route, navigation }) => {
 
                     <!-- RIEPILOGO GUADAGNI - SEZIONE COMPLETA -->
                     <div class="container full-width">
-                      <div class="section-title">💰 Riepilogo Guadagni</div>
+                      <div class="section-title">Riepilogo Guadagni</div>
                       
                       <!-- Calcolo ore lavorate con dati REALI -->
                       ${(() => {
