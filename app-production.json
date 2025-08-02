@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "WorkT - Tracker Ore Lavoro",
-    "slug": "workt-production",
+    "slug": "workt",
     "version": "1.1.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
