@@ -1,5 +1,48 @@
 # Changelog - WorkT Tracker Ore Lavoro
 
+## [1.1.0] - 2025-08-02
+
+### 🎉 AGGIORNAMENTO MAGGIORE - Sistema Notifiche Completo
+
+#### 🔔 **Sistema Notifiche Reperibilità Rivoluzionato**
+- **UI configurazione completamente rinnovata**: Interfaccia intuitiva con time picker per configurare notifiche reperibilità
+- **Notifiche multiple personalizzabili**: Supporto per più promemoria per ogni giorno di reperibilità (oggi, domani, etc.)
+- **Logging dettagliato**: Visualizzazione completa di quando le notifiche vengono programmate con date e orari specifici
+- **Database query ottimizzato**: Risolto accesso alle impostazioni reperibilità per programmazione automatica
+
+#### 🛠️ **Correzioni Tecniche Critiche**
+- **Fix database query**: Corretto accesso a `standbySettings` via `appSettings` invece di query diretta
+- **Import/Export patterns**: Risolti conflitti tra dynamic require() e ES6 modules
+- **Constructor-based imports**: Implementato pattern robusto per DatabaseService
+- **Field parsing UI**: Corretta conversione formati dati per time picker
+
+#### 🔧 **Miglioramenti Sistema Backup**
+- **Backup automatico ottimizzato**: Sistema ibrido Nativo + JavaScript per massima compatibilità
+- **Background tasks migliorati**: Gestione backup anche con app chiusa (build native)
+- **Logging backup avanzato**: Tracciamento dettagliato operazioni backup con dimensioni e timestamp
+
+#### 📱 **Aggiornamenti OTA e Build Native**
+- **Expo Updates integrato**: Sistema aggiornamenti automatici per build native
+- **Configurazione multi-ambiente**: Separazione completa tra development e production
+- **Build pipeline ottimizzata**: Script automatici per bump versioni e deploy
+
+#### 🎯 **Esperienza Utente**
+- **Notifiche intelligenti**: Sistema promemoria reperibilità con anticipo configurabile
+- **UI responsiva**: Interfaccia ottimizzata per Android con Material Design
+- **Feedback visivo**: Indicatori chiari per stato notifiche e configurazioni attive
+
+### 🔧 **Modifiche Tecniche Dettagliate**
+- `SuperNotificationService.js`: Aggiunto `scheduleStandbyReminders()` con logging completo
+- `NotificationSettingsScreen.js`: Refactor completo UI configurazione notifiche
+- `DatabaseService.js`: Pattern import ottimizzato per compatibilità moduli
+- `App.js`: Integrazione expo-updates per OTA automatic updates
+- `eas.json`: Configurazione build native separata da development
+
+### 📊 **Statistiche Aggiornamento**
+- **375 oggetti** caricati nel repository
+- **2.42 MB** di codice ottimizzato
+- **15+ file core** aggiornati
+- **100% compatibilità** con versioni precedenti
 
 ## [1.0.4] - 2025-01-16
 
