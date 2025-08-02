@@ -118,6 +118,7 @@ import { useDatabase } from './src/hooks';
 import DatabaseHealthService from './src/services/DatabaseHealthService';
 // import NotificationService from './src/services/FixedNotificationService'; // DISATTIVATO - usando SuperNotificationService
 import BackupService from './src/services/BackupService';
+import { registerBackgroundBackupTask } from './src/services/BackgroundBackupTask';
 const SuperNotificationService = require('./src/services/SuperNotificationService');
 const SuperBackupService = require('./src/services/SuperBackupService');
 import UpdateService from './src/services/UpdateService';
@@ -466,14 +467,11 @@ export default function App() {
       const initializeBackupSystem = async () => {
         try {
           console.log('💾 App: Inizializzazione SuperBackupService...');
-          
           // Attesa aggiuntiva per evitare conflitti database
           await new Promise(resolve => setTimeout(resolve, 1000));
-          
           // Inizializza il nuovo sistema SuperBackup
           const superInitialized = await SuperBackupService.initialize();
           console.log(`🚀 App: SuperBackupService inizializzato: ${superInitialized ? '✅ OK' : '❌ FAILED'}`);
-          
           if (superInitialized) {
             // Verifica automaticamente backup mancati e ripristina
             console.log('🔄 App: Controllo recovery backup...');
@@ -481,11 +479,9 @@ export default function App() {
             if (recoveredBackups > 0) {
               console.log(`✅ App: Recovery completato, recuperati ${recoveredBackups} backup`);
             }
-            
             // Verifica statistiche backup
             const stats = await SuperBackupService.getBackupStats();
             console.log(`📊 App: Backup totali: ${stats.totalBackups || 0}, Ultimo: ${stats.lastBackupDate || 'Mai'}`);
-            
             // Se non ci sono backup recenti, esegui uno ora
             if (!stats.lastBackupDate || (Date.now() - new Date(stats.lastBackupDate).getTime()) > 7 * 24 * 60 * 60 * 1000) {
               console.log('⚠️ App: Nessun backup recente, esecuzione backup iniziale...');
@@ -496,12 +492,17 @@ export default function App() {
                 console.warn(`❌ App: Backup iniziale fallito: ${backupResult.error}`);
               }
             }
+            // REGISTRA TASK BACKGROUND SOLO SE IL BACKUP AUTOMATICO È ATTIVO
+            const backupSettings = await SuperBackupService.getBackupSettings();
+            if (backupSettings && backupSettings.enabled) {
+              await registerBackgroundBackupTask();
+            } else {
+              console.log('ℹ️ [BackgroundFetch] Backup automatico non attivo, task non registrato');
+            }
           }
-          
           // Mantieni anche il vecchio sistema per compatibility (se necessario)
           try {
             console.log('App: Inizializzazione sistema backup legacy per compatibility...');
-            
             // Prima prova il backup nativo
             try {
               console.log('App: Tentativo inizializzazione NativeBackupService...');
@@ -518,7 +519,6 @@ export default function App() {
           } catch (legacyError) {
             console.warn('App: Sistema backup legacy non disponibile:', legacyError.message);
           }
-          
           console.log('✅ App: Sistema backup completo inizializzato');
         } catch (error) {
           console.warn('App: Errore inizializzazione backup (fallback a vecchio sistema):', error.message);

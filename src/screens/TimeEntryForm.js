@@ -24,6 +24,9 @@ import { useCalculationService } from '../hooks';
 import { createWorkEntryFromData } from '../utils/earningsHelper';
 import HolidayService from '../services/HolidayService';
 import NotificationService from '../services/FixedNotificationService';
+import * as Print from 'expo-print';
+import * as Sharing from 'expo-sharing';
+import * as FileSystem from 'expo-file-system';
 
 const { width } = Dimensions.get('window');
 
@@ -2499,8 +2502,43 @@ const TimeEntryForm = ({ route, navigation }) => {
   const styles = createStyles(theme);
   
   const today = new Date();
+  
+  // DEBUG: Log dei parametri ricevuti
+  console.log('🔍 TimeEntryForm - Parametri ricevuti:', {
+    initialDate: route?.params?.initialDate,
+    entryId: route?.params?.entryId,
+    isEditing: route?.params?.isEditing,
+    entryDate: route?.params?.entry?.date,
+    allParams: route?.params
+  });
+  
+  // Gestisci la data iniziale:
+  // 1. Se è in modalità modifica, usa la data dell'entry esistente
+  // 2. Se viene passata initialDate (nuovo inserimento con data selezionata), usala
+  // 3. Altrimenti usa oggi
+  let initialDate;
+  if (route?.params?.isEditing && route?.params?.entry?.date) {
+    // Modalità modifica: usa la data dell'entry esistente
+    initialDate = new Date(route.params.entry.date);
+  } else if (route?.params?.initialDate) {
+    // Nuovo inserimento con data selezionata dal calendario
+    initialDate = new Date(route.params.initialDate);
+  } else {
+    // Nuovo inserimento senza data specifica: usa oggi
+    initialDate = today;
+  }
+  
+  console.log('🔍 TimeEntryForm - Date processing:', {
+    today: today.toISOString(),
+    initialDateParam: route?.params?.initialDate,
+    entryDate: route?.params?.entry?.date,
+    isEditing: route?.params?.isEditing,
+    finalInitialDate: initialDate.toISOString(),
+    formatDateResult: formatDate(initialDate)
+  });
+  
   const [form, setForm] = useState({
-    date: formatDate(today),
+    date: formatDate(initialDate),
     site_name: '',
     veicolo: 'andata_ritorno',
     targa_veicolo: '', // Campo per targa/numero veicolo
@@ -3454,6 +3492,917 @@ const TimeEntryForm = ({ route, navigation }) => {
     }
   }, [form.viaggi, form.interventi, form.trasfertaManualOverride, form.pasti, settings]);
 
+  // � Funzione per fare screenshot del form
+  const printForm = async () => {
+    try {
+      console.log('� FORM SCREENSHOT - Avvio cattura schermata...');
+      
+      Alert.alert(
+        '� Screenshot Form',
+        'Vuoi salvare una foto dell\'inserimento corrente?',
+        [
+          { text: 'Annulla', style: 'cancel' },
+          {
+            text: 'Cattura Screenshot',
+            onPress: async () => {
+              try {
+                // PRIMA: Calcola il breakdown REALE usando CalculationService
+                let breakdown = null;
+                try {
+                  const primaryShift = form.viaggi[0] || {};
+                  const additionalShifts = form.viaggi.slice(1) || [];
+                  
+                  // Crea workEntry identico a quello dell'EarningsSummary
+                  const workEntry = {
+                    date: (() => {
+                      const [d, m, y] = form.date.split('/');
+                      return `${y}-${m}-${d}`;
+                    })(),
+                    siteName: form.site_name || '',
+                    vehicleDriven: form.veicolo || '',
+                    departureCompany: primaryShift.departure_company || '',
+                    arrivalSite: primaryShift.arrival_site || '',
+                    workStart1: primaryShift.work_start_1 || '',
+                    workEnd1: primaryShift.work_end_1 || '',
+                    workStart2: primaryShift.work_start_2 || '',
+                    workEnd2: primaryShift.work_end_2 || '',
+                    departureReturn: primaryShift.departure_return || '',
+                    arrivalCompany: primaryShift.arrival_company || '',
+                    viaggi: additionalShifts,
+                    interventi: form.interventi || [],
+                    mealLunchVoucher: form.pasti.pranzo ? 1 : 0,
+                    mealLunchCash: 0,
+                    mealDinnerVoucher: form.pasti.cena ? 1 : 0,
+                    mealDinnerCash: 0,
+                    travelAllowance: form.trasferta ? 1 : 0,
+                    travelAllowancePercent: 1.0,
+                    isStandbyDay: form.standby ? 1 : 0,
+                    standbyAllowance: form.standby ? 1 : 0,
+                    completamentoGiornata: 'nessuno',
+                    isFixedDay: false,
+                    fixedEarnings: 0,
+                    dayType: 'normale'
+                  };
+                  
+                  // Settings con valori di default come nell'EarningsSummary
+                  const defaultSettings = {
+                    contract: {
+                      monthlyRate: 2800,
+                      dailyRate: 107.69,
+                      hourlyRate: 16.15,
+                      overtime: {
+                        day: 1.2,
+                        night: 1.25,
+                        nightUntil22: 1.25,
+                        nightAfter22: 1.35,
+                        holiday: 1.3,
+                        nightHoliday: 1.5
+                      }
+                    },
+                    travelCompensationRate: 1.0,
+                    travelHoursSetting: 'MULTI_SHIFT_OPTIMIZED',
+                    standbySettings: {
+                      dailyAllowance: 7.5,
+                      dailyIndemnity: 7.5,
+                      travelWithBonus: false
+                    },
+                    mealAllowances: {
+                      lunch: { voucherAmount: 5.29 },
+                      dinner: { voucherAmount: 5.29 }
+                    }
+                  };
+                  
+                  const safeSettings = {
+                    ...defaultSettings,
+                    ...(settings || {}),
+                    contract: { ...defaultSettings.contract, ...(settings?.contract || {}) },
+                    standbySettings: { ...defaultSettings.standbySettings, ...(settings?.standbySettings || {}) },
+                    mealAllowances: { ...defaultSettings.mealAllowances, ...(settings?.mealAllowances || {}) }
+                  };
+                  
+                  // Usa il metodo corretto: calculateEarningsBreakdown (asincrono)
+                  breakdown = await calculationService.calculateEarningsBreakdown(workEntry, safeSettings);
+                  console.log('✅ Breakdown calcolato per PDF:', breakdown);
+                } catch (error) {
+                  console.error('Errore calcolo breakdown per PDF:', error);
+                }
+
+                // SECONDA: Genera dati per il form  
+                const additionalShifts = form.viaggi.slice(1) || [];
+                const interventions = form.interventi || [];
+                
+                // HTML che replica ESATTAMENTE TUTTO il form
+                const htmlContent = `
+                  <!DOCTYPE html>
+                  <html>
+                  <head>
+                    <meta charset="utf-8">
+                    <title>Work Time Tracker - Form PDF</title>
+                    <style>
+                      body { 
+                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
+                        margin: 0; 
+                        padding: 15px; 
+                        background-color: #f2f2f7; 
+                        width: 210mm; /* Larghezza A4 */
+                        font-size: 12px;
+                        line-height: 1.3;
+                      }
+                      .screen-container {
+                        background-color: #f2f2f7;
+                        min-height: 297mm; /* Altezza A4 */
+                        padding-bottom: 20px;
+                      }
+                      .cards-grid {
+                        display: grid;
+                        grid-template-columns: 1fr 1fr; /* 2 colonne uguali */
+                        gap: 12px;
+                        margin-bottom: 15px;
+                      }
+                      .container { 
+                        background-color: white; 
+                        border-radius: 10px; 
+                        padding: 15px; 
+                        box-shadow: 0 1px 3px rgba(0,0,0,0.1); 
+                        break-inside: avoid; /* Evita di spezzare le card */
+                      }
+                      .container.full-width {
+                        grid-column: 1 / -1; /* Occupa tutta la larghezza */ 
+                        margin-bottom: 15px;
+                      }
+                      .header { 
+                        display: flex; 
+                        justify-content: space-between; 
+                        align-items: center;
+                        margin-bottom: 20px; 
+                        padding-bottom: 15px; 
+                        border-bottom: 1px solid #e0e0e0; 
+                        font-weight: 600;
+                        font-size: 17px;
+                      }
+                      .section-title { 
+                        font-size: 17px; 
+                        font-weight: 600; 
+                        color: #000; 
+                        margin-bottom: 15px; 
+                        display: flex;
+                        align-items: center;
+                        gap: 8px;
+                      }
+                      .field { 
+                        margin-bottom: 20px; 
+                      }
+                      .field:last-child {
+                        margin-bottom: 0;
+                      }
+                      .field-label { 
+                        font-size: 13px; 
+                        font-weight: 500; 
+                        color: #8E8E93; 
+                        margin-bottom: 8px; 
+                        text-transform: uppercase;
+                        letter-spacing: 0.5px;
+                      }
+                      .field-value { 
+                        font-size: 16px; 
+                        background-color: #F2F2F7; 
+                        padding: 12px 16px; 
+                        border-radius: 10px; 
+                        border: none;
+                        color: #000;
+                        min-height: 20px;
+                      }
+                      .field-value.placeholder {
+                        color: #C7C7CD;
+                        font-style: italic;
+                      }
+                      .time-row { 
+                        display: flex; 
+                        align-items: center; 
+                        gap: 12px; 
+                      }
+                      .time-input { 
+                        flex: 1; 
+                        background-color: #F2F2F7; 
+                        padding: 12px 16px; 
+                        border-radius: 10px; 
+                        border: none;
+                        text-align: center;
+                        font-size: 16px;
+                        color: #000;
+                      }
+                      .time-input.placeholder {
+                        color: #C7C7CD;
+                      }
+                      .time-separator {
+                        font-size: 16px;
+                        font-weight: 500;
+                        color: #8E8E93;
+                      }
+                      .switch-row { 
+                        display: flex; 
+                        justify-content: space-between; 
+                        align-items: center;
+                        padding: 15px 0; 
+                        border-bottom: 0.5px solid #C6C6C8; 
+                      }
+                      .switch-row:last-child { 
+                        border-bottom: none; 
+                        padding-bottom: 0;
+                      }
+                      .switch-row:first-child {
+                        padding-top: 0;
+                      }
+                      .switch-label { 
+                        font-size: 17px;
+                        color: #000;
+                      }
+                      .switch-container {
+                        width: 51px;
+                        height: 31px;
+                        border-radius: 16px;
+                        position: relative;
+                        transition: all 0.3s ease;
+                      }
+                      .switch-on { 
+                        background-color: #34C759; 
+                      }
+                      .switch-off { 
+                        background-color: #E5E5EA; 
+                      }
+                      .switch-thumb {
+                        width: 27px;
+                        height: 27px;
+                        border-radius: 50%;
+                        background-color: white;
+                        position: absolute;
+                        top: 2px;
+                        box-shadow: 0 3px 8px rgba(0,0,0,0.15);
+                        transition: all 0.3s ease;
+                      }
+                      .switch-thumb.on {
+                        left: 22px;
+                      }
+                      .switch-thumb.off {
+                        left: 2px;
+                      }
+                      .picker-value {
+                        background-color: #F2F2F7;
+                        padding: 12px 16px;
+                        border-radius: 10px;
+                        font-size: 16px;
+                        color: #000;
+                        display: flex;
+                        justify-content: space-between;
+                        align-items: center;
+                      }
+                      .picker-arrow {
+                        color: #C7C7CD;
+                        font-size: 14px;
+                      }
+                      .textarea {
+                        background-color: #F2F2F7;
+                        padding: 12px 16px;
+                        border-radius: 10px;
+                        border: none;
+                        font-size: 16px;
+                        min-height: 100px;
+                        resize: none;
+                        font-family: inherit;
+                      }
+                      .textarea.placeholder {
+                        color: #C7C7CD;
+                        font-style: italic;
+                      }
+                      .add-button {
+                        background-color: #007AFF;
+                        color: white;
+                        border: none;
+                        border-radius: 10px;
+                        padding: 12px 20px;
+                        font-size: 16px;
+                        font-weight: 500;
+                        margin-top: 15px;
+                        width: 100%;
+                      }
+                      .shift-item {
+                        background-color: #F2F2F7;
+                        border-radius: 10px;
+                        padding: 15px;
+                        margin-bottom: 10px;
+                        border-left: 4px solid #007AFF;
+                      }
+                      .shift-title {
+                        font-weight: 600;
+                        color: #007AFF;
+                        margin-bottom: 10px;
+                        font-size: 15px;
+                      }
+                      .intervention-item {
+                        background-color: #FFF3CD;
+                        border-radius: 10px;
+                        padding: 15px;
+                        margin-bottom: 10px;
+                        border-left: 4px solid #FF9500;
+                      }
+                      .intervention-title {
+                        font-weight: 600;
+                        color: #FF9500;
+                        margin-bottom: 10px;
+                        font-size: 15px;
+                      }
+                      .timestamp { 
+                        text-align: center; 
+                        font-size: 11px; 
+                        color: #8E8E93; 
+                        margin: 30px 0 10px 0;
+                        padding: 15px;
+                        background-color: white;
+                        border-radius: 10px;
+                      }
+                      .no-items {
+                        color: #8E8E93;
+                        font-style: italic;
+                        text-align: center;
+                        padding: 20px;
+                        background-color: #F2F2F7;
+                        border-radius: 10px;
+                      }
+                      .day-type-badge {
+                        background-color: #E8F5E8;
+                        color: #4CAF50;
+                        padding: 4px 8px;
+                        border-radius: 6px;
+                        font-size: 12px;
+                        font-weight: 500;
+                        margin-left: 8px;
+                      }
+                      .breakdown-section {
+                        background-color: #F2F2F7;
+                        border-radius: 10px;
+                        padding: 12px;
+                      }
+                      .breakdown-row {
+                        display: flex;
+                        justify-content: space-between;
+                        align-items: center;
+                        padding: 8px 0;
+                        border-bottom: 0.5px solid #C6C6C8;
+                        font-size: 15px;
+                      }
+                      .breakdown-row:last-child {
+                        border-bottom: none;
+                        padding-bottom: 0;
+                      }
+                      .breakdown-row:first-child {
+                        padding-top: 0;
+                      }
+                      .total-section {
+                        background-color: #E8F5E8;
+                        border-radius: 10px;
+                        padding: 15px;
+                        border: 2px solid #4CAF50;
+                      }
+                      .total-row {
+                        display: flex;
+                        justify-content: space-between;
+                        align-items: center;
+                      }
+                      .total-label {
+                        font-size: 16px;
+                        font-weight: 600;
+                        color: #2E7D32;
+                      }
+                      .total-value {
+                        font-size: 18px;
+                        font-weight: 700;
+                        color: #2E7D32;
+                      }
+                    </style>
+                  </head>
+                  <body>
+                      <!-- Header Navigation -->
+                      <div class="container full-width">
+                        <div style="display: flex; justify-content: space-between; align-items: center; font-weight: 600; font-size: 16px;">
+                          <span style="color: #007AFF;">⬅️ Indietro</span>
+                          <div style="display: flex; align-items: center; gap: 8px;">
+                            <span style="font-size: 20px;">🏗️</span>
+                            <span>Work Time Tracker</span>
+                          </div>
+                          <span style="color: #007AFF;">� PDF</span>
+                        </div>
+                      </div>
+
+                      <!-- Grid Layout per Card a 2 colonne -->
+                      <div class="cards-grid">                    <!-- Data e Tipo Giornata -->
+                    <div class="container">
+                      <div class="section-title">📅 Data e Tipo Giornata</div>
+                      <div class="field">
+                        <div class="field-label">Data</div>
+                        <div class="field-value">
+                          ${form.date}
+                          ${form.day_type && form.day_type !== 'normale' ? 
+                            `<span class="day-type-badge">${
+                              form.day_type === 'festivo' ? 'Festivo' :
+                              form.day_type === 'domenica' ? 'Domenica' :
+                              form.day_type === 'ferie' ? 'Ferie' :
+                              form.day_type === 'permesso' ? 'Permesso' :
+                              form.day_type === 'malattia' ? 'Malattia' :
+                              form.day_type
+                            }</span>` : ''
+                          }
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- Informazioni base -->
+                    <div class="container">
+                      <div class="section-title">🏗️ Informazioni Cantiere</div>
+                      <div class="field">
+                        <div class="field-label">Nome Cantiere</div>
+                        <div class="field-value ${!form.site_name ? 'placeholder' : ''}">${form.site_name || 'Inserisci nome cantiere...'}</div>
+                      </div>
+                      <div class="field">
+                        <div class="field-label">Modalità Veicolo</div>
+                        <div class="picker-value">
+                          <span>${form.veicolo === 'andata_ritorno' ? 'Andata e Ritorno' : 
+                            form.veicolo === 'solo_andata' ? 'Solo Andata' : 
+                            form.veicolo === 'solo_ritorno' ? 'Solo Ritorno' : 
+                            'Andata e Ritorno'}</span>
+                          <span class="picker-arrow">▼</span>
+                        </div>
+                      </div>
+                      <div class="field">
+                        <div class="field-label">Targa/Numero Veicolo</div>
+                        <div class="field-value ${!form.targa_veicolo ? 'placeholder' : ''}">${form.targa_veicolo || 'Inserisci targa o numero veicolo...'}</div>
+                      </div>
+                    </div>
+
+                    <!-- Orari di Lavoro TURNO PRINCIPALE -->
+                    <div class="container">
+                      <div class="section-title">⏰ Orari di Lavoro</div>
+                      <div class="field">
+                        <div class="field-label">Lavoro Ordinario</div>
+                        <div class="time-row">
+                          <div class="time-input ${!form.viaggi[0]?.work_start_1 ? 'placeholder' : ''}">${form.viaggi[0]?.work_start_1 || '--:--'}</div>
+                          <span class="time-separator">-</span>
+                          <div class="time-input ${!form.viaggi[0]?.work_end_1 ? 'placeholder' : ''}">${form.viaggi[0]?.work_end_1 || '--:--'}</div>
+                        </div>
+                      </div>
+                      <div class="field">
+                        <div class="field-label">Lavoro Straordinario</div>
+                        <div class="time-row">
+                          <div class="time-input ${!form.viaggi[0]?.work_start_2 ? 'placeholder' : ''}">${form.viaggi[0]?.work_start_2 || '--:--'}</div>
+                          <span class="time-separator">-</span>
+                          <div class="time-input ${!form.viaggi[0]?.work_end_2 ? 'placeholder' : ''}">${form.viaggi[0]?.work_end_2 || '--:--'}</div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- Orari di Viaggio -->
+                    <div class="container">
+                      <div class="section-title">🚗 Orari di Viaggio</div>
+                      <div class="field">
+                        <div class="field-label">Partenza da Azienda</div>
+                        <div class="field-value ${!form.viaggi[0]?.departure_company ? 'placeholder' : ''}">${form.viaggi[0]?.departure_company || '--:--'}</div>
+                      </div>
+                      <div class="field">
+                        <div class="field-label">Arrivo a Cantiere</div>
+                        <div class="field-value ${!form.viaggi[0]?.arrival_site ? 'placeholder' : ''}">${form.viaggi[0]?.arrival_site || '--:--'}</div>
+                      </div>
+                      <div class="field">
+                        <div class="field-label">Partenza da Cantiere</div>
+                        <div class="field-value ${!form.viaggi[0]?.departure_return ? 'placeholder' : ''}">${form.viaggi[0]?.departure_return || '--:--'}</div>
+                      </div>
+                      <div class="field">
+                        <div class="field-label">Arrivo in Azienda</div>
+                        <div class="field-value ${!form.viaggi[0]?.arrival_company ? 'placeholder' : ''}">${form.viaggi[0]?.arrival_company || '--:--'}</div>
+                      </div>
+                    </div>
+
+                    <!-- TURNI AGGIUNTIVI - SEZIONE COMPLETA -->
+                    <div class="container">
+                      <div class="section-title">🔄 Turni Aggiuntivi</div>
+                      ${additionalShifts.length > 0 ? 
+                        additionalShifts.map((shift, index) => `
+                          <div class="shift-item">
+                            <div class="shift-title">Turno ${index + 2}</div>
+                            <div class="field">
+                              <div class="field-label">Lavoro Ordinario</div>
+                              <div class="time-row">
+                                <div class="time-input">${shift.work_start_1 || '--:--'}</div>
+                                <span class="time-separator">-</span>
+                                <div class="time-input">${shift.work_end_1 || '--:--'}</div>
+                              </div>
+                            </div>
+                            ${shift.work_start_2 || shift.work_end_2 ? `
+                            <div class="field">
+                              <div class="field-label">Lavoro Straordinario</div>
+                              <div class="time-row">
+                                <div class="time-input">${shift.work_start_2 || '--:--'}</div>
+                                <span class="time-separator">-</span>
+                                <div class="time-input">${shift.work_end_2 || '--:--'}</div>
+                              </div>
+                            </div>` : ''}
+                            <div class="field">
+                              <div class="field-label">Partenza da Azienda</div>
+                              <div class="field-value">${shift.departure_company || '--:--'}</div>
+                            </div>
+                            <div class="field">
+                              <div class="field-label">Arrivo a Cantiere</div>
+                              <div class="field-value">${shift.arrival_site || '--:--'}</div>
+                            </div>
+                            <div class="field">
+                              <div class="field-label">Partenza da Cantiere</div>
+                              <div class="field-value">${shift.departure_return || '--:--'}</div>
+                            </div>
+                            <div class="field">
+                              <div class="field-label">Arrivo in Azienda</div>
+                              <div class="field-value">${shift.arrival_company || '--:--'}</div>
+                            </div>
+                          </div>
+                        `).join('') : 
+                        '<div class="no-items">Nessun turno aggiuntivo inserito</div>'
+                      }
+                      <button class="add-button">+ Aggiungi Turno</button>
+                    </div>
+
+                    <!-- INTERVENTI - SEZIONE COMPLETA -->
+                    <div class="container">
+                      <div class="section-title">🛠️ Interventi</div>
+                      ${interventions.length > 0 ? 
+                        interventions.map((intervention, index) => `
+                          <div class="intervention-item">
+                            <div class="intervention-title">Intervento ${index + 1}</div>
+                            <div class="field">
+                              <div class="field-label">Tipologia</div>
+                              <div class="field-value">${intervention.type || 'Non specificato'}</div>
+                            </div>
+                            <div class="field">
+                              <div class="field-label">Lavoro Ordinario</div>
+                              <div class="time-row">
+                                <div class="time-input">${intervention.work_start_1 || '--:--'}</div>
+                                <span class="time-separator">-</span>
+                                <div class="time-input">${intervention.work_end_1 || '--:--'}</div>
+                              </div>
+                            </div>
+                            ${intervention.work_start_2 || intervention.work_end_2 ? `
+                            <div class="field">
+                              <div class="field-label">Lavoro Straordinario</div>
+                              <div class="time-row">
+                                <div class="time-input">${intervention.work_start_2 || '--:--'}</div>
+                                <span class="time-separator">-</span>
+                                <div class="time-input">${intervention.work_end_2 || '--:--'}</div>
+                              </div>
+                            </div>` : ''}
+                            <div class="field">
+                              <div class="field-label">Partenza da Azienda</div>
+                              <div class="field-value">${intervention.departure_company || '--:--'}</div>
+                            </div>
+                            <div class="field">
+                              <div class="field-label">Arrivo a Cantiere</div>
+                              <div class="field-value">${intervention.arrival_site || '--:--'}</div>
+                            </div>
+                            <div class="field">
+                              <div class="field-label">Partenza da Cantiere</div>
+                              <div class="field-value">${intervention.departure_return || '--:--'}</div>
+                            </div>
+                            <div class="field">
+                              <div class="field-label">Arrivo in Azienda</div>
+                              <div class="field-value">${intervention.arrival_company || '--:--'}</div>
+                            </div>
+                            ${intervention.description ? `
+                            <div class="field">
+                              <div class="field-label">Descrizione</div>
+                              <div class="field-value">${intervention.description}</div>
+                            </div>` : ''}
+                          </div>
+                        `).join('') : 
+                        '<div class="no-items">Nessun intervento inserito</div>'
+                      }
+                      <button class="add-button">+ Aggiungi Intervento</button>
+                    </div>
+
+                    <!-- Indennità -->
+                    <div class="container">
+                      <div class="section-title">💰 Indennità</div>
+                      <div class="switch-row">
+                        <span class="switch-label">Trasferta</span>
+                        <div class="switch-container ${form.trasferta ? 'switch-on' : 'switch-off'}">
+                          <div class="switch-thumb ${form.trasferta ? 'on' : 'off'}"></div>
+                        </div>
+                      </div>
+                      <div class="switch-row">
+                        <span class="switch-label">Pasti</span>
+                        <div class="switch-container ${form.pasti.pranzo || form.pasti.cena ? 'switch-on' : 'switch-off'}">
+                          <div class="switch-thumb ${form.pasti.pranzo || form.pasti.cena ? 'on' : 'off'}"></div>
+                        </div>
+                      </div>
+                      <div class="switch-row">
+                        <span class="switch-label">Standby</span>
+                        <div class="switch-container ${form.standby ? 'switch-on' : 'switch-off'}">
+                          <div class="switch-thumb ${form.standby ? 'on' : 'off'}"></div>
+                        </div>
+                      </div>
+                      ${form.standby ? `
+                      <div class="field" style="margin-top: 20px;">
+                        <div class="field-label">Orari Standby</div>
+                        <div class="time-row">
+                          <div class="time-input">${form.standby_start || '--:--'}</div>
+                          <span class="time-separator">-</span>
+                          <div class="time-input">${form.standby_end || '--:--'}</div>
+                        </div>
+                      </div>` : ''}
+                    </div>
+
+                    <!-- Note libere -->
+                    <div class="container">
+                      <div class="section-title">📝 Note Libere</div>
+                      <div class="field">
+                        <div class="textarea ${!form.note_libere ? 'placeholder' : ''}">${form.note_libere || 'Aggiungi note aggiuntive...'}</div>
+                      </div>
+                    </div>
+
+                    </div>
+
+                    <!-- TURNI AGGIUNTIVI - SEZIONE COMPLETA -->
+                    <div class="container full-width">
+                      <div class="section-title">🔄 Turni Aggiuntivi</div>
+                      ${additionalShifts.length > 0 ? 
+                        additionalShifts.map((shift, index) => `
+                          <div class="shift-item">
+                            <div class="shift-title">Turno ${index + 2}</div>
+                            <div class="field">
+                              <div class="field-label">Lavoro Ordinario</div>
+                              <div class="time-row">
+                                <div class="time-input">${shift.work_start_1 || '--:--'}</div>
+                                <span class="time-separator">-</span>
+                                <div class="time-input">${shift.work_end_1 || '--:--'}</div>
+                              </div>
+                            </div>
+                            ${shift.work_start_2 || shift.work_end_2 ? `
+                            <div class="field">
+                              <div class="field-label">Lavoro Straordinario</div>
+                              <div class="time-row">
+                                <div class="time-input">${shift.work_start_2 || '--:--'}</div>
+                                <span class="time-separator">-</span>
+                                <div class="time-input">${shift.work_end_2 || '--:--'}</div>
+                              </div>
+                            </div>` : ''}
+                            <div class="field">
+                              <div class="field-label">Partenza da Azienda</div>
+                              <div class="field-value">${shift.departure_company || '--:--'}</div>
+                            </div>
+                            <div class="field">
+                              <div class="field-label">Arrivo a Cantiere</div>
+                              <div class="field-value">${shift.arrival_site || '--:--'}</div>
+                            </div>
+                            <div class="field">
+                              <div class="field-label">Partenza da Cantiere</div>
+                              <div class="field-value">${shift.departure_return || '--:--'}</div>
+                            </div>
+                            <div class="field">
+                              <div class="field-label">Arrivo in Azienda</div>
+                              <div class="field-value">${shift.arrival_company || '--:--'}</div>
+                            </div>
+                          </div>
+                        `).join('') : 
+                        '<div class="no-items">Nessun turno aggiuntivo inserito</div>'
+                      }
+                      <button class="add-button">+ Aggiungi Turno</button>
+                    </div>
+
+                    <!-- INTERVENTI - SEZIONE COMPLETA -->
+                    <div class="container full-width">
+                      <div class="section-title">🛠️ Interventi</div>
+                      ${interventions.length > 0 ? 
+                        interventions.map((intervention, index) => `
+                          <div class="intervention-item">
+                            <div class="intervention-title">Intervento ${index + 1}</div>
+                            <div class="field">
+                              <div class="field-label">Tipologia</div>
+                              <div class="field-value">${intervention.type || 'Non specificato'}</div>
+                            </div>
+                            <div class="field">
+                              <div class="field-label">Lavoro Ordinario</div>
+                              <div class="time-row">
+                                <div class="time-input">${intervention.work_start_1 || '--:--'}</div>
+                                <span class="time-separator">-</span>
+                                <div class="time-input">${intervention.work_end_1 || '--:--'}</div>
+                              </div>
+                            </div>
+                            ${intervention.work_start_2 || intervention.work_end_2 ? `
+                            <div class="field">
+                              <div class="field-label">Lavoro Straordinario</div>
+                              <div class="time-row">
+                                <div class="time-input">${intervention.work_start_2 || '--:--'}</div>
+                                <span class="time-separator">-</span>
+                                <div class="time-input">${intervention.work_end_2 || '--:--'}</div>
+                              </div>
+                            </div>` : ''}
+                            <div class="field">
+                              <div class="field-label">Partenza da Azienda</div>
+                              <div class="field-value">${intervention.departure_company || '--:--'}</div>
+                            </div>
+                            <div class="field">
+                              <div class="field-label">Arrivo a Cantiere</div>
+                              <div class="field-value">${intervention.arrival_site || '--:--'}</div>
+                            </div>
+                            <div class="field">
+                              <div class="field-label">Partenza da Cantiere</div>
+                              <div class="field-value">${intervention.departure_return || '--:--'}</div>
+                            </div>
+                            <div class="field">
+                              <div class="field-label">Arrivo in Azienda</div>
+                              <div class="field-value">${intervention.arrival_company || '--:--'}</div>
+                            </div>
+                            ${intervention.description ? `
+                            <div class="field">
+                              <div class="field-label">Descrizione</div>
+                              <div class="field-value">${intervention.description}</div>
+                            </div>` : ''}
+                          </div>
+                        `).join('') : 
+                        '<div class="no-items">Nessun intervento inserito</div>'
+                      }
+                      <button class="add-button">+ Aggiungi Intervento</button>
+                    </div>
+
+                    <!-- RIEPILOGO GUADAGNI - SEZIONE COMPLETA -->
+                    <div class="container full-width">
+                      <div class="section-title">💰 Riepilogo Guadagni</div>
+                      
+                      <!-- Calcolo ore lavorate con dati REALI -->
+                      ${(() => {
+                        if (!breakdown || (!breakdown.ordinary && !breakdown.standby && !breakdown.allowances)) {
+                          return '<div class="no-items">Inserisci orari di lavoro o viaggio per vedere il riepilogo</div>';
+                        }
+                        
+                        let html = '';
+                        
+                        // Sezione Ore Lavorate
+                        if (breakdown.ordinary && breakdown.ordinary.hours) {
+                          const hours = breakdown.ordinary.hours;
+                          const hasHours = hours.lavoro_giornaliera > 0 || hours.viaggio_giornaliera > 0 || 
+                                         hours.lavoro_extra > 0 || hours.viaggio_extra > 0;
+                          
+                          if (hasHours) {
+                            html += `
+                              <div class="field">
+                                <div class="field-label">ORE LAVORATE</div>
+                                <div class="breakdown-section">`;
+                            
+                            if (hours.lavoro_giornaliera > 0) {
+                              html += `
+                                  <div class="breakdown-row">
+                                    <span>Lavoro Ordinario</span>
+                                    <span>${hours.lavoro_giornaliera.toFixed(2)}h</span>
+                                  </div>`;
+                            }
+                            
+                            if (hours.viaggio_giornaliera > 0) {
+                              html += `
+                                  <div class="breakdown-row">
+                                    <span>Viaggio Ordinario</span>
+                                    <span>${hours.viaggio_giornaliera.toFixed(2)}h</span>
+                                  </div>`;
+                            }
+                            
+                            if (hours.lavoro_extra > 0) {
+                              html += `
+                                  <div class="breakdown-row">
+                                    <span>Lavoro Straordinario</span>
+                                    <span>${hours.lavoro_extra.toFixed(2)}h</span>
+                                  </div>`;
+                            }
+                            
+                            if (hours.viaggio_extra > 0) {
+                              html += `
+                                  <div class="breakdown-row">
+                                    <span>Viaggio Straordinario</span>
+                                    <span>${hours.viaggio_extra.toFixed(2)}h</span>
+                                  </div>`;
+                            }
+                            
+                            html += `
+                                </div>
+                              </div>`;
+                          }
+                        }
+                        
+                        // Sezione Compensi
+                        html += `
+                          <div class="field">
+                            <div class="field-label">COMPENSI</div>
+                            <div class="breakdown-section">`;
+                        
+                        if (breakdown.ordinary && breakdown.ordinary.total > 0) {
+                          html += `
+                              <div class="breakdown-row">
+                                <span>Lavoro e Viaggio</span>
+                                <span>€${breakdown.ordinary.total.toFixed(2)}</span>
+                              </div>`;
+                        }
+                        
+                        if (breakdown.allowances) {
+                          if (breakdown.allowances.travel > 0) {
+                            html += `
+                              <div class="breakdown-row">
+                                <span>Indennità Trasferta</span>
+                                <span>€${breakdown.allowances.travel.toFixed(2)}</span>
+                              </div>`;
+                          }
+                          
+                          if (breakdown.allowances.meal > 0) {
+                            html += `
+                              <div class="breakdown-row">
+                                <span>Indennità Pasti${form.pasti.pranzo && form.pasti.cena ? ' (Pranzo + Cena)' : form.pasti.pranzo ? ' (Pranzo)' : form.pasti.cena ? ' (Cena)' : ''}</span>
+                                <span>€${breakdown.allowances.meal.toFixed(2)}</span>
+                              </div>
+                              <div style="font-size: 11px; color: #8E8E93; padding: 4px 0; font-style: italic;">
+                                * Rimborso separato, non incluso nel totale retributivo
+                              </div>`;
+                          }
+                          
+                          if (breakdown.allowances.standby > 0) {
+                            html += `
+                              <div class="breakdown-row">
+                                <span>Indennità Standby</span>
+                                <span>€${breakdown.allowances.standby.toFixed(2)}</span>
+                              </div>`;
+                          }
+                        }
+                        
+                        html += `
+                            </div>
+                          </div>`;
+                        
+                        // Totale finale - ESCLUDE indennità pasti (come nel form originale)
+                        const total = (breakdown.ordinary?.total || 0) + 
+                                     (breakdown.standby?.total || 0) + 
+                                     (breakdown.allowances?.travel || 0) + 
+                                     (breakdown.allowances?.standby || 0);
+                        // NOTA: breakdown.allowances?.meal è escluso dal totale giornata
+                        
+                        html += `
+                          <div class="field">
+                            <div class="total-section">
+                              <div class="total-row">
+                                <span class="total-label">TOTALE GIORNATA</span>
+                                <span class="total-value">€${total.toFixed(2)}</span>
+                              </div>
+                            </div>
+                          </div>`;
+                        
+                        return html;
+                      })()}
+                    </div>
+
+                    <!-- Timestamp -->
+                    <div class="timestamp">
+                      Screenshot COMPLETO generato il ${new Date().toLocaleDateString('it-IT')} alle ${new Date().toLocaleTimeString('it-IT')}
+                      <br>Tutti i campi del form inclusi: turni aggiuntivi, interventi, indennità, riepilogo guadagni
+                    </div>
+                  </body>
+                  </html>
+                `;
+
+                const { uri } = await Print.printToFileAsync({
+                  html: htmlContent,
+                  base64: false,
+                  width: 395,
+                  height: 2200  // Altezza maggiore per includere il riepilogo
+                });
+
+                if (await Sharing.isAvailableAsync()) {
+                  await Sharing.shareAsync(uri, { mimeType: 'application/pdf', dialogTitle: 'Work Time Tracker - Form PDF' });
+                  Alert.alert(
+                    '✅ Screenshot COMPLETO Creato', 
+                    'Screenshot completo con TUTTO il form:\n• Turni aggiuntivi\n• Interventi\n• Tutte le indennità\n• Riepilogo guadagni\n• Note e dettagli', 
+                    [{ text: 'OK' }]
+                  );
+                } else {
+                  Alert.alert('❌ Errore', 'Impossibile condividere lo screenshot.', [{ text: 'OK' }]);
+                }
+                
+              } catch (error) {
+                console.error('❌ FORM SCREENSHOT - Errore cattura:', error);
+                Alert.alert(
+                  'Errore Screenshot',
+                  `Impossibile catturare lo screenshot:\n\n${error.message}`,
+                  [{ text: 'OK' }]
+                );
+              }
+            }
+          }
+        ]
+      );
+    } catch (error) {
+      console.error('❌ FORM SCREENSHOT - Errore:', error);
+      Alert.alert('Errore', 'Impossibile avviare la cattura screenshot');
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar style={theme.isDark ? 'light' : 'dark'} />
@@ -3474,7 +4423,16 @@ const TimeEntryForm = ({ route, navigation }) => {
           <Text style={styles.headerTitle}>
             {isEdit ? 'Modifica Inserimento' : 'Nuovo Inserimento'}
           </Text>
-          <View style={styles.headerSpacer} />
+          <TouchableOpacity 
+            style={styles.printButton} 
+            onPress={printForm}
+          >
+            <MaterialCommunityIcons 
+              name="printer" 
+              size={24} 
+              color={theme.colors.primary} 
+            />
+          </TouchableOpacity>
         </View>
 
         {/* Messaggio Auto-compilazione */}
@@ -4403,6 +5361,15 @@ const createStyles = (theme) => StyleSheet.create({
   },
   headerSpacer: {
     width: 40,
+  },
+  printButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: theme.colors.card,
+    justifyContent: 'center',
+    alignItems: 'center',
+    ...theme.colors.cardElevation,
   },
 
   // Auto-compile notice styles

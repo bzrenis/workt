@@ -78,34 +78,7 @@ const NotificationSettingsScreen = ({ navigation }) => {
     }
   };
   
-  // Testa sistema notifiche
-  const testNotifications = async () => {
-    try {
-      setIsTesting(true);
-      setTestResult(null);
-      
-      // Verifica permessi
-      if (!hasPermissions) {
-        const granted = await NotificationService.requestPermissions();
-        setHasPermissions(granted);
-        if (!granted) {
-          setIsTesting(false);
-          Alert.alert('Permessi mancanti', 'È necessario concedere i permessi per le notifiche');
-          return;
-        }
-      }
-      
-      // Test del sistema notifiche
-      const result = await NotificationService.testNotificationSystem();
-      setTestResult(result);
-      
-      setIsTesting(false);
-    } catch (error) {
-      console.error('Errore test notifiche:', error);
-      setTestResult({ success: false, error: error.message });
-      setIsTesting(false);
-    }
-  };
+  // ...existing code...
   
   // Pulisci tutte le notifiche
   const clearAllNotifications = async () => {
@@ -153,35 +126,6 @@ const NotificationSettingsScreen = ({ navigation }) => {
             <ActivityIndicator size="large" color={theme.colors.primary} />
             <Text style={[styles.loadingText, { color: theme.colors.text }]}>
               Caricamento impostazioni...
-            </Text>
-          </View>
-        ) : (
-          <>
-            <Card style={[styles.card, { backgroundColor: theme.colors.card }]}>
-              <Card.Title 
-                title="Stato Notifiche" 
-                left={(props) => <Ionicons name="notifications" size={24} color={theme.colors.primary} />} 
-                titleStyle={{ color: theme.colors.text }}
-              />
-              <Card.Content>
-                <View style={styles.permissionStatus}>
-                  <Text style={[styles.statusText, { color: theme.colors.text }]}>
-                    Permessi notifiche:
-                  </Text>
-                  {hasPermissions ? (
-                    <Text style={[styles.statusValue, { color: 'green' }]}>Concessi ✓</Text>
-                  ) : (
-                    <TouchableOpacity onPress={requestPermissions}>
-                      <Text style={[styles.statusValue, { color: 'red' }]}>Non concessi ⚠️</Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
-                
-                <View style={styles.settingItem}>
-                  <Text style={[styles.settingLabel, { color: theme.colors.text }]}>
-                    Abilita notifiche
-                  </Text>
-                  <Switch
                     value={notificationsEnabled}
                     onValueChange={setNotificationsEnabled}
                     trackColor={{ false: "#767577", true: theme.colors.primaryLight }}
@@ -204,38 +148,34 @@ const NotificationSettingsScreen = ({ navigation }) => {
                   </Text>
                   <Switch
                     value={reminderEnabled && notificationsEnabled}
-                    onValueChange={setReminderEnabled}
-                    disabled={!notificationsEnabled}
-                    trackColor={{ false: "#767577", true: theme.colors.primaryLight }}
-                    thumbColor={reminderEnabled ? theme.colors.primary : "#f4f3f4"}
-                  />
-                </View>
-                <Text style={[styles.description, { color: theme.colors.textSecondary }]}>
-                  Riceverai una notifica quotidiana per ricordarti di inserire le tue ore di lavoro.
-                </Text>
-              </Card.Content>
-            </Card>
-            
-            <Card style={[styles.card, { backgroundColor: theme.colors.card, opacity: notificationsEnabled ? 1 : 0.5 }]}>
+            <Card style={[styles.card, { backgroundColor: theme.colors.card }]}> 
               <Card.Title 
-                title="Promemoria Reperibilità" 
-                left={(props) => <Ionicons name="alarm" size={24} color={theme.colors.primary} />} 
+                title="Strumenti Notifiche" 
+                left={(props) => <Ionicons name="construct" size={24} color={theme.colors.primary} />} 
                 titleStyle={{ color: theme.colors.text }}
               />
               <Card.Content>
-                <View style={styles.settingItem}>
-                  <Text style={[styles.settingLabel, { color: theme.colors.text }]}>
-                    Notifiche reperibilità
-                  </Text>
-                  <Switch
-                    value={standbyEnabled && notificationsEnabled}
-                    onValueChange={setStandbyEnabled}
-                    disabled={!notificationsEnabled}
-                    trackColor={{ false: "#767577", true: theme.colors.primaryLight }}
-                    thumbColor={standbyEnabled ? theme.colors.primary : "#f4f3f4"}
-                  />
-                </View>
-                <Text style={[styles.description, { color: theme.colors.textSecondary }]}>
+                <Button 
+                  mode="outlined" 
+                  onPress={clearAllNotifications}
+                  loading={isClearing}
+                  disabled={isClearing}
+                  style={[styles.button, { marginTop: 0 }]}
+                  color={theme.colors.primary}
+                >
+                  Cancella Tutte le Notifiche
+                </Button>
+                {!hasPermissions && (
+                  <Button 
+                    mode="contained" 
+                    onPress={requestPermissions}
+                    style={[styles.button, { marginTop: 10, backgroundColor: theme.colors.error }]}
+                  >
+                    Richiedi Permessi Notifiche
+                  </Button>
+                )}
+              </Card.Content>
+            </Card>
                   Riceverai notifiche quando sei in reperibilità secondo il calendario configurato.
                 </Text>
               </Card.Content>

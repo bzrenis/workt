@@ -22,7 +22,17 @@ const AppInfoScreen = ({ navigation }) => {
 
   const changelog = [
     {
-      version: '1.0.9',
+      version: '1.0.4',
+      date: '1 Agosto 2025',
+      changes: [
+        'Nuovo: backup automatico in background (solo build native) con notifica locale',
+        'Aggiunta informativa privacy dettagliata (vedi link sotto)',
+        'Aggiornamento documentazione e schermata info app',
+        'Miglioramenti minori interfaccia e stabilità'
+      ]
+    },
+    {
+      version: '',
       date: '27 Luglio 2025',
       changes: [
         'Miglioramenti alla dashboard con giorni non ordinari',
@@ -105,17 +115,15 @@ const AppInfoScreen = ({ navigation }) => {
               resizeMode="contain"
             />
           </View>
-          <Text style={[styles.appName, { color: theme.colors.text }]}>
+          <Text style={[styles.appName, { color: theme.colors.text }]}> 
             {expo.name}
           </Text>
-          <Text style={[styles.appVersion, { color: theme.colors.textSecondary }]}>
-            Versione {expo.version}
-          </Text>
-          <Text style={[styles.appDescription, { color: theme.colors.textSecondary }]}>
+          {/* Mostra la versione solo nella sezione info, non accanto al nome app */}
+          <Text style={[styles.appDescription, { color: theme.colors.textSecondary }]}> 
             App professionale per il tracking delle ore di lavoro con calcoli automatici 
-            conformi al CCNL Metalmeccanico PMI. I calcoli sono completamente personalizzabili 
-            per adattarsi a diverse tipologie contrattuali. Gestione completa di orari, viaggi, 
-            reperibilità e indennità con dashboard avanzate per l'analisi dei dati.
+            conformi al CCNL Metalmeccanico PMI. Calcoli e maggiorazioni sono personalizzabili 
+            per ogni utente e contratto. Gestione completa di orari, viaggi, reperibilità, indennità, 
+            backup automatici (anche in background su build native) e dashboard avanzate per l'analisi dei dati.
           </Text>
         </FadeInCard>
 
@@ -149,10 +157,12 @@ const AppInfoScreen = ({ navigation }) => {
           {changelog.map((release, index) => (
             <View key={index} style={styles.changelogItem}>
               <View style={styles.changelogHeader}>
-                <Text style={[styles.changelogVersion, { color: theme.colors.primary }]}>
-                  v{release.version}
-                </Text>
-                <Text style={[styles.changelogDate, { color: theme.colors.textSecondary }]}>
+                {release.version ? (
+                  <Text style={[styles.changelogVersion, { color: theme.colors.primary }]}> 
+                    v{release.version}
+                  </Text>
+                ) : null}
+                <Text style={[styles.changelogDate, { color: theme.colors.textSecondary }]}> 
                   {release.date}
                 </Text>
               </View>
@@ -175,26 +185,57 @@ const AppInfoScreen = ({ navigation }) => {
           ))}
         </FadeInCard>
 
-        {/* Informazioni Legali */}
-        <FadeInCard delay={300} style={[styles.sectionCard, { backgroundColor: theme.colors.card }]}>
-          <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>
-            Informazioni
+        {/* Disclaimer legale */}
+        <FadeInCard delay={300} style={[styles.sectionCard, { backgroundColor: theme.colors.card }]}> 
+          <Text style={[styles.sectionTitle, { color: theme.colors.text }]}> 
+            Disclaimer & Privacy
           </Text>
-          <Text style={[styles.legalText, { color: theme.colors.textSecondary }]}>
-            Quest'app è progettata per assistere nel tracciamento delle ore di lavoro e nel calcolo 
-            delle retribuzioni secondo il CCNL Metalmeccanico PMI. I calcoli sono indicativi e 
-            potrebbero non riflettere situazioni contrattuali specifiche. Si consiglia sempre di 
-            verificare con il proprio ufficio paghe.
+          <Text style={[styles.legalText, { color: theme.colors.textSecondary, fontWeight: 'bold' }]}> 
+            I calcoli forniti dall'app sono indicativi e non sostituiscono la busta paga ufficiale. Verifica sempre con il tuo consulente del lavoro o ufficio paghe. L'app non si assume responsabilità per errori di calcolo o interpretazione contrattuale.
           </Text>
-          
-          <View style={styles.contactSection}>
-            <Text style={[styles.contactTitle, { color: theme.colors.text }]}>
+          <Text style={[styles.legalText, { color: theme.colors.textSecondary }]}> 
+            Privacy: tutti i dati restano sul dispositivo. Il backup automatico in background (solo build native) non invia mai dati a server esterni. Consulta l'informativa privacy completa qui sotto.
+          </Text>
+          <TouchableOpacity
+            style={{marginTop: 16, alignSelf: 'flex-start'}}
+            onPress={() => Linking.openURL('https://github.com/bzlikaj/workt/blob/main/INFORMATIVA_PRIVACY.md')}
+          >
+            <Text style={{color: theme.colors.primary, textDecorationLine: 'underline', fontWeight: '600'}}>
+              Leggi l'informativa privacy completa
+            </Text>
+          </TouchableOpacity>
+          <View style={styles.contactSection}> 
+            <Text style={[styles.contactTitle, { color: theme.colors.text }]}> 
               Sviluppato da
             </Text>
-            <Text style={[styles.contactText, { color: theme.colors.textSecondary }]}>
-              Team WorkT
+            <Text style={[styles.contactText, { color: theme.colors.textSecondary }]}> 
+              Team WorkT | Contatti privacy: 
+              <Text 
+                style={{ color: theme.colors.primary, textDecorationLine: 'underline' }}
+                onPress={() => Linking.openURL('mailto:workt.info@gmail.com')}
+              >
+                workt.info@gmail.com
+              </Text>
             </Text>
           </View>
+        </FadeInCard>
+
+        {/* FAQ */}
+        <FadeInCard delay={350} style={[styles.sectionCard, { backgroundColor: theme.colors.card }]}> 
+          <Text style={[styles.sectionTitle, { color: theme.colors.text }]}> 
+            Domande frequenti (FAQ)
+          </Text>
+          <Text style={[styles.legalText, { color: theme.colors.textSecondary, fontWeight: 'bold' }]}>Privacy & Dati</Text>
+          <Text style={[styles.legalText, { color: theme.colors.textSecondary }]}>I miei dati vengono inviati a server esterni?</Text>
+          <Text style={[styles.legalText, { color: theme.colors.textSecondary }]}>No, tutti i dati restano sul dispositivo salvo backup cloud (se attivato in futuro).</Text>
+          <Text style={[styles.legalText, { color: theme.colors.textSecondary }]}>Posso cancellare o esportare i miei dati?</Text>
+          <Text style={[styles.legalText, { color: theme.colors.textSecondary }]}>Sì, tramite le funzioni di backup e ripristino puoi esportare, cancellare o ripristinare tutti i dati.</Text>
+          <Text style={[styles.legalText, { color: theme.colors.textSecondary, fontWeight: 'bold' }]}>Calcoli & Responsabilità</Text>
+          <Text style={[styles.legalText, { color: theme.colors.textSecondary }]}>I calcoli sono validi per la busta paga?</Text>
+          <Text style={[styles.legalText, { color: theme.colors.textSecondary }]}>No, sono solo indicativi. Fai sempre riferimento alla busta paga ufficiale e al tuo consulente del lavoro.</Text>
+          <Text style={[styles.legalText, { color: theme.colors.textSecondary, fontWeight: 'bold' }]}>Single utente</Text>
+          <Text style={[styles.legalText, { color: theme.colors.textSecondary }]}>L'app è attualmente single utente: ogni installazione è indipendente e i dati sono personali e separati.</Text>
+          <Text style={[styles.legalText, { color: theme.colors.textSecondary }]}>Il supporto multiutente potrà essere aggiunto in futuro e sarà descritto nella privacy e nella FAQ.</Text>
         </FadeInCard>
       </ScrollView>
     </SafeAreaView>

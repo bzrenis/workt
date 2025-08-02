@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { Calendar } from 'react-native-calendars';
 import { useWorkEntries, useSettings, useCalculationService } from '../hooks';
 import { formatDate, formatTime, formatCurrency, getDayName, formatSafeHours } from '../utils';
 import { createWorkEntryFromData } from '../utils/earningsHelper';
@@ -500,6 +501,7 @@ const TimeEntryScreen = () => {
   const [selectedEntry, setSelectedEntry] = useState(null);
   const [standbyAllowances, setStandbyAllowances] = useState([]);
   const [breakdowns, setBreakdowns] = useState({});
+  const [showCalendarModal, setShowCalendarModal] = useState(false);
 
   const { entries, isLoading, error, refreshEntries, canRetry } = useWorkEntries(selectedYear, selectedMonth, true);
   const { settings } = useSettings();
@@ -569,6 +571,118 @@ const TimeEntryScreen = () => {
     const date = new Date(selectedYear, selectedMonth - 1, 1);
     return date.toLocaleDateString('it-IT', { month: 'long', year: 'numeric' });
   }, [selectedYear, selectedMonth]);
+
+  // Funzioni per gestire il calendario
+  const openCalendar = useCallback(() => {
+    console.log('🗓️ [CALENDAR] Apertura calendario richiesta');
+    setShowCalendarModal(true);
+  }, []);
+
+  const closeCalendar = useCallback(() => {
+    console.log('🗓️ [CALENDAR] Chiusura calendario richiesta');
+    setShowCalendarModal(false);
+  }, []);
+
+  // Calcola le date marcate per il calendario
+  const getMarkedDates = useCallback(() => {
+    const markedDates = {};
+    
+    // Marca la data odierna
+    const today = new Date().toISOString().split('T')[0];
+    markedDates[today] = {
+      marked: true,
+      dotColor: '#4CAF50'
+    };
+    
+    // Marca le date con inserimenti esistenti
+    if (entries && entries.length > 0) {
+      entries.forEach(entry => {
+        if (entry.date) {
+          const entryDate = entry.date;
+          markedDates[entryDate] = {
+            ...markedDates[entryDate],
+            marked: true,
+            dotColor: entryDate === today ? '#4CAF50' : '#2196F3'
+          };
+        }
+      });
+    }
+    
+    return markedDates;
+  }, [entries]);
+
+  const onDateSelect = useCallback(async (day) => {
+    console.log('🗓️ [CALENDAR] Data selezionata:', day.dateString);
+    const selectedDate = new Date(day.dateString);
+    const year = selectedDate.getFullYear();
+    const month = selectedDate.getMonth() + 1;
+    
+    // Chiudi il calendario prima
+    setShowCalendarModal(false);
+    
+    try {
+      // Cerca se esiste già un inserimento per quella data
+      const existingEntries = await DatabaseService.getWorkEntries(year, month);
+      console.log('🗓️ [CALENDAR] Entries trovate per', year, month, ':', existingEntries.length);
+      
+      const entryForDate = existingEntries.find(entry => 
+        entry.date === day.dateString
+      );
+      
+      console.log('🗓️ [CALENDAR] Debug ricerca entry:');
+      console.log('🗓️ [CALENDAR] - Data cercata:', day.dateString);
+      console.log('🗓️ [CALENDAR] - Entries disponibili:', existingEntries.map(e => ({ id: e.id, date: e.date })));
+      console.log('🗓️ [CALENDAR] - Entry trovato:', entryForDate ? { id: entryForDate.id, date: entryForDate.date } : 'NESSUNO');
+      console.log('🗓️ [CALENDAR] Entry per', day.dateString, ':', entryForDate ? 'ESISTENTE' : 'NON ESISTENTE');
+      
+      if (entryForDate) {
+        // Se esiste un inserimento, apri il form in modalità modifica
+        console.log('🗓️ [CALENDAR] Navigando in modalità MODIFICA con:', {
+          entryId: entryForDate.id,
+          entry: entryForDate,
+          year: year,
+          month: month,
+          isEdit: true,
+          enableDelete: true
+        });
+        navigation.navigate('TimeEntryForm', {
+          entryId: entryForDate.id,
+          entry: entryForDate,
+          year: year,
+          month: month,
+          isEdit: true,
+          enableDelete: true
+        });
+      } else {
+        // Se non esiste, crea nuovo inserimento per quella data
+        console.log('🗓️ [CALENDAR] Navigando in modalità NUOVO con:', {
+          initialDate: day.dateString,
+          year: year,
+          month: month
+        });
+        navigation.navigate('TimeEntryForm', {
+          initialDate: day.dateString,
+          year: year,
+          month: month
+        });
+      }
+      
+      // Naviga al mese della data selezionata se diverso da quello corrente
+      if (year !== selectedYear || month !== selectedMonth) {
+        setSelectedYear(year);
+        setSelectedMonth(month);
+        setBreakdowns({}); // Reset breakdowns per nuovo mese
+      }
+    } catch (error) {
+      console.error('🗓️ [CALENDAR] Errore nel recupero inserimenti per data:', error);
+      // Fallback: apri il form per nuovo inserimento
+      navigation.navigate('TimeEntryForm', {
+        initialDate: day.dateString,
+        year: year,
+        month: month
+      });
+    }
+  }, [navigation, selectedYear, selectedMonth]);
 
   // Crea stili dinamici basati sul tema
   const styles = createStyles(theme);
@@ -981,7 +1095,7 @@ const TimeEntryScreen = () => {
                       styles={styles}
                     />
                   )}
-                  {!viaggio.departure_return && !viaggio.arrival_company && viaggioNumber++}
+                  {!viaggio.departure_return && !viaggio.arrival_company && (viaggioNumber++, null)}
                 </React.Fragment>
               ));
             })()}
@@ -1465,8 +1579,10 @@ const TimeEntryScreen = () => {
           <MaterialCommunityIcons name="chevron-right" size={36} color={theme.colors.primary} />
         </TouchableOpacity>
 
-        {/* Calendario rimane nella sua posizione originale */}
-        <MaterialCommunityIcons name="calendar-month" size={24} color="#4CAF50" />
+        {/* Calendario cliccabile */}
+        <TouchableOpacity onPress={openCalendar} style={styles.calendarButton}>
+          <MaterialCommunityIcons name="calendar-month" size={24} color="#4CAF50" />
+        </TouchableOpacity>
       </View>
     );
   };
@@ -1533,8 +1649,10 @@ const TimeEntryScreen = () => {
             <MaterialCommunityIcons name="chevron-right" size={36} color={theme.colors.primary} />
           </TouchableOpacity>
 
-          {/* Calendario rimane nella sua posizione originale */}
-          <MaterialCommunityIcons name="calendar-month" size={24} color="#4CAF50" />
+          {/* Calendario cliccabile */}
+          <TouchableOpacity onPress={openCalendar} style={styles.calendarButton}>
+            <MaterialCommunityIcons name="calendar-month" size={24} color="#4CAF50" />
+          </TouchableOpacity>
         </View>
       )}
 
@@ -1576,6 +1694,78 @@ const TimeEntryScreen = () => {
         onDeleted={handleManualRefresh}
         styles={styles}
       />
+
+      {/* Modale Calendario */}
+      <Modal
+        visible={showCalendarModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={closeCalendar}
+      >
+        <View style={styles.calendarModalOverlay}>
+          <View style={styles.calendarModalContent}>
+            <View style={styles.calendarModalHeader}>
+              <Text style={styles.calendarModalTitle}>Seleziona una data</Text>
+              <TouchableOpacity onPress={closeCalendar} style={styles.calendarCloseButton}>
+                <MaterialCommunityIcons name="close" size={24} color="#666" />
+              </TouchableOpacity>
+            </View>
+            
+            <View style={styles.calendarLegend}>
+              <View style={styles.calendarLegendItem}>
+                <View style={[styles.calendarDot, { backgroundColor: '#4CAF50' }]} />
+                <Text style={styles.calendarLegendText}>Oggi</Text>
+              </View>
+              <View style={styles.calendarLegendItem}>
+                <View style={[styles.calendarDot, { backgroundColor: '#2196F3' }]} />
+                <Text style={styles.calendarLegendText}>Con inserimenti</Text>
+              </View>
+            </View>
+            
+            <Calendar
+              onDayPress={onDateSelect}
+              markedDates={getMarkedDates()}
+              theme={{
+                backgroundColor: '#ffffff',
+                calendarBackground: '#ffffff',
+                textSectionTitleColor: '#b6c1cd',
+                selectedDayBackgroundColor: '#4CAF50',
+                selectedDayTextColor: '#ffffff',
+                todayTextColor: '#4CAF50',
+                dayTextColor: '#2d4150',
+                textDisabledColor: '#d9e1e8',
+                dotColor: '#4CAF50',
+                selectedDotColor: '#ffffff',
+                arrowColor: '#4CAF50',
+                disabledArrowColor: '#d9e1e8',
+                monthTextColor: '#2d4150',
+                indicatorColor: '#4CAF50',
+                textDayFontFamily: 'monospace',
+                textMonthFontFamily: 'monospace',
+                textDayHeaderFontFamily: 'monospace',
+                textDayFontWeight: '300',
+                textMonthFontWeight: 'bold',
+                textDayHeaderFontWeight: '300',
+                textDayFontSize: 16,
+                textMonthFontSize: 18,
+                textDayHeaderFontSize: 13
+              }}
+              firstDay={1}
+              hideExtraDays={true}
+              showWeekNumbers={false}
+              disableMonthChange={false}
+              hideDayNames={false}
+              hideArrows={false}
+              enableSwipeMonths={true}
+              style={styles.calendar}
+            />
+            
+            <TouchableOpacity onPress={closeCalendar} style={styles.calendarCancelButton}>
+              <Text style={styles.calendarCancelButtonText}>Annulla</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 };
@@ -2449,6 +2639,98 @@ const createStyles = (theme) => StyleSheet.create({
     marginBottom: 4,
     paddingHorizontal: 12,
     lineHeight: 16,
+  },
+
+  // Stili per il calendario
+  calendarButton: {
+    padding: 4,
+    borderRadius: 8,
+    backgroundColor: 'rgba(76, 175, 80, 0.1)',
+  },
+  calendarModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  calendarModalContent: {
+    backgroundColor: 'white',
+    borderRadius: 16,
+    padding: 20,
+    margin: 20,
+    maxWidth: '90%',
+    width: '100%',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+  calendarModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  calendarModalTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  calendarCloseButton: {
+    padding: 8,
+    borderRadius: 8,
+    backgroundColor: '#f5f5f5',
+  },
+  calendarLegend: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    backgroundColor: '#f8f9fa',
+    borderRadius: 8,
+    marginBottom: 16,
+  },
+  calendarLegendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  calendarDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: 6,
+  },
+  calendarLegendText: {
+    fontSize: 12,
+    color: '#666',
+  },
+  calendar: {
+    borderRadius: 8,
+    elevation: 1,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 1,
+    },
+    shadowOpacity: 0.22,
+    shadowRadius: 2.22,
+  },
+  calendarCancelButton: {
+    marginTop: 20,
+    backgroundColor: '#f5f5f5',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  calendarCancelButtonText: {
+    fontSize: 16,
+    color: '#666',
+    fontWeight: '500',
   },
 });
 

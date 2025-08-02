@@ -14,9 +14,40 @@ class NativeBackupService {
     this.initializationAttempted = false;
     this.scheduledBackupId = null;
     this.lastAutoBackupTime = 0; // Timestamp ultimo backup automatico (anti-loop)
-    
+    this.notificationListenerSetup = false; // Flag per evitare listener multipli
     console.log('🚀 NativeBackupService inizializzato con supporto destinazioni multiple');
-    this.initializeNativeBackup();
+    // Avvia inizializzazione in background
+    this.initialize();
+  }
+
+  // Metodo di inizializzazione pubblico
+  async initialize() {
+    return await this.initializeNativeBackup();
+  }
+
+  // 🕐 Genera timestamp nel fuso orario locale italiano
+  getLocalTimestamp() {
+    const now = new Date();
+    // Semplice: aggiungi 1 ora (UTC+1) o 2 ore (UTC+2) in base al DST
+    const isDST = this.isDaylightSavingTime(now);
+    const hoursToAdd = isDST ? 2 : 1; // UTC+2 in estate, UTC+1 in inverno
+    const italianTime = new Date(now.getTime() + (hoursToAdd * 60 * 60 * 1000));
+    return italianTime.toISOString();
+  }
+
+  // Verifica se siamo in ora legale (DST)
+  isDaylightSavingTime(date) {
+    const year = date.getFullYear();
+    // L'ora legale in Europa va dall'ultima domenica di marzo all'ultima domenica di ottobre
+    const march = new Date(year, 2, 31); // 31 marzo
+    const october = new Date(year, 9, 31); // 31 ottobre
+    
+    // Trova l'ultima domenica di marzo
+    const lastSundayMarch = new Date(march.getTime() - (march.getDay() * 24 * 60 * 60 * 1000));
+    // Trova l'ultima domenica di ottobre  
+    const lastSundayOctober = new Date(october.getTime() - (october.getDay() * 24 * 60 * 60 * 1000));
+    
+    return date >= lastSundayMarch && date < lastSundayOctober;
   }
 
   // 🔧 Inizializzazione automatica con supporto destinazioni
@@ -189,40 +220,46 @@ class NativeBackupService {
   }
 
   // 🔔 Programma backup nativo con notifiche background-ready
+  // Pianifica backup nativo solo all'orario scelto, nessun backup su salvataggio/cambio dati
   async scheduleNativeBackup(settings) {
     if (!this.isNativeReady || !this.notificationsModule) {
       console.log('⚠️ Sistema nativo non disponibile per backup programmato');
       return false;
     }
-
     try {
-      // Cancella backup precedente
-      if (this.scheduledBackupId) {
-        await this.notificationsModule.cancelScheduledNotificationAsync(this.scheduledBackupId);
-        this.scheduledBackupId = null;
-        console.log('🗑️ [NATIVE] Backup precedente cancellato');
-      }
-
+      // Cancella tutte le notifiche programmate di tipo backup prima di schedulare
+      await this.notificationsModule.cancelAllScheduledNotificationsAsync();
+      this.scheduledBackupId = null;
+      console.log('🗑️ [NATIVE] Tutte le notifiche backup precedenti cancellate');
       const [hours, minutes] = settings.time.split(':').map(Number);
-      
-      // Calcola il prossimo trigger (evita trigger immediato)
       const now = new Date();
       const nextTrigger = new Date();
       nextTrigger.setHours(hours, minutes, 0, 0);
-      
-      // Se l'orario è già passato oggi, programma per domani
       if (nextTrigger <= now) {
         nextTrigger.setDate(nextTrigger.getDate() + 1);
       }
+      const diffInSeconds = Math.floor((nextTrigger.getTime() - now.getTime()) / 1000);
       
-      // Verifica che sia almeno tra 1 minuto (evita trigger immediato)
-      if (nextTrigger.getTime() - now.getTime() < 60000) {
+      // Sicurezza: se il trigger è troppo vicino (meno di 30 secondi), sposta al giorno dopo
+      if (diffInSeconds < 30) {
+        console.log(`⚠️ [NATIVE] Trigger troppo vicino (${diffInSeconds}s), spostando al giorno successivo`);
         nextTrigger.setDate(nextTrigger.getDate() + 1);
+        const newDiffInSeconds = Math.floor((nextTrigger.getTime() - now.getTime()) / 1000);
+        console.log(`📅 [NATIVE] Nuovo trigger: ${nextTrigger.toLocaleString('it-IT')} (tra ${newDiffInSeconds} secondi)`);
       }
       
-      console.log(`🔔 [NATIVE] Programmando backup per: ${nextTrigger.toLocaleString('it-IT')}`);
+      const finalDiffInSeconds = Math.floor((nextTrigger.getTime() - now.getTime()) / 1000);
       
-      // Programma con trigger time-based invece di hour/minute per maggiore controllo
+      // Salva il timestamp della programmazione per anti-trigger immediato
+      // Salva anche il timestamp effettivo del prossimo trigger
+      await AsyncStorage.setItem('last_backup_schedule_time', Date.now().toString());
+      await AsyncStorage.setItem('last_backup_trigger_time', nextTrigger.getTime().toString());
+      console.log(`[DEBUG] 📅 Trigger time salvato: ${nextTrigger.toLocaleString('it-IT')} (${nextTrigger.getTime()})`);
+      console.log(`[DEBUG] 📅 Orario attuale: ${now.toLocaleString('it-IT')} (${now.getTime()})`);
+      console.log(`[DEBUG] 📅 Differenza finale: ${finalDiffInSeconds} secondi`);
+      
+      // Nessun backup immediato, solo all'orario programmato
+      console.log(`🔔 [NATIVE] Programmando backup per: ${nextTrigger.toLocaleString('it-IT')} (tra ${finalDiffInSeconds} secondi)`);
       const notificationId = await this.notificationsModule.scheduleNotificationAsync({
         content: {
           title: '💾 WorkT - Backup Automatico',
@@ -232,27 +269,22 @@ class NativeBackupService {
             action: 'perform_backup',
             timestamp: new Date().toISOString()
           },
-          sound: false, // Silent per backup automatico
+          sound: false,
           priority: this.notificationsModule.AndroidNotificationPriority.LOW,
           categoryIdentifier: 'BACKUP_CATEGORY'
         },
         trigger: {
-          date: nextTrigger, // Trigger specifico invece di hour/minute
-          repeats: false, // Non ripetere automaticamente
+          seconds: finalDiffInSeconds,
+          repeats: false,
         },
       });
-
       this.scheduledBackupId = notificationId;
-      
-      // Setup listener una sola volta
       if (!this.notificationListenerSetup) {
         this.setupBackupNotificationListener();
         this.notificationListenerSetup = true;
       }
-
       console.log(`✅ [NATIVE] Backup programmato con ID: ${notificationId}`);
       console.log(`📅 [NATIVE] Prossimo backup: ${nextTrigger.toLocaleString('it-IT')}`);
-      
       return true;
     } catch (error) {
       console.error(`❌ [NATIVE] Errore programmazione backup: ${error.message}`);
@@ -260,91 +292,119 @@ class NativeBackupService {
     }
   }
 
-  // 👂 Listener per notifiche di backup (background-ready)
+  // Listener notifiche backup: più flessibile e con debug esteso
   setupBackupNotificationListener() {
     if (!this.notificationsModule) return;
-
+    if (this.notificationListenerSetup) return;
+    this.notificationListenerSetup = true;
     console.log('👂 [NATIVE] Setup listener notifiche backup');
-
-    // Listener per notifiche ricevute (sia foreground che background)
+    
     this.notificationsModule.addNotificationReceivedListener(async (notification) => {
+      console.log('🔔 [NATIVE] Notifica ricevuta:', JSON.stringify(notification.request.content));
       const data = notification.request.content.data;
       if (data?.type === 'auto_backup_trigger') {
+        // Anti-trigger rafforzato: blocca backup immediati
+        const scheduleTimeStr = await AsyncStorage.getItem('last_backup_schedule_time');
+        if (scheduleTimeStr) {
+          const scheduleTime = parseInt(scheduleTimeStr, 10);
+          const timeSinceSchedule = Date.now() - scheduleTime;
+          const secondsSinceSchedule = timeSinceSchedule / 1000;
+          
+          console.log(`[DEBUG] ⏱️ Tempo dalla programmazione: ${secondsSinceSchedule.toFixed(0)} secondi`);
+          
+          // Blocca se il backup si sta eseguendo troppo presto (meno di 20 secondi dalla programmazione)
+          if (secondsSinceSchedule < 20) {
+            console.log(`⏳ [NATIVE] Backup bloccato: troppo presto dalla programmazione (${secondsSinceSchedule.toFixed(0)}s)`);
+            
+            // 🔧 FALLBACK per Expo Development: programma timer JavaScript
+            const triggerTimeStr = await AsyncStorage.getItem('last_backup_trigger_time');
+            if (triggerTimeStr) {
+              const triggerTime = parseInt(triggerTimeStr, 10);
+              const now = Date.now();
+              const delayMs = triggerTime - now;
+              
+              if (delayMs > 0 && delayMs < 24 * 60 * 60 * 1000) { // max 24 ore
+                console.log(`🔄 [NATIVE] Programmando fallback JavaScript timer in ${Math.round(delayMs/1000)} secondi`);
+                setTimeout(async () => {
+                  console.log(`⏰ [NATIVE] Esecuzione backup tramite timer JavaScript fallback`);
+                  await this.executeBackup(true);
+                }, delayMs);
+              }
+            }
+            return;
+          }
+        }
+        
+        // Anti-trigger tempo dall'ultimo backup
+        const lastBackupTimeStr = await AsyncStorage.getItem('last_backup_date');
+        const now = Date.now();
+        
+        if (lastBackupTimeStr) {
+          const lastBackupTime = new Date(lastBackupTimeStr).getTime();
+          const timeSinceLastBackup = now - lastBackupTime;
+          const minutesSinceLastBackup = timeSinceLastBackup / (1000 * 60);
+          
+          console.log(`[DEBUG] 📅 Ultimo backup: ${new Date(lastBackupTime).toLocaleString('it-IT')}`);
+          console.log(`[DEBUG] 📅 Tempo trascorso: ${minutesSinceLastBackup.toFixed(1)} minuti`);
+          
+          // Blocca backup se l'ultimo è stato fatto meno di 10 minuti fa
+          if (minutesSinceLastBackup < 10) {
+            console.log(`⏳ [NATIVE] Backup automatico bloccato: ultimo backup troppo recente (${minutesSinceLastBackup.toFixed(1)} min fa)`);
+            return;
+          }
+        }
+        
+        // Verifica orario programmato (tolleranza più ragionevole)
+        const triggerTimeStr = await AsyncStorage.getItem('last_backup_trigger_time');
+        if (triggerTimeStr) {
+          const triggerTime = parseInt(triggerTimeStr, 10);
+          const diff = Math.abs(now - triggerTime);
+          const hoursDiff = diff / (1000 * 60 * 60);
+          
+          console.log(`[DEBUG] ⏰ Orario trigger: ${new Date(triggerTime).toLocaleString('it-IT')}`);
+          console.log(`[DEBUG] ⏰ Differenza: ${hoursDiff.toFixed(2)} ore`);
+          
+          // Blocca se siamo troppo distanti dall'orario programmato (max 2 ore)
+          if (hoursDiff > 2) {
+            console.log(`⏳ [NATIVE] Backup bloccato: troppo distante dall'orario programmato (${hoursDiff.toFixed(2)}h)`);
+            return;
+          }
+        }
+        
         console.log('🔔 [NATIVE] Notifica backup automatico triggerata');
-        
-        // Esegui backup immediatamente
-        const result = await this.executeBackup(true);
-        
-        // 🚫 RIMOSSO: Non riprogrammare automaticamente
-        // Il backup viene riprogrammato solo quando l'utente lo attiva manualmente
-        console.log(`📅 [NATIVE] Backup completato. Loop automatico fermato.`);
+        await this.executeBackup(true);
+        console.log(`📅 [NATIVE] Backup completato.`);
+      } else {
+        console.log(`[DEBUG] 🔔 Notifica ricevuta ma non è backup trigger:`, data?.type);
       }
     });
-
-    // Listener per quando l'utente tappa la notifica (app chiusa)
     this.notificationsModule.addNotificationResponseReceivedListener(async (response) => {
       const data = response.notification.request.content.data;
       if (data?.type === 'auto_backup_trigger') {
         console.log('👆 [NATIVE] Utente ha toccato notifica backup');
-        
-        // Esegui backup se non già fatto
         await this.executeBackup(true);
       }
     });
-
-    // Background notification handler
     this.notificationsModule.setNotificationHandler({
       handleNotification: async (notification) => {
         const data = notification.request.content.data;
+        console.log(`🔔 [NATIVE] Notifica ricevuta in background: ${data?.type}`);
         
-        if (data?.type === 'auto_backup_trigger') {
-          console.log('🔄 [NATIVE] Handling background backup notification');
-          
-          // 🚨 CONTROLLO 1: Verifica se backup automatico è ancora abilitato
-          const currentSettings = await this.getBackupSettings();
-          if (!currentSettings.enabled) {
-            console.log('🚫 [NATIVE] Backup automatico disabilitato - notifica ignorata');
-            return {
-              shouldShowAlert: false,
-              shouldPlaySound: false,
-              shouldSetBadge: false,
-            };
-          }
-          
-          // 🚨 CONTROLLO 2: verifica ultima esecuzione (anti-loop)
-          const now = Date.now();
-          const lastBackupTime = this.lastAutoBackupTime || 0;
-          const timeSinceLastBackup = now - lastBackupTime;
-          
-          // Se è passato meno di 5 minuti dall'ultimo backup automatico, ignora COMPLETAMENTE
-          if (timeSinceLastBackup < 5 * 60 * 1000) { // 5 minuti in millisecondi
-            console.log(`🚫 [NATIVE] Backup ignorato - ultimo backup ${Math.round(timeSinceLastBackup/1000)}s fa`);
-            // 🛑 NON eseguire backup, NON schedulare niente, FERMA QUI
-            return {
-              shouldShowAlert: false,
-              shouldPlaySound: false,
-              shouldSetBadge: false,
-            };
-          }
-          
-          // Aggiorna timestamp ultima esecuzione
-          this.lastAutoBackupTime = now;
-          
-          // Esegui backup in background
-          const result = await this.executeBackup(true);
-          
+        // Mostra solo le notifiche di conferma backup, non quelle di trigger
+        if (data?.type === 'backup_complete') {
           return {
-            shouldShowAlert: result.success, // Mostra solo se successo
+            shouldShowAlert: true,
+            shouldPlaySound: true,
+            shouldSetBadge: true,
+          };
+        } else {
+          // Per tutte le altre notifiche (incluso auto_backup_trigger), non mostrare
+          return {
+            shouldShowAlert: false,
             shouldPlaySound: false,
             shouldSetBadge: false,
           };
         }
-        
-        return {
-          shouldShowAlert: true,
-          shouldPlaySound: true,
-          shouldSetBadge: true,
-        };
       },
     });
   }
@@ -353,19 +413,33 @@ class NativeBackupService {
   async executeBackup(isAutomatic = false) {
     try {
       console.log(`🔄 [NATIVE] Esecuzione backup ${isAutomatic ? 'automatico' : 'manuale'}...`);
-      
+
+      // ANTI-LOOP: blocca backup automatico se già fatto nelle ultime 12 ore
+      if (isAutomatic) {
+        const lastBackupDateStr = await AsyncStorage.getItem('last_backup_date');
+        if (lastBackupDateStr) {
+          const lastBackupDate = new Date(lastBackupDateStr);
+          const now = new Date();
+          const diffMs = now - lastBackupDate;
+          if (diffMs < 12 * 60 * 60 * 1000) { // 12 ore
+            console.log('⏳ [NATIVE] Backup automatico già eseguito nelle ultime 12 ore, skip!');
+            return { success: false, error: 'Backup già eseguito di recente' };
+          }
+        }
+      }
+
       // Ottieni impostazioni backup complete
       const settings = isAutomatic ? await this.getBackupSettings() : { destination: 'asyncstorage' };
-      
+
       // Ottieni tutti i dati dal database
       const data = await DatabaseService.getAllData();
-      
+
       if (!data || Object.keys(data).length === 0) {
         throw new Error('Nessun dato trovato per il backup');
       }
 
       // Crea metadati backup
-      const timestamp = new Date().toISOString();
+      const timestamp = this.getLocalTimestamp();
       const backupData = {
         metadata: {
           version: '1.0.0',
@@ -398,42 +472,74 @@ class NativeBackupService {
       if (!saveResult.success) {
         throw new Error(`Errore salvataggio in ${settings.destination}: ${saveResult.error}`);
       }
-      
+
       // Aggiorna timestamp ultimo backup
       await AsyncStorage.setItem('last_backup_date', timestamp);
-      
+
       console.log(`✅ [NATIVE] Backup ${isAutomatic ? 'automatico' : 'manuale'} completato in ${settings.destination}: ${saveResult.path || backupKey}`);
-      
+
       // Mostra notifica di conferma SOLO per backup automatici
       if (isAutomatic && this.notificationsModule) {
         try {
+          // Verifica permessi notifiche prima di inviare
+          const { status } = await this.notificationsModule.getPermissionsAsync();
+          console.log(`🔔 [NATIVE] Status permessi notifiche: ${status}`);
+          
+          if (status !== 'granted') {
+            console.warn('⚠️ [NATIVE] Permessi notifiche non concessi, impossibile mostrare conferma backup');
+            return { success: true, backupKey, timestamp };
+          }
+          
+          // ANTI-DUPLICATO: cancella tutte le notifiche backup complete prima di inviarne una nuova
+          await this.notificationsModule.cancelAllScheduledNotificationsAsync();
+          const fileName = saveResult.fileName || backupKey;
+          const folderName = this.getDestinationDisplayName(settings.destination);
           await this.notificationsModule.scheduleNotificationAsync({
             content: {
-              title: '✅ WorkT - Backup Completato',
-              body: `Backup automatico salvato in ${this.getDestinationDisplayName(settings.destination)}.\n${data.workEntries?.length || 0} registrazioni salvate.`,
+              title: '✅ WorkT - Backup Automatico Completato',
+              body: `Backup \"${fileName}\" salvato in ${folderName}.\n${data.workEntries?.length || 0} registrazioni salvate.`,
               data: { 
                 type: 'backup_complete',
                 timestamp: timestamp,
                 destination: settings.destination,
-                silent: true
+                fileName,
+                folderName,
+                silent: false
               },
-              sound: false,
-              priority: this.notificationsModule.AndroidNotificationPriority.LOW,
+              sound: true,
+              priority: this.notificationsModule.AndroidNotificationPriority.DEFAULT,
             },
             trigger: null // Immediata
           });
-          
+
           console.log('📝 [NATIVE] Notifica conferma backup inviata');
+          
+          // Test aggiuntivo: prova a inviare una notifica di test per verificare i permessi
+          setTimeout(async () => {
+            try {
+              await this.notificationsModule.scheduleNotificationAsync({
+                content: {
+                  title: '🔔 Test Notifica',
+                  body: 'Se vedi questo messaggio, le notifiche funzionano correttamente.',
+                  data: { type: 'test' },
+                },
+                trigger: { seconds: 2, repeats: false }
+              });
+              console.log('🔔 [NATIVE] Notifica di test programmata');
+            } catch (testError) {
+              console.error('❌ [NATIVE] Errore notifica di test:', testError);
+            }
+          }, 1000);
         } catch (notificationError) {
           console.warn('⚠️ [NATIVE] Errore invio notifica conferma:', notificationError.message);
         }
       }
 
       return { success: true, backupKey, timestamp };
-      
+
     } catch (error) {
       console.error(`❌ [NATIVE] Errore backup: ${error.message}`);
-      
+
       // Notifica errore (NON immediata per evitare spam)
       if (this.notificationsModule) {
         try {
@@ -443,17 +549,11 @@ class NativeBackupService {
               body: 'Si è verificato un errore durante il backup automatico',
               data: { type: 'backup_error' },
               priority: this.notificationsModule.AndroidNotificationPriority.LOW,
-              sound: false
             },
-            trigger: {
-              seconds: 5 // Ritarda di 5 secondi per evitare spam
-            }
+            trigger: null
           });
-        } catch (notificationError) {
-          console.warn('⚠️ [NATIVE] Errore invio notifica errore:', notificationError.message);
-        }
+        } catch (e) {}
       }
-      
       return { success: false, error: error.message };
     }
   }

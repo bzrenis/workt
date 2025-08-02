@@ -98,8 +98,8 @@ class SuperBackupService {
       console.log('⚠️ Recovery backup disabilitato temporaneamente');
       
       // Programma notifiche promemoria backup
-      // await this.scheduleBackupReminders();
-      console.log('⚠️ Promemoria backup disabilitati temporaneamente');
+      await this.scheduleBackupReminders();
+      console.log('✅ Promemoria backup programmati all\'avvio');
       
       console.log('✅ SuperBackupService inizializzato con successo');
       

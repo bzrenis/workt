@@ -15,12 +15,108 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { clearAllBackupsFromAsyncStorage } from '../../App';
 import { useTheme } from '../contexts/ThemeContext';
 import DatabaseService from '../services/DatabaseService';
 import BackupService from '../services/BackupService';
+import NativeBackupService from '../services/NativeBackupService';
 
 const BackupScreen = ({ navigation }) => {
+  // Stato diagnostica backup nativo
+  const [nativeStatus, setNativeStatus] = useState({});
+  const [notificationPermission, setNotificationPermission] = useState(null);
+  const [nextNativeBackup, setNextNativeBackup] = useState(null);
+  // Funzione per aprire il time picker
+  const openTimePicker = () => {
+    setShowTimePicker(true);
+  };
+
+  // Carica stato diagnostica nativo
+  useEffect(() => {
+    const fetchNativeStatus = async () => {
+      try {
+        const status = NativeBackupService.getSystemStatus ? NativeBackupService.getSystemStatus() : {};
+        setNativeStatus(status);
+        // Permessi notifiche
+        let perm = null;
+        if (NativeBackupService.notificationsModule?.getPermissionsAsync) {
+          const { status: permStatus } = await NativeBackupService.notificationsModule.getPermissionsAsync();
+          perm = permStatus;
+        }
+        setNotificationPermission(perm);
+        // Prossimo backup
+        if (NativeBackupService.getBackupSettings && NativeBackupService.getNextBackupTime) {
+          const settings = await NativeBackupService.getBackupSettings();
+          const next = NativeBackupService.getNextBackupTime(settings);
+          setNextNativeBackup(next);
+        }
+      } catch (e) {
+        setNativeStatus({ error: e.message });
+      }
+    };
+    fetchNativeStatus();
+  }, [autoBackupEnabled, autoBackupTime]);
+  // ...existing code...
+  // DIAGNOSTICA BACKUP NATIVO
+  const renderNativeDiagnostics = () => (
+    <View style={{ marginVertical: 16, padding: 12, borderRadius: 8, backgroundColor: theme.colors.card, borderWidth: 1, borderColor: '#1976d2' }}>
+      <Text style={{ fontWeight: 'bold', color: theme.colors.primary, marginBottom: 4 }}>Diagnostica Backup Automatico Nativo</Text>
+      <Text style={{ color: theme.colors.text }}>Sistema nativo pronto: <Text style={{ fontWeight: 'bold', color: nativeStatus.isNativeReady ? 'green' : 'red' }}>{nativeStatus.isNativeReady ? 'SÌ' : 'NO'}</Text></Text>
+      <Text style={{ color: theme.colors.text }}>Permessi notifiche: <Text style={{ fontWeight: 'bold', color: notificationPermission === 'granted' ? 'green' : 'red' }}>{notificationPermission || '---'}</Text></Text>
+      <Text style={{ color: theme.colors.text }}>Prossimo backup automatico: <Text style={{ fontWeight: 'bold' }}>{nextNativeBackup ? new Date(nextNativeBackup).toLocaleString('it-IT') : '---'}</Text></Text>
+      {nativeStatus.error && <Text style={{ color: 'red' }}>Errore: {nativeStatus.error}</Text>}
+      {/* Pulsante test backup nativo */}
+      <TouchableOpacity
+        style={{ marginTop: 12, backgroundColor: '#1976d2', borderRadius: 6, padding: 10, alignItems: 'center' }}
+        onPress={async () => {
+          try {
+            if (NativeBackupService && NativeBackupService.executeBackup) {
+              const res = await NativeBackupService.executeBackup(true);
+              Alert.alert('Backup nativo eseguito', typeof res === 'string' ? res : JSON.stringify(res));
+              console.log('✅ TEST BACKUP NATIVO:', res);
+            } else {
+              Alert.alert('Errore', 'Funzione NativeBackupService.executeBackup non disponibile');
+            }
+          } catch (e) {
+            Alert.alert('Errore', e.message);
+            console.error('❌ Errore test backup nativo:', e);
+          }
+        }}
+      >
+        <Text style={{ color: 'white', fontWeight: 'bold' }}>Esegui subito backup nativo (TEST)</Text>
+      </TouchableOpacity>
+      {/* Pulsante cancella tutti i backup */}
+      <TouchableOpacity
+        style={{ marginTop: 10, backgroundColor: '#d32f2f', borderRadius: 6, padding: 10, alignItems: 'center' }}
+        onPress={async () => {
+          Alert.alert(
+            'Conferma eliminazione',
+            'Vuoi davvero eliminare TUTTI i backup? L’operazione è irreversibile.',
+            [
+              { text: 'Annulla', style: 'cancel' },
+              { text: 'Elimina tutto', style: 'destructive', onPress: async () => {
+                  try {
+                    if (BackupService && BackupService.deleteAllBackups) {
+                      await BackupService.deleteAllBackups();
+                    } else if (typeof clearAllBackupsFromAsyncStorage === 'function') {
+                      await clearAllBackupsFromAsyncStorage();
+                    }
+                    if (typeof loadExistingBackups === 'function') {
+                      await loadExistingBackups();
+                    }
+                    Alert.alert('Backup eliminati', 'Tutti i backup sono stati eliminati.');
+                  } catch (e) {
+                    Alert.alert('Errore', e.message);
+                  }
+                }
+              }
+            ]
+          );
+        }}
+      >
+        <Text style={{ color: 'white', fontWeight: 'bold' }}>Cancella tutti i backup</Text>
+      </TouchableOpacity>
+    </View>
+  );
   const { theme } = useTheme();
   const styles = createStyles(theme);
   const [isLoading, setIsLoading] = useState(false);
@@ -33,53 +129,158 @@ const BackupScreen = ({ navigation }) => {
   const [existingBackups, setExistingBackups] = useState([]);
   const [loadingBackups, setLoadingBackups] = useState(false);
 
-
+  // Carica le impostazioni backup reali all'avvio della schermata
   useEffect(() => {
+    const loadBackupSettings = async () => {
+      try {
+        if (typeof BackupService.getBackupSettings === 'function') {
+          const settings = await BackupService.getBackupSettings();
+          console.log('📱 [BackupScreen] Impostazioni caricate:', settings);
+          setAutoBackupEnabled(!!settings.enabled); // Correzione: usa 'enabled' non 'autoBackupEnabled'
+          if (settings.autoBackupTime) setAutoBackupTime(settings.autoBackupTime);
+          if (settings.time) setAutoBackupTime(settings.time); // Correzione: usa 'time' come fallback
+          if (settings.backupDestination) setBackupDestination(settings.backupDestination);
+          if (settings.destination) setBackupDestination(settings.destination); // Correzione: usa 'destination' come fallback
+          console.log('📱 [BackupScreen] Stato UI aggiornato - enabled:', !!settings.enabled, 'time:', settings.time || settings.autoBackupTime);
+        }
+        // Carica anche le destinazioni disponibili
+        if (typeof BackupService.getAvailableDestinations === 'function') {
+          const destinations = BackupService.getAvailableDestinations();
+          setAvailableDestinations(destinations);
+        }
+      } catch (e) {
+        console.error('Errore caricamento impostazioni backup:', e);
+      }
+    };
     loadBackupSettings();
-    loadAvailableDestinations();
-    loadExistingBackups();
   }, []);
 
-  // Gestione attivazione/disattivazione backup automatico
-  useEffect(() => {
-    // Il BackupService gestisce autonomamente la programmazione
-    // Non serve più il vecchio TaskService che creava notifiche immediate
-    console.log(`🔄 Backup automatico: ${autoBackupEnabled ? 'abilitato' : 'disabilitato'} alle ${autoBackupTime}`);
-  }, [autoBackupEnabled, autoBackupTime]);
+  // Funzione per convertire l'orario di backup in un oggetto Date per il DateTimePicker
+  const getCurrentTimeForPicker = () => {
+    const [hours, minutes] = autoBackupTime.split(':');
+    const date = new Date();
+    date.setHours(parseInt(hours), parseInt(minutes), 0, 0);
+    return date;
+  };
 
-  const loadBackupSettings = async () => {
-    try {
-      const settings = await BackupService.getBackupSettings();
-      setAutoBackupEnabled(settings.enabled);
-      setAutoBackupTime(settings.time);
-      setBackupDestination(settings.destination || 'asyncstorage');
-      console.log('✅ Impostazioni backup caricate:', settings);
-    } catch (error) {
-      console.error('Errore caricamento impostazioni backup:', error);
+  // Gestisce il cambio di orario dal DateTimePicker
+  const handleTimeChange = (event, selectedTime) => {
+    setShowTimePicker(false);
+    if (selectedTime) {
+      const hours = selectedTime.getHours().toString().padStart(2, '0');
+      const minutes = selectedTime.getMinutes().toString().padStart(2, '0');
+      setAutoBackupTime(`${hours}:${minutes}`);
     }
   };
 
-  const loadAvailableDestinations = async () => {
-    try {
-      const destinations = BackupService.getAvailableDestinations();
-      setAvailableDestinations(destinations);
-      console.log('📁 Destinazioni backup disponibili:', destinations);
-    } catch (error) {
-      console.error('Errore caricamento destinazioni backup:', error);
+  // Funzione per ottenere il nome visualizzabile della destinazione
+  const getDestinationDisplayName = (destination) => {
+    switch (destination) {
+      case 'asyncstorage':
+        return 'Memoria App';
+      case 'filesystem':
+        return 'File System';
+      case 'cloud':
+        return 'Cloud';
+      default:
+        return destination || 'Sconosciuto';
     }
   };
 
-  // ✅ CARICA BACKUP ESISTENTI
+  // Funzione per ottenere il percorso completo del backup
+  const getFullBackupPath = (backup) => {
+    // Per AsyncStorage, mostra la posizione interna
+    if (backup.destination === 'asyncstorage' || !backup.destination) {
+      return `Memoria app: ${backup.name || backup.key}`;
+    }
+    
+    // Per file condivisi, mostra informazioni user-friendly
+    if (backup.destination === 'sharing') {
+      return `File condiviso: ${backup.name || 'Backup'}`;
+    }
+    
+    // Per file system, cerca il percorso completo
+    if (backup.destination === 'filesystem') {
+      const fullPath = backup.filePath || backup.path;
+      if (fullPath && fullPath !== backup.key && fullPath.includes('/')) {
+        return fullPath;
+      }
+      return `File system: ${backup.name || backup.key}`;
+    }
+    
+    // Fallback generico
+    return backup.path || backup.name || backup.key;
+  };
+
+  // Funzione per pulire backup duplicati
+  const cleanDuplicateBackups = async () => {
+    try {
+      console.log('🧹 Pulizia backup duplicati...');
+      const keys = await AsyncStorage.getAllKeys();
+      const backupKeys = keys.filter(key => 
+        key.startsWith('backup_') || 
+        key.startsWith('manual-backup-') || 
+        key.startsWith('manual_backup_') || 
+        key.startsWith('auto-backup-') ||
+        key.startsWith('worktracker-backup-')
+      );
+      
+      const backupsByTimestamp = {};
+      
+      for (const key of backupKeys) {
+        const backupData = await AsyncStorage.getItem(key);
+        if (backupData) {
+          const parsed = JSON.parse(backupData);
+          const metadata = parsed.metadata || parsed.backupInfo || {};
+          const timestamp = metadata.created || metadata.createdAt;
+          
+          if (timestamp) {
+            const timeKey = new Date(timestamp).getTime();
+            if (!backupsByTimestamp[timeKey]) {
+              backupsByTimestamp[timeKey] = [];
+            }
+            backupsByTimestamp[timeKey].push({ key, metadata });
+          }
+        }
+      }
+      
+      // Rimuovi duplicati (mantieni solo il primo)
+      let removedCount = 0;
+      for (const timeKey in backupsByTimestamp) {
+        const backups = backupsByTimestamp[timeKey];
+        if (backups.length > 1) {
+          // Mantieni solo il primo, rimuovi gli altri
+          for (let i = 1; i < backups.length; i++) {
+            await AsyncStorage.removeItem(backups[i].key);
+            removedCount++;
+            console.log(`🗑️ Rimosso backup duplicato: ${backups[i].key}`);
+          }
+        }
+      }
+      
+      if (removedCount > 0) {
+        Alert.alert('Pulizia Completata', `Rimossi ${removedCount} backup duplicati`);
+        await loadExistingBackups(); // Ricarica la lista
+      } else {
+        Alert.alert('Pulizia', 'Nessun backup duplicato trovato');
+      }
+      
+    } catch (error) {
+      console.error('❌ Errore pulizia duplicati:', error);
+      Alert.alert('Errore', 'Errore durante la pulizia dei backup duplicati');
+    }
+  };
+
+  // Carica la lista dei backup esistenti
   const loadExistingBackups = async () => {
     try {
       setLoadingBackups(true);
-      const backups = await BackupService.listAllBackups();
-      
-      // Ordina per data (più recenti prima)
-      const sortedBackups = backups.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-      
-      setExistingBackups(sortedBackups);
-      console.log(`📂 Trovati ${sortedBackups.length} backup:`, sortedBackups);
+      if (typeof BackupService.getExistingBackups === 'function') {
+        const backups = await BackupService.getExistingBackups();
+        setExistingBackups(backups || []);
+      } else {
+        setExistingBackups([]);
+      }
     } catch (error) {
       console.error('Errore caricamento backup esistenti:', error);
       setExistingBackups([]);
@@ -88,39 +289,14 @@ const BackupScreen = ({ navigation }) => {
     }
   };
 
-  // ✅ GESTIONE DATETIMEPICKER PER ORARIO BACKUP
-  const openTimePicker = () => {
-    setShowTimePicker(true);
-  };
+  // Carica i backup esistenti all'avvio
+  useEffect(() => {
+    loadExistingBackups();
+  }, []);
 
-  const handleTimeChange = (event, selectedTime) => {
-    setShowTimePicker(false);
-    if (selectedTime) {
-      const hours = selectedTime.getHours().toString().padStart(2, '0');
-      const minutes = selectedTime.getMinutes().toString().padStart(2, '0');
-      const timeString = `${hours}:${minutes}`;
-      setAutoBackupTime(timeString);
-      
-      // Salva immediatamente le nuove impostazioni se il backup è abilitato
-      if (autoBackupEnabled) {
-        BackupService.updateBackupSettings(autoBackupEnabled, timeString);
-      }
-    }
-  };
 
-  const getCurrentTimeForPicker = () => {
-    try {
-      const [hours, minutes] = autoBackupTime.split(':');
-      const date = new Date();
-      date.setHours(parseInt(hours) || 0, parseInt(minutes) || 0, 0, 0);
-      return date;
-    } catch (error) {
-      console.error('Errore parsing orario:', error);
-      const date = new Date();
-      date.setHours(2, 0, 0, 0); // Default 02:00
-      return date;
-    }
-  };
+  // ...
+// ...existing code...
 
   // ✅ ELIMINA BACKUP SPECIFICO
   const deleteBackup = async (backup) => {
@@ -256,6 +432,12 @@ const BackupScreen = ({ navigation }) => {
   };
 
   const saveBackupSettings = async () => {
+    // Se il backup automatico è abilitato e non è selezionata una destinazione valida, mostra il picker e blocca il salvataggio
+    if (autoBackupEnabled && (!backupDestination || !availableDestinations.find(d => d.id === backupDestination))) {
+      Alert.alert('Seleziona destinazione', 'Devi selezionare una cartella di destinazione per il backup automatico.');
+      setShowDestinationPicker(true);
+      return;
+    }
     try {
       setIsLoading(true);
       const success = await BackupService.updateAllBackupSettings(
@@ -263,8 +445,14 @@ const BackupScreen = ({ navigation }) => {
         autoBackupTime, 
         backupDestination
       );
-      
       if (success) {
+        // Aggiorna lo stato locale con i valori effettivamente salvati
+        if (typeof BackupService.getBackupSettings === 'function') {
+          const settings = await BackupService.getBackupSettings();
+          setAutoBackupEnabled(!!settings.enabled); // Correzione: usa 'enabled' non 'autoBackupEnabled'
+          if (settings.time) setAutoBackupTime(settings.time); // Correzione: usa 'time' non 'autoBackupTime'
+          if (settings.destination) setBackupDestination(settings.destination); // Correzione: usa 'destination' non 'backupDestination'
+        }
         Alert.alert('Successo', 'Impostazioni backup salvate correttamente');
         const systemStatus = BackupService.getSystemStatus();
         console.log('📱 Sistema backup attivo:', systemStatus.current);
@@ -695,7 +883,7 @@ Backup: ${backupEntriesWithInterventi.length} entry con interventi`;
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar style={theme.isDark ? 'light' : 'dark'} />
-      
+
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={24} color={theme.colors.primary} />
@@ -704,21 +892,47 @@ Backup: ${backupEntriesWithInterventi.length} entry con interventi`;
         <View style={{ width: 24 }} />
       </View>
 
+      {/* Diagnostica backup nativo sempre visibile in alto */}
+      {renderNativeDiagnostics()}
+
       <ScrollView style={styles.content}>
         {/* Sezione Backup Automatico */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>🔄 Backup Automatico</Text>
-          
           <View style={styles.autoBackupContainer}>
             <View style={styles.switchRow}>
               <Text style={styles.switchLabel}>Attiva backup automatico</Text>
               <Switch
                 value={autoBackupEnabled}
                 onValueChange={async (value) => {
+                  console.log('📱 [BackupScreen] Switch cambiato a:', value);
                   setAutoBackupEnabled(value);
+                  // Se si abilita, obbliga la selezione destinazione se non valida
+                  if (value && (!backupDestination || !availableDestinations.find(d => d.id === backupDestination))) {
+                    Alert.alert('Seleziona destinazione', 'Devi selezionare una cartella di destinazione per il backup automatico.');
+                    // Aggiorna subito le destinazioni disponibili prima di mostrare il picker
+                    if (typeof BackupService?.getAvailableDestinations === 'function') {
+                      const destinations = BackupService.getAvailableDestinations();
+                      setAvailableDestinations(destinations);
+                    }
+                    setShowDestinationPicker(true);
+                    return;
+                  }
                   setIsLoading(true);
                   try {
-                    await BackupService.updateBackupSettings(value, autoBackupTime);
+                    console.log('📱 [BackupScreen] Chiamando updateBackupSettings con:', value, autoBackupTime);
+                    const result = await BackupService.updateBackupSettings(value, autoBackupTime);
+                    console.log('📱 [BackupScreen] Risultato updateBackupSettings:', result);
+                    
+                    // Verifica che le impostazioni siano state salvate correttamente
+                    const savedSettings = await BackupService.getBackupSettings();
+                    console.log('📱 [BackupScreen] Verifica impostazioni salvate:', savedSettings);
+                    
+                    if (savedSettings.enabled !== value) {
+                      console.error('❌ [BackupScreen] Le impostazioni non sono state salvate correttamente!');
+                      Alert.alert('Errore', 'Le impostazioni non sono state salvate correttamente');
+                      setAutoBackupEnabled(savedSettings.enabled); // Ripristina lo stato corretto
+                    }
                   } catch (e) {
                     console.error('Errore aggiornamento impostazioni backup:', e);
                   } finally {
@@ -732,6 +946,16 @@ Backup: ${backupEntriesWithInterventi.length} entry con interventi`;
             
             {autoBackupEnabled && (
               <>
+                {/* Avviso modalità sviluppo */}
+                {__DEV__ && (
+                  <View style={[styles.infoContainer, { backgroundColor: '#FFF3CD', borderColor: '#FFC107', marginBottom: 15 }]}>
+                    <Text style={[styles.infoText, { color: '#856404' }]}>
+                      ⚠️ <Text style={{ fontWeight: 'bold' }}>Modalità Sviluppo</Text>{'\n'}
+                      Il backup automatico funziona solo con app aperta. Nella versione finale funzionerà anche con app chiusa.
+                    </Text>
+                  </View>
+                )}
+                
                 <View style={styles.timeContainer}>
                   <Text style={styles.timeLabel}>Orario backup (ogni 24h):</Text>
                   <TouchableOpacity 
@@ -748,7 +972,14 @@ Backup: ${backupEntriesWithInterventi.length} entry con interventi`;
                   <Text style={styles.destinationLabel}>📁 Destinazione backup:</Text>
                   <TouchableOpacity 
                     style={styles.destinationButton}
-                    onPress={() => setShowDestinationPicker(true)}
+                    onPress={() => {
+                      // Aggiorna subito le destinazioni disponibili prima di mostrare il picker
+                      if (typeof BackupService?.getAvailableDestinations === 'function') {
+                        const destinations = BackupService.getAvailableDestinations();
+                        setAvailableDestinations(destinations);
+                      }
+                      setShowDestinationPicker(true);
+                    }}
                   >
                     <Ionicons 
                       name={availableDestinations.find(d => d.id === backupDestination)?.icon || 'folder-outline'} 
@@ -771,6 +1002,17 @@ Backup: ${backupEntriesWithInterventi.length} entry con interventi`;
           </View>
         </View>
 
+
+        {/* Feedback visivo per backup automatico programmato */}
+        {autoBackupEnabled && (
+          <View style={{alignItems: 'center', marginBottom: 16}}>
+            <Ionicons name="calendar-outline" size={20} color={theme.colors.primary} />
+            <Text style={{color: theme.colors.textSecondary, fontSize: 13, marginTop: 4}}>
+              Backup automatico programmato ogni giorno alle {autoBackupTime} su: {availableDestinations.find(d => d.id === backupDestination)?.name || 'Memoria App'}
+            </Text>
+          </View>
+        )}
+
         {/* Bottone Salva Impostazioni */}
         <TouchableOpacity style={styles.saveButton} onPress={saveBackupSettings} disabled={isLoading}>
           <Ionicons name="save-outline" size={20} color={theme.colors.onPrimary} />
@@ -786,7 +1028,7 @@ Backup: ${backupEntriesWithInterventi.length} entry con interventi`;
             disabled={isLoading}
           >
             <Ionicons name="download-outline" size={20} color={theme.colors.onPrimary} />
-            <Text style={styles.buttonText}>Crea Backup e Scegli Destinazione</Text>
+            <Text style={styles.buttonText}>Crea Backup Manuale</Text>
           </TouchableOpacity>
           <TouchableOpacity 
             style={[styles.button, { backgroundColor: '#FF6B35' }]}
@@ -797,6 +1039,14 @@ Backup: ${backupEntriesWithInterventi.length} entry con interventi`;
             <Text style={[styles.buttonText, { color: '#FFFFFF' }]}>Ripristina da File</Text>
           </TouchableOpacity>
           <TouchableOpacity 
+            style={[styles.button, { backgroundColor: '#FFA500' }]}
+            onPress={cleanDuplicateBackups}
+            disabled={isLoading}
+          >
+            <Ionicons name="trash-outline" size={20} color="#FFFFFF" />
+            <Text style={[styles.buttonText, { color: '#FFFFFF' }]}>Pulisci Duplicati</Text>
+          </TouchableOpacity>
+          <TouchableOpacity 
             style={[styles.button, { backgroundColor: theme.colors.secondary }]}
             onPress={showBackupStats}
             disabled={isLoading}
@@ -804,28 +1054,23 @@ Backup: ${backupEntriesWithInterventi.length} entry con interventi`;
             <Ionicons name="stats-chart-outline" size={20} color={theme.colors.onPrimary} />
             <Text style={styles.buttonText}>Mostra Statistiche</Text>
           </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.button, { backgroundColor: '#e11d48' }]}
-            onPress={async () => {
-              const count = await clearAllBackupsFromAsyncStorage();
-              Alert.alert(
-                'Backup eliminati',
-                count > 0
-                  ? `${count} backup eliminati con successo.`
-                  : 'Nessun backup trovato da eliminare.'
-              );
-              loadExistingBackups();
-            }}
-            disabled={isLoading}
-          >
-            <Ionicons name="trash-outline" size={20} color="#fff" />
-            <Text style={[styles.buttonText, { color: '#fff' }]}>Svuota backup</Text>
-          </TouchableOpacity>
         </View>
 
         {/* ✅ BACKUP ESISTENTI */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>📂 Backup Salvati</Text>
+          
+          {/* Pulsante Aggiorna Lista sempre visibile */}
+          <TouchableOpacity
+            style={[styles.button, styles.refreshButton]}
+            onPress={loadExistingBackups}
+            disabled={loadingBackups}
+          >
+            <Ionicons name="refresh-outline" size={20} color={theme.colors.primary} />
+            <Text style={[styles.buttonText, { color: theme.colors.primary }]}>
+              Aggiorna Lista
+            </Text>
+          </TouchableOpacity>
           
           {loadingBackups ? (
             <View style={styles.loadingContainer}>
@@ -843,20 +1088,36 @@ Backup: ${backupEntriesWithInterventi.length} entry con interventi`;
               <Text style={styles.backupCount}>
                 📊 {existingBackups.length} backup disponibili
               </Text>
-              {existingBackups.map((backup, index) => (
+              {existingBackups.map((backup, index) => {
+                return (
                 <View key={backup.key} style={styles.backupItem}>
                   <View style={styles.backupHeader}>
                     <View style={styles.backupInfo}>
-                      <Text style={styles.backupName}>{backup.name}</Text>
+                      <Text style={styles.backupName}>{backup.name || 'Backup senza nome'}</Text>
                       <Text style={styles.backupDate}>
                         📅 {new Date(backup.createdAt).toLocaleString('it-IT')}
                       </Text>
                       <Text style={styles.backupSize}>
-                        💾 {(backup.size / 1024).toFixed(2)} KB
+                        💾 {Math.round(backup.size / 1024)} KB
                       </Text>
                       {backup.type === 'auto' && (
                         <Text style={styles.backupType}>🤖 Automatico</Text>
                       )}
+                      {backup.type === 'javascript_local' && (
+                        <Text style={styles.backupType}>📱 JavaScript</Text>
+                      )}
+                      {backup.type === 'manual' && (
+                        <Text style={styles.backupType}>✋ Manuale</Text>
+                      )}
+                      {(backup.type === 'automatic' || backup.type === 'auto') && (
+                        <Text style={styles.backupType}>🔄 Automatico</Text>
+                      )}
+                      <Text style={styles.backupDestination}>
+                        📁 {getDestinationDisplayName(backup.destination)}
+                      </Text>
+                      <Text style={styles.backupPath} numberOfLines={2} ellipsizeMode="middle">
+                        📂 {getFullBackupPath(backup)}
+                      </Text>
                     </View>
                     <View style={styles.backupActions}>
                       <TouchableOpacity
@@ -882,24 +1143,14 @@ Backup: ${backupEntriesWithInterventi.length} entry con interventi`;
                       </TouchableOpacity>
                     </View>
                   </View>
-                  {backup.entries && (
+                  {backup.entries > 0 && (
                     <Text style={styles.backupEntries}>
                       📋 {backup.entries} ore registrate
                     </Text>
                   )}
                 </View>
-              ))}
-              
-              <TouchableOpacity
-                style={[styles.button, styles.refreshButton]}
-                onPress={loadExistingBackups}
-                disabled={loadingBackups}
-              >
-                <Ionicons name="refresh-outline" size={20} color={theme.colors.primary} />
-                <Text style={[styles.buttonText, { color: theme.colors.primary }]}>
-                  Aggiorna Lista
-                </Text>
-              </TouchableOpacity>
+                );
+              })}
             </>
           )}
         </View>
@@ -912,7 +1163,8 @@ Backup: ${backupEntriesWithInterventi.length} entry con interventi`;
             🚀 Sistema IBRIDO: Backup nativo (app builds) + fallback JavaScript (Expo).{'\n'}
             🔔 Sistema nativo: Funziona anche con app chiusa tramite notifiche.{'\n'}
             📁 Backup manuali: Scegli dove salvare (file, condivisione, memoria app).{'\n'}
-            📁 Backup automatici: Scegli destinazione dalla sezione sopra.
+            📁 Backup automatici: Scegli destinazione dalla sezione sopra.{'\n'}
+            {__DEV__ && '⚠️ Modalità sviluppo: Backup automatico solo con app aperta.'}
           </Text>
         </View>
       </ScrollView>
@@ -929,53 +1181,59 @@ Backup: ${backupEntriesWithInterventi.length} entry con interventi`;
             </View>
             
             <ScrollView style={styles.destinationList}>
-              {availableDestinations.map((destination) => (
-                <TouchableOpacity
-                  key={destination.id}
-                  style={[
-                    styles.destinationOption,
-                    backupDestination === destination.id && styles.destinationOptionSelected
-                  ]}
-                  onPress={() => {
-                    setBackupDestination(destination.id);
-                    setShowDestinationPicker(false);
-                  }}
-                >
-                  <View style={styles.destinationOptionLeft}>
-                    <Ionicons 
-                      name={destination.icon} 
-                      size={24} 
-                      color={backupDestination === destination.id ? '#007AFF' : theme.colors.textSecondary} 
-                    />
-                    <View style={styles.destinationOptionText}>
-                      <Text style={[
-                        styles.destinationOptionName,
-                        backupDestination === destination.id && { color: '#007AFF', fontWeight: '600' }
-                      ]}>
-                        {destination.name}
-                      </Text>
-                      <Text style={styles.destinationOptionDescription}>
-                        {destination.description}
-                      </Text>
-                      <View style={styles.destinationOptionTags}>
-                        {destination.available && (
-                          <View style={[styles.tag, styles.tagAvailable]}>
-                            <Text style={styles.tagText}>✅ Disponibile</Text>
-                          </View>
-                        )}
-                        {destination.reliable && (
-                          <View style={[styles.tag, styles.tagReliable]}>
-                            <Text style={styles.tagText}>🔒 Affidabile</Text>
-                          </View>
-                        )}
+              {availableDestinations.length === 0 ? (
+                <Text style={{ textAlign: 'center', color: theme.colors.textSecondary, marginTop: 32 }}>
+                  Nessuna destinazione disponibile. Premi "Salva Impostazioni" per aggiornare le destinazioni o riavvia l'app.
+                </Text>
+              ) : (
+                availableDestinations.map((destination) => (
+                  <TouchableOpacity
+                    key={destination.id}
+                    style={[
+                      styles.destinationOption,
+                      backupDestination === destination.id && styles.destinationOptionSelected
+                    ]}
+                    onPress={() => {
+                      setBackupDestination(destination.id);
+                      setShowDestinationPicker(false);
+                    }}
+                  >
+                    <View style={styles.destinationOptionLeft}>
+                      <Ionicons 
+                        name={destination.icon} 
+                        size={24} 
+                        color={backupDestination === destination.id ? '#007AFF' : theme.colors.textSecondary} 
+                      />
+                      <View style={styles.destinationOptionText}>
+                        <Text style={[
+                          styles.destinationOptionName,
+                          backupDestination === destination.id && { color: '#007AFF', fontWeight: '600' }
+                        ]}>
+                          {destination.name}
+                        </Text>
+                        <Text style={styles.destinationOptionDescription}>
+                          {destination.description}
+                        </Text>
+                        <View style={styles.destinationOptionTags}>
+                          {destination.available && (
+                            <View style={[styles.tag, styles.tagAvailable]}>
+                              <Text style={styles.tagText}>✅ Disponibile</Text>
+                            </View>
+                          )}
+                          {destination.reliable && (
+                            <View style={[styles.tag, styles.tagReliable]}>
+                              <Text style={styles.tagText}>🔒 Affidabile</Text>
+                            </View>
+                          )}
+                        </View>
                       </View>
                     </View>
-                  </View>
-                  {backupDestination === destination.id && (
-                    <Ionicons name="checkmark-circle" size={20} color="#007AFF" />
-                  )}
-                </TouchableOpacity>
-              ))}
+                    {backupDestination === destination.id && (
+                      <Ionicons name="checkmark-circle" size={20} color="#007AFF" />
+                    )}
+                  </TouchableOpacity>
+                ))
+              )}
             </ScrollView>
           </View>
         </View>
@@ -1329,6 +1587,19 @@ const createStyles = (theme) => StyleSheet.create({
     color: theme.colors.primary,
     fontWeight: '500',
   },
+  backupDestination: {
+    fontSize: 12,
+    color: '#007AFF',
+    marginTop: 2,
+    fontWeight: '500',
+  },
+  backupPath: {
+    fontSize: 11,
+    color: '#666',
+    marginTop: 2,
+    fontStyle: 'italic',
+    flexWrap: 'wrap',
+  },
   backupEntries: {
     fontSize: 12,
     color: theme.colors.textSecondary,
@@ -1367,5 +1638,4 @@ const createStyles = (theme) => StyleSheet.create({
     marginTop: 8,
   },
 });
-
 export default BackupScreen;

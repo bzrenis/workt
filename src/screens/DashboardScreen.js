@@ -202,7 +202,7 @@ const DashboardScreen = ({ navigation, route }) => {
   }, [settingsLoading, settings]);
 
   // Carica dati dal database
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     try {
       const year = selectedDate.getFullYear();
       const month = selectedDate.getMonth() + 1;
@@ -218,7 +218,7 @@ const DashboardScreen = ({ navigation, route }) => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [selectedDate]);
 
   // Calcola aggregazione mensile solo quando sia workEntries che settings sono aggiornati
   useEffect(() => {
@@ -265,7 +265,7 @@ const DashboardScreen = ({ navigation, route }) => {
   }, [settingsLoading, settings, workEntries]);
 
   // Carica dati dei giorni fissi (ferie, permessi, malattia, riposo, festivi)
-  const loadFixedDaysData = async () => {
+  const loadFixedDaysData = useCallback(async () => {
     try {
       setFixedDaysLoading(true);
       const startDate = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 1);
@@ -302,10 +302,10 @@ const DashboardScreen = ({ navigation, route }) => {
     } finally {
       setFixedDaysLoading(false);
     }
-  };
+  }, [selectedDate]);
 
   // Carica dati dei giorni in completamento
-  const loadCompletionData = async () => {
+  const loadCompletionData = useCallback(async () => {
     try {
       setCompletionLoading(true);
       const startDate = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 1);
@@ -333,7 +333,7 @@ const DashboardScreen = ({ navigation, route }) => {
     } finally {
       setCompletionLoading(false);
     }
-  };
+  }, [selectedDate]);
 
   // Calcola aggregazione mensile fedele al breakdown del TimeEntryForm
   const calculateMonthlyAggregation = async (entries) => {
@@ -1567,6 +1567,7 @@ const DashboardScreen = ({ navigation, route }) => {
     setRefreshing(true);
     try {
       console.log('🔄 DASHBOARD - Inizio refresh manuale...');
+      console.log('🔄 DASHBOARD - Refresh per mese:', formatMonthYear(selectedDate));
       // Refresh sia impostazioni che dati
       await refreshSettings();
       console.log('🔄 DASHBOARD - Settings aggiornate');
@@ -1578,7 +1579,7 @@ const DashboardScreen = ({ navigation, route }) => {
     } finally {
       setRefreshing(false);
     }
-  }, []);
+  }, [refreshSettings]);
 
   // 📄 STAMPA PDF MENSILE COMPLETA
   const generateMonthlyPDF = async () => {

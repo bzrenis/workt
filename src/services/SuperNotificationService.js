@@ -44,6 +44,14 @@ class SuperNotificationService {
     this.hasPermission = false;
     this.databaseService = null; // Import dinamico per evitare loop
     
+    // Import del DatabaseService
+    try {
+      this.DatabaseServiceInstance = require('./DatabaseService').default;
+    } catch (error) {
+      console.warn('⚠️ Errore import DatabaseService:', error.message);
+      this.DatabaseServiceInstance = null;
+    }
+    
     console.log('🚀 SuperNotificationService inizializzato', this.isReactNativeEnvironment ? '(React Native)' : '(Node.js Mock)');
   }
 
@@ -190,7 +198,6 @@ class SuperNotificationService {
         
         await Notifications.cancelAllScheduledNotificationsAsync();
         await Notifications.dismissAllNotificationsAsync();
-        await new Promise(resolve => setTimeout(resolve, 1000));
         
         console.log('🧹 Notifiche esistenti cancellate');
       }
@@ -215,6 +222,13 @@ class SuperNotificationService {
         const count = await this.scheduleBackupReminders(settings.backupReminder);
         totalScheduled += count;
         console.log(`💾 Programmati ${count} promemoria backup automatico`);
+      }
+
+      if (settings.standbyReminder?.enabled || settings.standbyReminders?.enabled) {
+        const standbyNotificationSettings = settings.standbyReminder || settings.standbyReminders;
+        const count = await this.scheduleStandbyReminders(standbyNotificationSettings);
+        totalScheduled += count;
+        console.log(`📞 Programmati ${count} promemoria reperibilità`);
       }
 
       console.log(`✅ Totale notifiche programmate: ${totalScheduled}`);
@@ -254,20 +268,8 @@ class SuperNotificationService {
         const now = new Date();
         const timeDiff = targetDate.getTime() - now.getTime();
         
-        if (targetDate.toDateString() === now.toDateString()) {
-          if (timeDiff <= 3600000) { // 1 ora
-            console.log(`⏭️ Saltato promemoria mattutino: stesso giorno troppo vicino (${Math.round(timeDiff/1000/60)}min)`);
-            continue;
-          }
-        }
-        
-        if (timeDiff <= 1800000) { // 30 minuti
-          console.log(`⏭️ Saltato promemoria mattutino: troppo vicino (${Math.round(timeDiff/1000/60)}min) - richiede 30min+`);
-          continue;
-        }
-        
-        console.log(`📅 Programmando promemoria lavoro per: ${targetDate.toLocaleString('it-IT')} (tra ${Math.round(timeDiff/1000/60)} min)`);
-        
+        // PROGRAMMA SEMPRE LA NOTIFICA COME IL TEST
+        console.log(`📅 [NO FILTER] Programmando promemoria lavoro per: ${targetDate.toLocaleString('it-IT')} (tra ${Math.round(timeDiff/1000/60)} min)`);
         await Notifications.scheduleNotificationAsync({
           content: {
             title: '🌅 Buongiorno! Inizio Lavoro',
@@ -327,20 +329,8 @@ class SuperNotificationService {
         const now = new Date();
         const timeDiff = targetDate.getTime() - now.getTime();
         
-        if (targetDate.toDateString() === now.toDateString()) {
-          if (timeDiff <= 3600000) { // 1 ora
-            console.log(`⏭️ Saltato promemoria time entry: stesso giorno troppo vicino (${Math.round(timeDiff/1000/60)}min)`);
-            continue;
-          }
-        }
-        
-        if (timeDiff <= 1800000) { // 30 minuti
-          console.log(`⏭️ Saltato promemoria time entry: troppo vicino (${Math.round(timeDiff/1000/60)}min) - richiede 30min+`);
-          continue;
-        }
-        
-        console.log(`📅 Programmando time entry per: ${targetDate.toLocaleString('it-IT')} (tra ${Math.round(timeDiff/1000/60)} min)`);
-        
+        // PROGRAMMA SEMPRE LA NOTIFICA COME IL TEST
+        console.log(`📅 [NO FILTER] Programmando time entry per: ${targetDate.toLocaleString('it-IT')} (tra ${Math.round(timeDiff/1000/60)} min)`);
         await Notifications.scheduleNotificationAsync({
           content: {
             title: '⏰ Promemoria Inserimento Orari',
@@ -390,14 +380,8 @@ class SuperNotificationService {
         targetDate.setDate(now.getDate() + day);
         targetDate.setHours(parseInt(hours), parseInt(minutes), 0, 0);
         
-        const timeDiff = targetDate.getTime() - now.getTime();
-        if (timeDiff <= 1800000) { // 30 minuti
-          console.log(`⏭️ Saltato backup: troppo vicino (${Math.round(timeDiff/1000/60)}min)`);
-          continue;
-        }
-        
-        console.log(`💾 Programmando backup automatico GIORNALIERO per: ${targetDate.toLocaleString('it-IT')}`);
-        
+        // PROGRAMMA SEMPRE LA NOTIFICA COME IL TEST
+        console.log(`💾 [NO FILTER] Programmando backup automatico GIORNALIERO per: ${targetDate.toLocaleString('it-IT')}`);
         await Notifications.scheduleNotificationAsync({
           content: {
             title: '💾 Backup Automatico Giornaliero WorkT',
@@ -427,6 +411,129 @@ class SuperNotificationService {
       
     } catch (error) {
       console.error('❌ Errore programmazione backup automatico:', error);
+      return 0;
+    }
+  }
+
+  // 📞 PROMEMORIA REPERIBILITÀ 
+  async scheduleStandbyReminders(settings) {
+    console.log('📞 [DEBUG] scheduleStandbyReminders chiamato con settings:', JSON.stringify(settings, null, 2));
+    
+    if (!settings || !settings.enabled) {
+      console.log('⏹️ Promemoria reperibilità disabilitati (enabled=false)');
+      return 0;
+    }
+    
+    if (!settings.notifications || !Array.isArray(settings.notifications)) {
+      console.log('⏹️ Configurazione notifiche reperibilità non valida:', settings);
+      return 0;
+    }
+
+    try {
+      console.log('📞 [DEBUG] DatabaseServiceInstance disponibile:', !!this.DatabaseServiceInstance);
+      console.log('📞 [DEBUG] DatabaseServiceInstance type:', typeof this.DatabaseServiceInstance);
+      console.log('📞 [DEBUG] DatabaseServiceInstance methods:', this.DatabaseServiceInstance ? Object.getOwnPropertyNames(Object.getPrototypeOf(this.DatabaseServiceInstance)) : 'N/A');
+      
+      // 📞 1. Ottieni le impostazioni complete dal database
+      const appSettings = await this.DatabaseServiceInstance.getSetting('appSettings', null);
+      console.log('📞 [DEBUG] appSettings dal database:', JSON.stringify(appSettings, null, 2));
+      
+      // 📞 2. Estrai le impostazioni di standby
+      const standbySettings = appSettings?.standbySettings;
+      console.log('📞 [DEBUG] standbySettings estratte:', JSON.stringify(standbySettings, null, 2));
+      
+      if (!standbySettings?.enabled) {
+        console.log('📞 Sistema reperibilità disabilitato nel database (enabled=false)');
+        return 0;
+      }
+      
+      if (!standbySettings?.standbyDays) {
+        console.log('📞 Nessun giorno di reperibilità configurato nel calendario (standbyDays mancante)');
+        return 0;
+      }
+      
+      const selectedDays = Object.keys(standbySettings.standbyDays).filter(date => 
+        standbySettings.standbyDays[date].selected
+      );
+      console.log('📞 [DEBUG] Giorni selezionati trovati:', selectedDays.length, selectedDays);
+      
+      if (selectedDays.length === 0) {
+        console.log('📞 Nessun giorno di reperibilità selezionato nel calendario');
+        return 0;
+      }
+
+      let totalScheduled = 0;
+      const now = new Date();
+
+      // Per ogni notifica configurata (oggi, domani, etc.)
+      for (const notification of settings.notifications) {
+        console.log('📞 [DEBUG] Processando notifica:', JSON.stringify(notification, null, 2));
+        
+        if (!notification.enabled || !notification.time) {
+          console.log('📞 [DEBUG] Notifica saltata: enabled=', notification.enabled, 'time=', notification.time);
+          continue;
+        }
+
+        const [hours, minutes] = notification.time.split(':').map(Number);
+        let scheduledForThisNotification = 0;
+
+        // Per ogni giorno di reperibilità
+        for (const standbyDateStr of selectedDays) {
+          const standbyDate = new Date(standbyDateStr);
+          
+          // Calcola la data di notifica in base a daysInAdvance
+          const notificationDate = new Date(standbyDate);
+          notificationDate.setDate(standbyDate.getDate() - (notification.daysInAdvance || 0));
+          notificationDate.setHours(hours, minutes, 0, 0);
+
+          // Solo notifiche future e nei prossimi 30 giorni
+          if (notificationDate <= now) {
+            console.log(`📞 [DEBUG] Notifica nel passato saltata: ${notificationDate.toLocaleString('it-IT')} <= ${now.toLocaleString('it-IT')}`);
+            continue;
+          }
+          if (notificationDate.getTime() - now.getTime() > 30 * 24 * 60 * 60 * 1000) {
+            console.log(`📞 [DEBUG] Notifica troppo lontana saltata: ${notificationDate.toLocaleString('it-IT')}`);
+            continue;
+          }
+
+          const timeDiff = notificationDate.getTime() - now.getTime();
+          
+          console.log(`📞 [NO FILTER] Programmando reperibilità (${notification.daysInAdvance || 0} giorni prima) per: ${notificationDate.toLocaleString('it-IT')} - Reperibilità: ${standbyDate.toLocaleDateString('it-IT')} (tra ${Math.round(timeDiff/1000/60)} min)`);
+          
+          await Notifications.scheduleNotificationAsync({
+            content: {
+              title: '📞 Promemoria Reperibilità',
+              body: notification.message || `Turno di reperibilità ${notification.daysInAdvance === 0 ? 'oggi' : 'domani'}`,
+              data: { 
+                type: 'standby_reminder',
+                standbyDate: standbyDateStr,
+                daysInAdvance: notification.daysInAdvance || 0,
+                timestamp: notificationDate.getTime()
+              },
+              sound: Platform.OS === 'android' ? 'default' : true,
+              priority: Platform.OS === 'android' ? 'high' : undefined,
+              color: '#FF9500',
+              categoryIdentifier: 'standby_reminder',
+              ...(Platform.OS === 'android' && { channelId: 'default' }),
+            },
+            trigger: {
+              type: 'date',
+              date: notificationDate,
+            },
+          });
+          
+          scheduledForThisNotification++;
+          totalScheduled++;
+        }
+
+        console.log(`📞 Notifica "${notification.message || 'Reperibilità'}" programmata per ${scheduledForThisNotification} giorni`);
+      }
+      
+      console.log(`📞 [DEBUG] Totale notifiche reperibilità programmate: ${totalScheduled}`);
+      return totalScheduled;
+      
+    } catch (error) {
+      console.error('❌ Errore programmazione promemoria reperibilità:', error);
       return 0;
     }
   }

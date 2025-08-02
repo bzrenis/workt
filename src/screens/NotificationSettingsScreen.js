@@ -10,6 +10,7 @@ import {
   Platform,
   SafeAreaView
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { StatusBar } from 'expo-status-bar';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -33,6 +34,75 @@ const NotificationSettingsScreen = ({ navigation }) => {
   const [showTimePicker, setShowTimePicker] = useState(false);
   const [timePickerField, setTimePickerField] = useState('');
   const [hasPermission, setHasPermission] = useState(false);
+
+  // Funzione per pulire dati corrotti delle notifiche
+  const cleanCorruptedNotificationData = async () => {
+    try {
+      const notificationData = await AsyncStorage.getItem('NOTIFICATION_SETTINGS');
+      if (notificationData) {
+        const parsed = JSON.parse(notificationData);
+        let needsUpdate = false;
+        
+        // Pulisce i dati di standby
+        if (parsed.standbyReminder || parsed.standbyReminders) {
+          const standbyData = parsed.standbyReminder || parsed.standbyReminders;
+          
+          if (standbyData.notifications && Array.isArray(standbyData.notifications)) {
+            standbyData.notifications = standbyData.notifications.map(notif => {
+              let cleanedNotif = { ...notif };
+              
+              // Correggi il typo messsage -> message
+              if (cleanedNotif.messsage && !cleanedNotif.message) {
+                cleanedNotif.message = cleanedNotif.messsage;
+                delete cleanedNotif.messsage;
+                needsUpdate = true;
+                console.log('✅ Corretto typo "messsage" -> "message"');
+              }
+              
+              // Assicurati che il tempo sia una stringa valida
+              if (!cleanedNotif.time || typeof cleanedNotif.time !== 'string') {
+                cleanedNotif.time = '08:00';
+                needsUpdate = true;
+                console.log('✅ Corretto tempo non valido -> "08:00"');
+              }
+              
+              // Assicurati che enabled sia boolean
+              if (typeof cleanedNotif.enabled !== 'boolean') {
+                cleanedNotif.enabled = true;
+                needsUpdate = true;
+              }
+              
+              // Assicurati che daysInAdvance sia numero
+              if (typeof cleanedNotif.daysInAdvance !== 'number') {
+                cleanedNotif.daysInAdvance = 0;
+                needsUpdate = true;
+              }
+              
+              return cleanedNotif;
+            });
+            
+            // Aggiorna i dati puliti
+            if (parsed.standbyReminder) {
+              parsed.standbyReminder.notifications = standbyData.notifications;
+            }
+            if (parsed.standbyReminders) {
+              parsed.standbyReminders.notifications = standbyData.notifications;
+            }
+          }
+        }
+        
+        if (needsUpdate) {
+          await AsyncStorage.setItem('NOTIFICATION_SETTINGS', JSON.stringify(parsed));
+          console.log('✅ Dati delle notifiche puliti e salvati');
+          return true;
+        }
+      }
+      return false;
+    } catch (error) {
+      console.error('❌ Errore nella pulizia dati notifiche:', error);
+      return false;
+    }
+  };
 
   // Carica le impostazioni al mount
   useEffect(() => {
@@ -70,7 +140,12 @@ const NotificationSettingsScreen = ({ navigation }) => {
 
   const loadSettings = async () => {
     try {
+      // Prima pulisci eventuali dati corrotti
+      await cleanCorruptedNotificationData();
+      
+      console.log('🔍 DEBUG - Iniziando caricamento impostazioni notifiche...');
       const loadedSettings = await NotificationService.getSettings();
+      console.log('🔍 DEBUG - Impostazioni caricate dal servizio:', JSON.stringify(loadedSettings, null, 2));
       
       // Verifica che loadedSettings sia un oggetto valido
       if (!loadedSettings || typeof loadedSettings !== 'object') {
@@ -88,6 +163,62 @@ const NotificationSettingsScreen = ({ navigation }) => {
           dailySummary: loadedSettings.dailySummary || { enabled: false, time: '21:00' },
           overtimeAlerts: loadedSettings.overtimeAlerts || { enabled: false }
         };
+        
+        console.log('🔍 DEBUG - standbyReminders prima dell\'inizializzazione:', JSON.stringify(normalizedSettings.standbyReminders, null, 2));
+        
+        // CORREZIONE FORMATO: gestisce sia il formato stringa che array
+        if (normalizedSettings.standbyReminders) {
+          // Se notifications è una stringa, convertila in array
+          if (typeof normalizedSettings.standbyReminders.notifications === 'string') {
+            console.log('🔧 CONVERSIONE: trovato formato stringa, converto in array');
+            const timeString = normalizedSettings.standbyReminders.notifications;
+            normalizedSettings.standbyReminders.notifications = [
+              {
+                daysInAdvance: 0,
+                enabled: true,
+                time: timeString,
+                message: 'Turno di reperibilità oggi'
+              },
+              {
+                daysInAdvance: 1,
+                enabled: true,
+                time: '20:00',
+                message: 'Turno di reperibilità domani'
+              }
+            ];
+            console.log('✅ Conversione completata:', JSON.stringify(normalizedSettings.standbyReminders.notifications, null, 2));
+          }
+        }
+        
+        // Assicurati che i promemoria di reperibilità abbiano le notifiche di default se vuoti
+        if (!normalizedSettings.standbyReminders.notifications || normalizedSettings.standbyReminders.notifications.length === 0) {
+          console.log('🔧 Inizializzo promemoria reperibilità di default');
+          normalizedSettings.standbyReminders.notifications = [
+            {
+              daysInAdvance: 0,
+              enabled: true,
+              time: '07:30',
+              message: 'Turno di reperibilità oggi'
+            },
+            {
+              daysInAdvance: 1,
+              enabled: true,
+              time: '20:00',
+              message: 'Turno di reperibilità domani'
+            }
+          ];
+          
+          // Salva immediatamente i promemoria inizializzati
+          try {
+            await AsyncStorage.setItem('standbyReminder', JSON.stringify(normalizedSettings.standbyReminders));
+            console.log('✅ Promemoria reperibilità salvati in AsyncStorage');
+          } catch (error) {
+            console.error('❌ Errore nel salvataggio promemoria:', error);
+          }
+        }
+        
+        console.log('🔍 Promemoria reperibilità caricati:', JSON.stringify(normalizedSettings.standbyReminders, null, 2));
+        console.log('🔍 DEBUG - normalizedSettings finali:', JSON.stringify(normalizedSettings, null, 2));
         
         // Usa le impostazioni normalizzate
         setSettings(normalizedSettings);
@@ -140,34 +271,33 @@ const NotificationSettingsScreen = ({ navigation }) => {
       const granted = await requestNotificationPermissions();
       if (!granted) return;
     }
-
-    const newSettings = { ...settings, enabled: value };
-    await saveSettings(newSettings);
+    setSettings({ ...settings, enabled: value });
   };
 
   const handleSectionToggle = (section, value) => {
     // Verifica che la sezione esista prima di aggiornarla
     if (!settings || !settings[section]) {
       console.error(`❌ Sezione ${section} non trovata nelle impostazioni`);
-      
       // Inizializza la sezione se non esiste
       const newSettings = { ...settings };
       newSettings[section] = { enabled: value };
-      saveSettings(newSettings);
+      setSettings(newSettings);
       return;
     }
-    
     const newSettings = {
       ...settings,
       [section]: { ...settings[section], enabled: value }
     };
-    saveSettings(newSettings);
+    setSettings(newSettings);
   };
 
   const handleTimeChange = (section, field, time) => {
+    console.log('🔍 DEBUG handleTimeChange chiamata:', { section, field, time });
     const timeString = `${time.getHours().toString().padStart(2, '0')}:${time.getMinutes().toString().padStart(2, '0')}`;
+    console.log('🔍 DEBUG timeString generata:', timeString);
     
     let newSettings = { ...settings };
+    console.log('🔍 DEBUG newSettings prima:', newSettings);
     
     // Verifica che la sezione esista
     if (!newSettings[section]) {
@@ -177,26 +307,34 @@ const NotificationSettingsScreen = ({ navigation }) => {
     
     // Gestione speciale per notifiche di reperibilità
     if (section === 'standbyReminders' && field.startsWith('notifications.')) {
+      console.log('🔍 DEBUG - Gestione notifiche reperibilità');
       const notificationIndex = parseInt(field.split('.')[1]);
+      console.log('🔍 DEBUG notificationIndex:', notificationIndex);
       
       // Verifica che notifications esista
       if (!newSettings.standbyReminders.notifications) {
+        console.log('🔍 DEBUG - Inizializzazione array notifications');
         newSettings.standbyReminders.notifications = [];
       }
       
       // Verifica che l'elemento all'indice esista
       if (!newSettings.standbyReminders.notifications[notificationIndex]) {
+        console.log('🔍 DEBUG - Inizializzazione notification elemento', notificationIndex);
         newSettings.standbyReminders.notifications[notificationIndex] = {};
       }
       
       newSettings.standbyReminders.notifications[notificationIndex].time = timeString;
+      console.log('🔍 DEBUG - Nuovo valore impostato:', newSettings.standbyReminders.notifications[notificationIndex]);
     } else {
+      console.log('🔍 DEBUG - Gestione normale');
       // Gestione normale
       newSettings[section] = { ...newSettings[section], [field]: timeString };
     }
     
-    saveSettings(newSettings);
+    console.log('🔍 DEBUG newSettings dopo:', newSettings);
+    setSettings(newSettings);
     setShowTimePicker(false);
+    console.log('🔍 DEBUG handleTimeChange completata');
   };
 
   const openTimePicker = (section, field) => {
@@ -211,11 +349,17 @@ const NotificationSettingsScreen = ({ navigation }) => {
   };
 
   const getCurrentTime = () => {
+    console.log(`🔍 DEBUG getCurrentTime chiamata per campo: ${timePickerField}`);
     if (!timePickerField) return new Date();
     
-    const [section, field] = timePickerField.split('.');
+    // Split per campi con più livelli come standbyReminders.notifications.0
+    const parts = timePickerField.split('.');
+    const section = parts[0];
+    const field = parts.slice(1).join('.');
     let timeString = '00:00'; // Default
     
+    console.log(`🔍 DEBUG split - section: "${section}", field: "${field}"`);
+
     try {
       // Verifica che la sezione esista
       if (!settings || !settings[section]) {
@@ -226,22 +370,28 @@ const NotificationSettingsScreen = ({ navigation }) => {
       if (section === 'standbyReminders' && field.startsWith('notifications.')) {
         // Caso speciale per standbyReminders.notifications.X
         const notificationIndex = parseInt(field.split('.')[1]);
+        console.log(`🔍 DEBUG - field: "${field}", notificationIndex: ${notificationIndex}`);
         
         if (settings.standbyReminders.notifications && 
             settings.standbyReminders.notifications[notificationIndex] &&
             settings.standbyReminders.notifications[notificationIndex].time) {
           timeString = settings.standbyReminders.notifications[notificationIndex].time;
+          console.log(`🔍 DEBUG - timeString from notification[${notificationIndex}]: ${timeString}`);
         }
       } else {
         // Caso normale section.field
         if (settings[section] && settings[section][field]) {
           timeString = settings[section][field];
+          console.log(`🔍 DEBUG getCurrentTime - section: ${section}, field: ${field}, timeString:`, timeString);
         }
       }
       
       // Assicurati che il formato sia corretto
-      if (!timeString || !timeString.includes(':')) {
-        console.warn(`⚠️ Formato orario non valido: ${timeString}`);
+      if (Array.isArray(timeString)) {
+        console.warn(`⚠️ Formato orario non valido: ricevuto array invece di stringa per ${timePickerField}:`, timeString);
+        timeString = '08:00';
+      } else if (!timeString || typeof timeString !== 'string' || !timeString.includes(':')) {
+        console.warn(`⚠️ Formato orario non valido:`, timeString);
         timeString = '08:00';
       }
       
@@ -379,7 +529,7 @@ const NotificationSettingsScreen = ({ navigation }) => {
                           ...normalizedSettings,
                           workReminders: { ...normalizedSettings.workReminders, weekendsEnabled: value }
                         };
-                        saveSettings(newSettings);
+                        setSettings(newSettings);
                       }}
                       trackColor={{ false: '#E0E0E0', true: '#C8E6C9' }}
                       thumbColor={normalizedSettings.workReminders.weekendsEnabled ? '#4CAF50' : '#f4f3f4'}
@@ -421,7 +571,7 @@ const NotificationSettingsScreen = ({ navigation }) => {
                           ...normalizedSettings,
                           timeEntryReminders: { ...normalizedSettings.timeEntryReminders, weekendsEnabled: value }
                         };
-                        saveSettings(newSettings);
+                        setSettings(newSettings);
                       }}
                       trackColor={{ false: '#E0E0E0', true: '#C8E6C9' }}
                       thumbColor={normalizedSettings.timeEntryReminders.weekendsEnabled ? '#4CAF50' : '#f4f3f4'}
@@ -431,59 +581,7 @@ const NotificationSettingsScreen = ({ navigation }) => {
               )}
             </View>
 
-            {/* Riepilogo giornaliero */}
-            {/* Riepilogo giornaliero */}
-            <View style={styles.sectionCard}>
-              <View style={styles.sectionHeader}>
-                <MaterialCommunityIcons name="chart-line" size={24} color="#2196F3" />
-                <Text style={styles.sectionTitle}>Riepilogo Giornaliero</Text>
-                <Switch
-                  value={normalizedSettings.dailySummary && normalizedSettings.dailySummary.enabled}
-                  onValueChange={(value) => handleSectionToggle('dailySummary', value)}
-                  trackColor={{ false: '#E0E0E0', true: '#C8E6C9' }}
-                  thumbColor={(normalizedSettings.dailySummary && normalizedSettings.dailySummary.enabled) ? '#4CAF50' : '#f4f3f4'}
-                />
-              </View>
-              
-              {normalizedSettings.dailySummary && normalizedSettings.dailySummary.enabled && (
-                <View style={styles.sectionContent}>
-                  <TouchableOpacity 
-                    style={styles.timeSelector}
-                    onPress={() => openTimePicker('dailySummary', 'time')}
-                  >
-                    <Text style={styles.timeSelectorLabel}>Orario promemoria</Text>
-                    <Text style={styles.timeSelectorValue}>{normalizedSettings.dailySummary.time}</Text>
-                  </TouchableOpacity>
-                  <Text style={styles.optionDescription}>
-                    Ricevi un riepilogo dei tuoi guadagni giornalieri
-                  </Text>
-                </View>
-              )}
-            </View>
-
-            {/* Avvisi straordinario */}
-            <View style={styles.sectionCard}>
-              <View style={styles.sectionHeader}>
-                <MaterialCommunityIcons name="alert-circle" size={24} color="#F44336" />
-                <Text style={styles.sectionTitle}>Avvisi Straordinario</Text>
-                <Switch
-                  value={normalizedSettings.overtimeAlerts && normalizedSettings.overtimeAlerts.enabled}
-                  onValueChange={(value) => handleSectionToggle('overtimeAlerts', value)}
-                  trackColor={{ false: '#E0E0E0', true: '#C8E6C9' }}
-                  thumbColor={(normalizedSettings.overtimeAlerts && normalizedSettings.overtimeAlerts.enabled) ? '#4CAF50' : '#f4f3f4'}
-                />
-              </View>
-              
-              {normalizedSettings.overtimeAlerts && normalizedSettings.overtimeAlerts.enabled && (
-                <View style={styles.sectionContent}>
-                  <Text style={styles.optionDescription}>
-                    Ricevi un avviso quando superi le 8 ore giornaliere
-                  </Text>
-                </View>
-              )}
-            </View>
-
-            {/* Promemoria reperibilità */}
+            {/* Promemoria reperibilità - sempre visibile */}
             <View style={styles.sectionCard}>
               <View style={styles.sectionHeader}>
                 <MaterialCommunityIcons name="phone-alert" size={24} color="#9C27B0" />
@@ -495,111 +593,132 @@ const NotificationSettingsScreen = ({ navigation }) => {
                   thumbColor={(normalizedSettings.standbyReminders && normalizedSettings.standbyReminders.enabled) ? '#4CAF50' : '#f4f3f4'}
                 />
               </View>
-              
-              {normalizedSettings.standbyReminders && normalizedSettings.standbyReminders.enabled && (
-                <View style={styles.sectionContent}>
-                  <Text style={styles.optionDescription}>
-                    Ricevi promemoria basati sul calendario di reperibilità
-                  </Text>
-                  
-                  {/* Lista notifiche reperibilità configurabili */}
-                  {normalizedSettings.standbyReminders.notifications && normalizedSettings.standbyReminders.notifications.map((notification, index) => (
-                    <View key={index} style={styles.standbyNotificationItem}>
-                      <View style={styles.standbyNotificationHeader}>
-                        <Text style={styles.standbyNotificationTitle}>
-                          {notification.daysInAdvance === 0 ? 'Giorno stesso' :
-                           notification.daysInAdvance === 1 ? 'Il giorno prima' :
-                           `${notification.daysInAdvance} giorni prima`}
-                        </Text>
-                        <Switch
-                          value={notification.enabled}
-                          onValueChange={(value) => {
-                            const newSettings = { ...normalizedSettings };
-                            if (!newSettings.standbyReminders.notifications) {
-                              newSettings.standbyReminders.notifications = [];
+              <View style={styles.sectionContent}>
+                <Text style={styles.optionDescription}>
+                  Ricevi promemoria basati sul calendario di reperibilità
+                </Text>
+                {/* Se abilitato, mostra notifiche configurabili o pulsante per aggiungerle */}
+                {normalizedSettings.standbyReminders && normalizedSettings.standbyReminders.enabled && (
+                  <>
+                    {(!normalizedSettings.standbyReminders.notifications || normalizedSettings.standbyReminders.notifications.length === 0) ? (
+                      <TouchableOpacity
+                        style={[
+                          {
+                            backgroundColor: theme.colors.surface,
+                            borderRadius: 10,
+                            paddingVertical: 12,
+                            alignItems: 'center',
+                            marginBottom: 12,
+                            flexDirection: 'row',
+                            justifyContent: 'center',
+                            borderWidth: 1.5,
+                            borderColor: theme.colors.primary,
+                            shadowColor: theme.dark ? '#000' : theme.colors.primary,
+                            shadowOffset: { width: 0, height: 2 },
+                            shadowOpacity: 0.12,
+                            shadowRadius: 4,
+                            elevation: 2
+                          }
+                        ]}
+                        onPress={() => {
+                          // Aggiungi "Giorno stesso" e "Il giorno prima" se non esistono
+                          const defaultNotifications = [
+                            {
+                              daysInAdvance: 0,
+                              enabled: true,
+                              time: '07:30',
+                              message: 'Turno di reperibilità oggi',
+                            },
+                            {
+                              daysInAdvance: 1,
+                              enabled: true,
+                              time: '20:00',
+                              message: 'Turno di reperibilità domani',
                             }
-                            if (!newSettings.standbyReminders.notifications[index]) {
-                              newSettings.standbyReminders.notifications[index] = {};
-                            }
-                            newSettings.standbyReminders.notifications[index].enabled = value;
-                            saveSettings(newSettings);
-                          }}
-                          trackColor={{ false: '#E0E0E0', true: '#E1BEE7' }}
-                          thumbColor={notification.enabled ? '#9C27B0' : '#f4f3f4'}
-                          style={{ transform: [{ scaleX: 0.8 }, { scaleY: 0.8 }] }}
+                          ];
+                          const newSettings = { ...normalizedSettings };
+                          newSettings.standbyReminders = {
+                            ...newSettings.standbyReminders,
+                            notifications: defaultNotifications
+                          };
+                          setSettings(newSettings);
+                        }}
+                      >
+                        <MaterialCommunityIcons
+                          name="plus-circle"
+                          size={22}
+                          color={theme.dark ? theme.colors.accent || '#BB86FC' : theme.colors.primary}
+                          style={{marginRight: 8}}
                         />
-                      </View>
-                      
-                      {notification.enabled && (
-                        <View style={styles.standbyNotificationContent}>
-                          <TouchableOpacity 
-                            style={styles.timeSelector}
-                            onPress={() => openStandbyTimePicker(index)}
-                          >
-                            <Text style={styles.timeSelectorLabel}>Orario</Text>
-                            <Text style={styles.timeSelectorValue}>{notification.time}</Text>
-                          </TouchableOpacity>
-                          <Text style={styles.standbyNotificationMessage}>
-                            "{notification.message}"
-                          </Text>
+                        <Text
+                          style={{
+                            color: theme.dark ? (theme.colors.accentText || '#fff') : theme.colors.primary,
+                            fontWeight: 'bold',
+                            fontSize: 16
+                          }}
+                        >
+                          Aggiungi promemoria "Giorno stesso" e "Giorno prima"
+                        </Text>
+                      </TouchableOpacity>
+                    ) : (
+                      Array.isArray(normalizedSettings.standbyReminders.notifications) ? 
+                      normalizedSettings.standbyReminders.notifications.map((notification, index) => (
+                        <View key={index} style={styles.standbyNotificationItem}>
+                          <View style={styles.standbyNotificationHeader}>
+                            <Text style={styles.standbyNotificationTitle}>
+                              {notification.daysInAdvance === 0 ? 'Giorno stesso' :
+                               notification.daysInAdvance === 1 ? 'Il giorno prima' :
+                               `${notification.daysInAdvance} giorni prima`}
+                            </Text>
+                            <Switch
+                              value={notification.enabled}
+                              onValueChange={(value) => {
+                                const newSettings = { ...normalizedSettings };
+                                if (!newSettings.standbyReminders.notifications) {
+                                  newSettings.standbyReminders.notifications = [];
+                                }
+                                if (!newSettings.standbyReminders.notifications[index]) {
+                                  newSettings.standbyReminders.notifications[index] = {};
+                                }
+                                newSettings.standbyReminders.notifications[index].enabled = value;
+                                setSettings(newSettings);
+                              }}
+                              trackColor={{ false: '#E0E0E0', true: '#E1BEE7' }}
+                              thumbColor={notification.enabled ? '#9C27B0' : '#f4f3f4'}
+                              style={{ transform: [{ scaleX: 0.8 }, { scaleY: 0.8 }] }}
+                            />
+                          </View>
+                          {notification.enabled && (
+                            <View style={styles.standbyNotificationContent}>
+                              <TouchableOpacity 
+                                style={styles.timeSelector}
+                                onPress={() => openStandbyTimePicker(index)}
+                              >
+                                <Text style={styles.timeSelectorLabel}>Orario</Text>
+                                <Text style={styles.timeSelectorValue}>{notification.time}</Text>
+                              </TouchableOpacity>
+                              <Text style={styles.standbyNotificationMessage}>
+                                "{notification.message}"
+                              </Text>
+                            </View>
+                          )}
                         </View>
-                      )}
-                    </View>
-                  ))}
-                </View>
-              )}
+                      )) : (
+                        <Text style={styles.optionDescription}>
+                          Nessun promemoria configurato
+                        </Text>
+                      )
+                    )}
+                  </>
+                )}
+              </View>
             </View>
           </>
         )}
 
-        {/* Pulsante Test Immediato */}
-        {normalizedSettings.enabled && (
-          <View style={styles.sectionCard}>
-            <View style={styles.sectionHeader}>
-              <MaterialCommunityIcons name="test-tube" size={24} color="#FF5722" />
-              <Text style={styles.sectionTitle}>Test Sistema</Text>
-            </View>
-            
-            <View style={styles.sectionContent}>
-              <TouchableOpacity 
-                style={styles.testButton}
-                onPress={async () => {
-                  try {
-                    Alert.alert(
-                      '🧪 Test Notifiche',
-                      'Vuoi testare il sistema di notifiche aggiornato?\n\nRiceverai una notifica di test tra 5 secondi.',
-                      [
-                        { text: 'Annulla', style: 'cancel' },
-                        { 
-                          text: 'Testa', 
-                          onPress: async () => {
-                            // Test immediato
-                            await NotificationService.scheduleTestNotification();
-                            Alert.alert('✅ Test Avviato', 'Notifica di test programmata per tra 5 secondi!');
-                          }
-                        }
-                      ]
-                    );
-                  } catch (error) {
-                    console.error('❌ Errore test notifiche:', error);
-                    Alert.alert('❌ Errore', 'Impossibile avviare il test.');
-                  }
-                }}
-              >
-                <MaterialCommunityIcons name="play-circle" size={20} color="#fff" />
-                <Text style={styles.testButtonText}>Testa Notifiche Ora</Text>
-              </TouchableOpacity>
-              
-              <Text style={styles.testDescription}>
-                Invia una notifica di test per verificare che le modifiche funzionino correttamente
-              </Text>
-            </View>
-          </View>
-        )}
-
         {/* Info e suggerimenti */}
         <View style={styles.infoCard}>
-          <MaterialCommunityIcons name="information" size={24} color="#2196F3" />
+          <MaterialCommunityIcons name="information" size={24} color={theme.dark ? theme.colors.text : '#2196F3'} />
           <Text style={styles.infoTitle}>Suggerimenti</Text>
           <Text style={styles.infoText}>
             • Le notifiche ti aiutano a mantenere la costanza nell'inserimento degli orari{'\n'}
@@ -611,6 +730,30 @@ const NotificationSettingsScreen = ({ navigation }) => {
         </View>
       </ScrollView>
 
+      {/* Pulsante Salva Impostazioni */}
+      {normalizedSettings.enabled && (
+        <View style={{padding: 16, backgroundColor: 'transparent'}}>
+          <TouchableOpacity
+            style={{
+              backgroundColor: theme.dark ? '#0A84FF' : '#2196F3',
+              borderRadius: 8,
+              paddingVertical: 14,
+              alignItems: 'center',
+              marginBottom: 8,
+              shadowColor: theme.dark ? '#000' : '#2196F3',
+              shadowOffset: { width: 0, height: 2 },
+              shadowOpacity: theme.dark ? 0.3 : 0.2,
+              shadowRadius: 4,
+              elevation: 2,
+            }}
+            onPress={() => saveSettings(settings)}
+          >
+            <MaterialCommunityIcons name="content-save" size={20} color="#fff" />
+            <Text style={{color: '#fff', fontWeight: 'bold', fontSize: 16, marginTop: 4}}>Salva Impostazioni</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
       {/* Time Picker */}
       {showTimePicker && (
         <DateTimePicker
@@ -619,8 +762,12 @@ const NotificationSettingsScreen = ({ navigation }) => {
           is24Hour={true}
           display={Platform.OS === 'ios' ? 'spinner' : 'default'}
           onChange={(event, selectedTime) => {
+            console.log('🔍 DEBUG DateTimePicker onChange:', { timePickerField, selectedTime });
             if (selectedTime && timePickerField) {
-              const [section, field] = timePickerField.split('.');
+              const parts = timePickerField.split('.');
+              const section = parts[0];
+              const field = parts.slice(1).join('.');
+              console.log('🔍 DEBUG DateTimePicker - section:', section, 'field:', field);
               handleTimeChange(section, field, selectedTime);
             } else {
               setShowTimePicker(false);
@@ -658,9 +805,9 @@ const createStyles = (theme) => StyleSheet.create({
     marginBottom: 16,
     alignItems: 'center',
     elevation: 2,
-    shadowColor: '#000',
+    shadowColor: theme.dark ? '#000' : '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
+    shadowOpacity: theme.dark ? 0.3 : 0.1,
     shadowRadius: 4,
   },
   headerTitle: {
@@ -682,9 +829,9 @@ const createStyles = (theme) => StyleSheet.create({
     padding: 16,
     marginBottom: 12,
     elevation: 2,
-    shadowColor: '#000',
+    shadowColor: theme.dark ? '#000' : '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
+    shadowOpacity: theme.dark ? 0.3 : 0.1,
     shadowRadius: 4,
   },
   mainToggleContainer: {
@@ -714,12 +861,12 @@ const createStyles = (theme) => StyleSheet.create({
     padding: 12,
     marginTop: 12,
     borderWidth: 1,
-    borderColor: '#007AFF',
+    borderColor: theme.dark ? '#0A84FF' : '#007AFF',
   },
   permissionButtonText: {
     marginLeft: 8,
     fontSize: 16,
-    color: '#007AFF',
+    color: theme.dark ? '#0A84FF' : '#007AFF',
     fontWeight: '500',
   },
   sectionHeader: {
@@ -742,7 +889,7 @@ const createStyles = (theme) => StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    backgroundColor: theme.dark ? 'rgba(255, 255, 255, 0.1)' : '#F5F5F5',
+    backgroundColor: theme.dark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)',
     borderRadius: 8,
     padding: 12,
     marginBottom: 12,
@@ -756,7 +903,7 @@ const createStyles = (theme) => StyleSheet.create({
   timeSelectorValue: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#007AFF',
+    color: theme.dark ? '#0A84FF' : '#007AFF',
   },
   optionRow: {
     flexDirection: 'row',
@@ -774,25 +921,27 @@ const createStyles = (theme) => StyleSheet.create({
     fontStyle: 'italic',
   },
   infoCard: {
-    backgroundColor: theme.dark ? '#2C2C2E' : '#E8F5E9',
+    backgroundColor: theme.dark ? theme.colors.surface : '#E8F5E9',
     borderRadius: 12,
     padding: 16,
     marginBottom: 32,
+    borderWidth: 1,
+    borderColor: theme.dark ? theme.colors.border : '#C8E6C9',
   },
   infoTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: theme.dark ? '#FFFFFF' : '#2E7D32',
+    color: theme.dark ? theme.colors.text : '#2E7D32',
     marginLeft: 8,
     marginBottom: 8,
   },
   infoText: {
     fontSize: 14,
-    color: theme.dark ? '#FFFFFF' : '#2E7D32',
+    color: theme.dark ? theme.colors.textSecondary : '#2E7D32',
     lineHeight: 20,
   },
   standbyNotificationItem: {
-    backgroundColor: theme.dark ? 'rgba(255, 255, 255, 0.05)' : '#F8F9FA',
+    backgroundColor: theme.dark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.03)',
     borderRadius: 8,
     padding: 12,
     marginBottom: 8,
@@ -808,7 +957,7 @@ const createStyles = (theme) => StyleSheet.create({
   standbyNotificationTitle: {
     fontSize: 14,
     fontWeight: '600',
-    color: theme.dark ? '#FFFFFF' : '#333333',
+    color: theme.colors.text,
     flex: 1,
   },
   standbyNotificationContent: {
@@ -816,31 +965,9 @@ const createStyles = (theme) => StyleSheet.create({
   },
   standbyNotificationMessage: {
     fontSize: 12,
-    color: theme.dark ? '#FFFFFF' : '#666666',
+    color: theme.colors.textSecondary,
     fontStyle: 'italic',
     marginTop: 4,
-  },
-  testButton: {
-    backgroundColor: '#FF5722',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 8,
-    marginBottom: 8,
-  },
-  testButtonText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '600',
-    marginLeft: 8,
-  },
-  testDescription: {
-    fontSize: 12,
-    color: theme.colors.textSecondary,
-    textAlign: 'center',
-    fontStyle: 'italic',
   },
 });
 

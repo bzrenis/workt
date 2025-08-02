@@ -2,7 +2,7 @@
   "expo": {
     "name": "WorkT - Tracker Ore Lavoro",
     "slug": "workt",
-    "version": "1.0.0",
+    "version": "1.0.4",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -26,7 +26,8 @@
           "background-fetch",
           "remote-notification"
         ],
-        "NSUserNotificationsUsageDescription": "Questa app utilizza le notifiche per ricordarti di inserire gli orari di lavoro e per avvisarti dei turni di reperibilità."
+        "NSUserNotificationsUsageDescription": "Questa app utilizza le notifiche per ricordarti di inserire gli orari di lavoro e per avvisarti dei turni di reperibilità.",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {

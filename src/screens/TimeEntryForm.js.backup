@@ -23,7 +23,10 @@ import DatabaseService from '../services/DatabaseService';
 import { useCalculationService } from '../hooks';
 import { createWorkEntryFromData } from '../utils/earningsHelper';
 import HolidayService from '../services/HolidayService';
-import NotificationService from '../services/NotificationService';
+import NotificationService from '../services/FixedNotificationService';
+import * as Print from 'expo-print';
+import * as Sharing from 'expo-sharing';
+import * as FileSystem from 'expo-file-system';
 
 const { width } = Dimensions.get('window');
 
@@ -243,7 +246,7 @@ const EarningsSummary = ({ form, settings, isDateInStandbyCalendar, isStandbyCal
       completamentoGiornata: form.completamentoGiornata || 'nessuno', // Modalità di completamento giornata
       // Nuovi campi per gestione giorni fissi
       isFixedDay: isFixedDay,
-      fixedEarnings: form.fixedEarnings || (isFixedDay ? (settings?.contract?.dailyRate || 107.69) : 0),
+      fixedEarnings: form.fixedEarnings || (isFixedDay ? (settings?.contract?.dailyRate || 109.19) : 0),
       dayType: form.dayType || dayType
     };
   }, [form, dayType]);
@@ -290,7 +293,9 @@ const EarningsSummary = ({ form, settings, isDateInStandbyCalendar, isStandbyCal
       mealAllowances: {
         lunch: { voucherAmount: 5.29 },
         dinner: { voucherAmount: 5.29 }
-      }
+      },
+      // 🔥 FORZA refresh per impostazioni giorni speciali
+      specialDayTravelSettings: settings?.specialDayTravelSettings || null
     };
     
     // Merge settings (safe)
@@ -300,7 +305,9 @@ const EarningsSummary = ({ form, settings, isDateInStandbyCalendar, isStandbyCal
       contract: { ...defaultSettings.contract, ...(settings?.contract || {}) },
       standbySettings: { ...defaultSettings.standbySettings, ...(settings?.standbySettings || {}) },
       mealAllowances: { ...defaultSettings.mealAllowances, ...(settings?.mealAllowances || {}) },
-      travelHoursSetting: settings?.travelHoursSetting || 'MULTI_SHIFT_OPTIMIZED' // Modalità viaggio predefinita
+      travelHoursSetting: settings?.travelHoursSetting || 'MULTI_SHIFT_OPTIMIZED', // Modalità viaggio predefinita
+      // 🔥 INCLUDI esplicitamente le impostazioni giorni speciali
+      specialDayTravelSettings: settings?.specialDayTravelSettings || defaultSettings.specialDayTravelSettings
     };
     
     // Se è un giorno di ferie/malattia/riposo, calcola la retribuzione fissa
@@ -323,6 +330,15 @@ const EarningsSummary = ({ form, settings, isDateInStandbyCalendar, isStandbyCal
       // Usa async/await per il nuovo sistema
       const calculateAsync = async () => {
         try {
+          // 🔍 DEBUG: Verifica che le impostazioni giorni speciali siano presenti
+          console.log('🔍 EarningsSummary - DEBUG impostazioni:', {
+            hasSettings: !!settings,
+            hasSpecialDaySettings: !!settings?.specialDayTravelSettings,
+            specialDaySettings: settings?.specialDayTravelSettings,
+            safeSpecialSettings: safeSettings?.specialDayTravelSettings,
+            workEntryDate: workEntry.date
+          });
+          
           const result = await calculationService.calculateEarningsBreakdown(workEntry, safeSettings);
           setBreakdown(result);
           
@@ -387,7 +403,7 @@ const EarningsSummary = ({ form, settings, isDateInStandbyCalendar, isStandbyCal
       
       calculateAsync();
     }
-  }, [workEntry, settings]);
+  }, [workEntry, settings, settings?.specialDayTravelSettings]);
   
   // Debug per indennità reperibilità
   useEffect(() => {
@@ -533,7 +549,7 @@ const EarningsSummary = ({ form, settings, isDateInStandbyCalendar, isStandbyCal
               <Text style={styles.breakdownLabel}>Retribuzione CCNL</Text>
               <Text style={styles.breakdownValue}>{formatSafeAmount(breakdown?.fixedEarnings)}</Text>
             </View>
-            <Text style={styles.rateCalc}>
+            <Text style={styles.breakdownDetail}>
               Retribuzione giornaliera secondo contratto CCNL Metalmeccanico PMI Level 5
             </Text>
             <Text style={styles.breakdownDetail}>
@@ -573,6 +589,29 @@ const EarningsSummary = ({ form, settings, isDateInStandbyCalendar, isStandbyCal
               <Text style={styles.breakdownDetail}>
                 Calcolo automatico basato su fasce orarie personalizzate secondo CCNL
               </Text>
+
+              {/* Prime 8 ore cronologiche per sistema multi-fascia */}
+              <View style={[styles.breakdownItem, { marginLeft: 10, marginTop: 8, backgroundColor: '#f8f9fa', padding: 8, borderRadius: 4 }]}>
+                <View style={styles.breakdownRow}>
+                  <Text style={[styles.breakdownLabel, { fontWeight: 'bold' }]}>Prime 8 ore cronologiche</Text>
+                  <Text style={[styles.breakdownValue, { color: '#1976d2' }]}>
+                    {formatSafeHours(Math.min(8, (breakdown.ordinary?.hours?.lavoro_giornaliera || 0) + (breakdown.ordinary?.hours?.viaggio_giornaliera || 0)))}
+                  </Text>
+                </View>
+                <Text style={styles.breakdownDetail}>
+                  {(() => {
+                    // Usa sempre il fallback semplice per chiarezza
+                    let details = [];
+                    if (breakdown.ordinary?.hours?.lavoro_giornaliera > 0) {
+                      details.push(`Lavoro ${formatSafeHours(breakdown.ordinary.hours.lavoro_giornaliera)}`);
+                    }
+                    if (breakdown.ordinary?.hours?.viaggio_giornaliera > 0) {
+                      details.push(`Viaggio ${formatSafeHours(breakdown.ordinary.hours.viaggio_giornaliera)}`);
+                    }
+                    return details.length > 0 ? details.join(' + ') : 'Prime 8 ore lavorative';
+                  })()}
+                </Text>
+              </View>
               
               {/* Dettaglio fasce orarie */}
               {breakdown.details.hourlyRatesBreakdown.map((fascia, index) => (
@@ -596,7 +635,7 @@ const EarningsSummary = ({ form, settings, isDateInStandbyCalendar, isStandbyCal
                       {formatSafeHours(fascia.hours)}
                     </Text>
                   </View>
-                  <Text style={styles.rateCalc}>
+                  <Text style={styles.breakdownDetail}>
                     €{fascia.hourlyRate?.toFixed(2).replace('.', ',')} x {formatSafeHours(fascia.hours)} = €{fascia.earnings?.toFixed(2).replace('.', ',')}
                     {fascia.rate !== 1.0 && ` (${Math.round((fascia.rate - 1) * 100)}% maggiorazione)`}
                   </Text>
@@ -639,8 +678,18 @@ const EarningsSummary = ({ form, settings, isDateInStandbyCalendar, isStandbyCal
                       €{breakdown.details.dailyRateBreakdown.dailyRate.toFixed(2).replace('.', ',')}
                     </Text>
                   </View>
-                  <Text style={styles.rateCalc}>
-                    Retribuzione giornaliera standard secondo CCNL
+                  <Text style={styles.breakdownDetail}>
+                    {(() => {
+                      // Usa sempre il fallback semplice per chiarezza
+                      let details = [];
+                      if (breakdown.ordinary?.hours?.lavoro_giornaliera > 0) {
+                        details.push(`Lavoro ${formatSafeHours(breakdown.ordinary.hours.lavoro_giornaliera)}`);
+                      }
+                      if (breakdown.ordinary?.hours?.viaggio_giornaliera > 0) {
+                        details.push(`Viaggio ${formatSafeHours(breakdown.ordinary.hours.viaggio_giornaliera)}`);
+                      }
+                      return details.length > 0 ? details.join(' + ') : 'Prime 8 ore lavorative';
+                    })()}
                   </Text>
                 </View>
               )}
@@ -680,7 +729,7 @@ const EarningsSummary = ({ form, settings, isDateInStandbyCalendar, isStandbyCal
                       {regular.breakdown && regular.breakdown.length > 0 ? (
                         <View style={{ marginTop: 4 }}>
                           {regular.breakdown.map((subItem, subIndex) => (
-                            <Text key={subIndex} style={[styles.rateCalc, { fontSize: 11, marginLeft: 20, marginTop: 2 }]}>
+                            <Text key={subIndex} style={[styles.breakdownDetail, { fontSize: 11, marginLeft: 20, marginTop: 2 }]}>
                               {subItem.type}: {formatSafeHours(subItem.hours)} {subItem.rate > 0 ? 
                                 `(+${Math.round(subItem.rate * 100)}%) = €${subItem.amount.toFixed(2).replace('.', ',')}` :
                                 '(nessun supplemento)'
@@ -690,7 +739,7 @@ const EarningsSummary = ({ form, settings, isDateInStandbyCalendar, isStandbyCal
                         </View>
                       ) : (
                         /* Struttura legacy */
-                        <Text style={styles.rateCalc}>
+                        <Text style={styles.breakdownDetail}>
                           {regular.timeRange || regular.period} • {regular.supplementAmount > 0 ? 
                             `Supplemento: €${regular.supplementAmount.toFixed(2).replace('.', ',')} (+${Math.round(regular.supplement * 100)}%)` :
                             'Nessun supplemento (fascia diurna)'
@@ -709,6 +758,9 @@ const EarningsSummary = ({ form, settings, isDateInStandbyCalendar, isStandbyCal
                           +€{breakdown.details.dailyRateBreakdown.supplements.toFixed(2).replace('.', ',')}
                         </Text>
                       </View>
+                      <Text style={styles.breakdownDetail}>
+                        Supplementi aggiuntivi alle prime 8 ore lavorative
+                      </Text>
                     </View>
                   )}
                 </>
@@ -753,7 +805,7 @@ const EarningsSummary = ({ form, settings, isDateInStandbyCalendar, isStandbyCal
                       {/* Breakdown per fascia */}
                       {overtime.breakdown && overtime.breakdown.length > 0 ? (
                         overtime.breakdown.map((sub, subIdx) => (
-                          <Text key={subIdx} style={[styles.rateCalc, { fontSize: 11, marginLeft: 20, marginTop: 2 }]}> 
+                          <Text key={subIdx} style={[styles.breakdownDetail, { fontSize: 11, marginLeft: 20, marginTop: 2 }]}> 
                             {sub.type}: {formatSafeHours(sub.hours)} {sub.percent ? `${sub.percent}` : '--'}
                             {sub.details && (sub.details.basePercent || sub.details.eveningPercent || sub.details.nightPercent) ?
                               ` = ${sub.percent} (${[sub.details.basePercent, sub.details.eveningPercent, sub.details.nightPercent].filter(Boolean).join(' + ')})` :
@@ -763,7 +815,7 @@ const EarningsSummary = ({ form, settings, isDateInStandbyCalendar, isStandbyCal
                           </Text>
                         ))
                       ) : (
-                        <Text style={styles.rateCalc}>
+                        <Text style={styles.breakdownDetail}>
                           {overtime.timeRange} • €{Number.isFinite(overtime.hourlyRate) ? overtime.hourlyRate.toFixed(2).replace('.', ',') : '--'} x {formatSafeHours(overtime.hours)} = {Number.isFinite(overtime.earnings) ? `€${overtime.earnings.toFixed(2).replace('.', ',')}` : '0,00 €'}
                           {' '}(+{Number.isFinite(overtime.rate) ? Math.round((overtime.rate - 1) * 100) : '--'}% CCNL)
                         </Text>
@@ -799,10 +851,6 @@ const EarningsSummary = ({ form, settings, isDateInStandbyCalendar, isStandbyCal
                       {formatSafeHours(breakdown.details.dailyRateBreakdown.overtimeHours)}
                     </Text>
                   </View>
-                  <Text style={styles.rateCalc}>
-                    €{breakdown.details.dailyRateBreakdown.totalOvertimeEarnings?.toFixed(2).replace('.', ',')} 
-                    {' '}(maggiorazioni CCNL applicate)
-                  </Text>
                 </View>
               )}
 
@@ -816,10 +864,12 @@ const EarningsSummary = ({ form, settings, isDateInStandbyCalendar, isStandbyCal
                       <Text style={styles.breakdownLabel}>{travel.type}</Text>
                       <Text style={styles.breakdownValue}>{formatSafeHours(travel.hours)}</Text>
                     </View>
-                    <Text style={styles.rateCalc}>
-                      €{travel.hourlyRate?.toFixed(2).replace('.', ',')} x {formatSafeHours(travel.hours)} = €{travel.amount?.toFixed(2).replace('.', ',')}
-                      {travel.rate > 0 ? ` (${Math.round(travel.rate * 100)}% tariffa)` : ''}
-                    </Text>
+                    {travel.hours > 0 && (
+                      <Text style={styles.breakdownDetail}>
+                        €{(settings.contract?.hourlyRate || 16.41).toFixed(2).replace('.', ',')} × {travel.hours.toFixed(2).replace('.', ',') || '0,00'}h 
+                        {' '}× {Math.round((settings.travelCompensationRate || 1.0) * 100)}% = €{((settings.contract?.hourlyRate || 16.41) * travel.hours * (settings.travelCompensationRate || 1.0)).toFixed(2).replace('.', ',')}
+                      </Text>
+                    )}
                   </View>
                 ))}
                 {breakdown.details.dailyRateBreakdown.travelEarnings > 0 && (
@@ -857,23 +907,21 @@ const EarningsSummary = ({ form, settings, isDateInStandbyCalendar, isStandbyCal
                     (breakdown?.ordinary?.hours?.viaggio_giornaliera || 0)
                   )}</Text>
                 </View>
-                {breakdown?.ordinary?.earnings?.giornaliera > 0 && (
-                  <Text style={styles.rateCalc}>
-                    {(() => {
-                      const totalOrdinaryHours =
-                        (breakdown?.ordinary?.hours?.lavoro_giornaliera || 0) +
-                        (breakdown?.ordinary?.hours?.viaggio_giornaliera || 0);
-                      const standardWorkDayHours = 8;
-                      const dailyRate = settings.contract?.dailyRate || 109.19;
-                      if (totalOrdinaryHours >= standardWorkDayHours) {
-                        return `${dailyRate.toFixed(2).replace('.', ',')} € x 1 giorno = ${breakdown?.ordinary?.earnings?.giornaliera.toFixed(2).replace('.', ',')} €`;
-                      } else {
-                        const percentage = (totalOrdinaryHours / standardWorkDayHours * 100).toFixed(0);
-                        return `${dailyRate.toFixed(2).replace('.', ',')} € x ${percentage}% (${totalOrdinaryHours.toFixed(2).replace('.', ',')}h / 8h) = ${breakdown?.ordinary?.earnings?.giornaliera.toFixed(2).replace('.', ',')} €`;
-                      }
-                    })()}
-                  </Text>
-                )}
+                <Text style={styles.breakdownDetail}>
+                  {(() => {
+                    const totalOrdinaryHours =
+                      (breakdown?.ordinary?.hours?.lavoro_giornaliera || 0) +
+                      (breakdown?.ordinary?.hours?.viaggio_giornaliera || 0);
+                    const standardWorkDayHours = 8;
+                    const dailyRate = settings.contract?.dailyRate || 109.19;
+                    if (totalOrdinaryHours >= standardWorkDayHours) {
+                      return `${dailyRate.toFixed(2).replace('.', ',')} € x 1 giorno = ${breakdown?.ordinary?.earnings?.giornaliera.toFixed(2).replace('.', ',')} €`;
+                    } else {
+                      const percentage = (totalOrdinaryHours / standardWorkDayHours * 100).toFixed(0);
+                      return `${dailyRate.toFixed(2).replace('.', ',')} € x ${percentage}% (${totalOrdinaryHours.toFixed(2).replace('.', ',')}h / 8h) = ${breakdown?.ordinary?.earnings?.giornaliera.toFixed(2).replace('.', ',')} €`;
+                    }
+                  })()}
+                </Text>
                 {breakdown?.ordinary?.hours?.lavoro_giornaliera > 0 && (
                   <Text style={styles.breakdownDetail}>
                     {`- Lavoro: ${formatSafeHours(breakdown?.ordinary?.hours?.lavoro_giornaliera)}`}
@@ -898,7 +946,7 @@ const EarningsSummary = ({ form, settings, isDateInStandbyCalendar, isStandbyCal
                       <Text style={styles.breakdownLabel}>Lavoro ordinario domenica</Text>
                       <Text style={styles.breakdownValue}>{formatSafeHours((breakdown?.ordinary?.hours?.lavoro_giornaliera || 0) + (breakdown?.ordinary?.hours?.viaggio_giornaliera || 0))}</Text>
                     </View>
-                    <Text style={styles.rateCalc}>
+                    <Text style={styles.breakdownDetail}>
                       {(() => {
                         const base = settings.contract?.hourlyRate || 16.41;
                         const multiplier = settings.contract?.overtimeRates?.holiday || 1.3;
@@ -921,7 +969,7 @@ const EarningsSummary = ({ form, settings, isDateInStandbyCalendar, isStandbyCal
                       <Text style={styles.breakdownLabel}>Lavoro ordinario festivo</Text>
                       <Text style={styles.breakdownValue}>{formatSafeHours((breakdown?.ordinary?.hours?.lavoro_giornaliera || 0) + (breakdown?.ordinary?.hours?.viaggio_giornaliera || 0))}</Text>
                     </View>
-                    <Text style={styles.rateCalc}>
+                    <Text style={styles.breakdownDetail}>
                       {(() => {
                         const base = settings.contract?.hourlyRate || 16.41;
                         const multiplier = settings.contract?.overtimeRates?.holiday || 1.3;
@@ -943,7 +991,7 @@ const EarningsSummary = ({ form, settings, isDateInStandbyCalendar, isStandbyCal
                       <Text style={styles.breakdownLabel}>Lavoro ordinario sabato</Text>
                       <Text style={styles.breakdownValue}>{formatSafeHours((breakdown?.ordinary?.hours?.lavoro_giornaliera || 0) + (breakdown?.ordinary?.hours?.viaggio_giornaliera || 0))}</Text>
                     </View>
-                    <Text style={styles.rateCalc}>
+                    <Text style={styles.breakdownDetail}>
                       {(() => {
                         const base = settings.contract?.hourlyRate || 16.41;
                         const multiplier = settings.contract?.overtimeRates?.saturday || 1.25;
@@ -973,7 +1021,7 @@ const EarningsSummary = ({ form, settings, isDateInStandbyCalendar, isStandbyCal
                       <Text style={styles.breakdownValue}>{formatSafeHours(breakdown?.ordinary?.hours?.viaggio_extra)}</Text>
                     </View>
                     {(breakdown?.ordinary?.earnings?.viaggio_extra > 0) && (
-                      <Text style={styles.rateCalc}>
+                      <Text style={styles.breakdownDetail}>
                         {(() => {
                           const base = settings.contract?.hourlyRate || 16.41;
                           
@@ -1029,7 +1077,7 @@ const EarningsSummary = ({ form, settings, isDateInStandbyCalendar, isStandbyCal
                 <Text style={styles.breakdownValue}>{formatSafeHours(breakdown?.ordinary?.hours?.viaggio_extra)}</Text>
               </View>
               {breakdown?.ordinary?.earnings?.viaggio_extra > 0 && breakdown?.ordinary?.hours?.viaggio_extra > 0 && (
-                <Text style={styles.rateCalc}>
+                <Text style={styles.breakdownDetail}>
                   {(() => {
                     if (settings?.travelHoursSetting === 'EXCESS_AS_OVERTIME') {
                       // Mostra come straordinario con tariffa maggiorata
@@ -1060,7 +1108,7 @@ const EarningsSummary = ({ form, settings, isDateInStandbyCalendar, isStandbyCal
                 })()}</Text>
               </View>
               {breakdown?.ordinary?.earnings?.lavoro_extra > 0 && breakdown?.ordinary?.hours?.lavoro_extra > 0 && (
-                <Text style={styles.rateCalc}>
+                <Text style={styles.breakdownDetail}>
                   {(() => {
                     const base = settings.contract?.hourlyRate || 16.41;
                     // Usa la maggiorazione corretta in base al giorno
@@ -1097,6 +1145,29 @@ const EarningsSummary = ({ form, settings, isDateInStandbyCalendar, isStandbyCal
               <Text style={[styles.infoText, {fontSize: 12, fontStyle: 'italic', marginTop: 2}]}>
                 • Solo primo viaggio (partenza azienda) e ultimo viaggio (arrivo azienda) pagati come viaggio
               </Text>
+              
+              {/* Prime 8 ore cronologiche per multi-turno */}
+              <View style={[styles.breakdownItem, { marginTop: 8, backgroundColor: '#fff3e0', padding: 8, borderRadius: 4 }]}>
+                <View style={styles.breakdownRow}>
+                  <Text style={[styles.breakdownLabel, { fontWeight: 'bold', fontSize: 12 }]}>🎯 Prime 8 ore Multi-turno</Text>
+                  <Text style={[styles.breakdownValue, { color: '#f57c00', fontSize: 12 }]}>
+                    {formatSafeHours(Math.min(8, (breakdown.ordinary?.hours?.lavoro_giornaliera || 0) + (breakdown.ordinary?.hours?.viaggio_giornaliera || 0)))}
+                  </Text>
+                </View>
+                <Text style={[styles.breakdownDetail, { fontSize: 11 }]}>
+                  {(() => {
+                    // Usa sempre il fallback semplice per chiarezza
+                    let details = [];
+                    if (breakdown.ordinary?.hours?.lavoro_giornaliera > 0) {
+                      details.push(`Lavoro ${formatSafeHours(breakdown.ordinary.hours.lavoro_giornaliera)}`);
+                    }
+                    if (breakdown.ordinary?.hours?.viaggio_giornaliera > 0) {
+                      details.push(`Viaggio ${formatSafeHours(breakdown.ordinary.hours.viaggio_giornaliera)}`);
+                    }
+                    return details.length > 0 ? details.join(' + ') : 'Prime 8 ore lavorative';
+                  })()}
+                </Text>
+              </View>
             </View>
           )}
           
@@ -1131,15 +1202,149 @@ const EarningsSummary = ({ form, settings, isDateInStandbyCalendar, isStandbyCal
         <View style={styles.breakdownSection}>
           <View style={styles.sectionHeaderWithIcon}>
             <MaterialCommunityIcons name="alarm-light" size={16} color={styles.infoText.color} />
-            <Text style={styles.breakdownSubtitle}>Interventi Reperibilità</Text>
+            <Text style={styles.breakdownSubtitle}>Interventi Reperibilità per Fascia</Text>
           </View>
           
-          {/* Lavoro diurno reperibilità */}
-          {breakdown?.standby?.workHours?.ordinary > 0 && (
+          {/* Fascia Diurna */}
+          {(breakdown?.standby?.workHours?.ordinary > 0 || breakdown?.standby?.travelHours?.ordinary > 0) && (
             <View style={styles.breakdownItem}>
+              {/* Header fascia con emoji e totale ore */}
               <View style={styles.breakdownRow}>
                 <Text style={styles.breakdownLabel}>
+                  🟢 Fascia Diurna
+                </Text>
+                <Text style={styles.breakdownValue}>
+                  {formatSafeHours((breakdown?.standby?.workHours?.ordinary || 0) + (breakdown?.standby?.travelHours?.ordinary || 0))}
+                </Text>
+              </View>
+              
+              {/* Dettaglio Lavoro */}
+              {breakdown?.standby?.workHours?.ordinary > 0 && (
+                <Text style={styles.breakdownDetail}>
                   {(() => {
+                    // Calcola ore corrette per la fascia diurna usando la nuova logica
+                    const calculateSegmentHoursByTimeSlot = (start, end) => {
+                      if (!start || !end) return {};
+                      
+                      const parseTime = (timeString) => {
+                        const [hours, minutes] = timeString.split(':').map(Number);
+                        return hours * 60 + minutes;
+                      };
+                      
+                      const calculateTimeDifference = (startTime, endTime) => {
+                        const start = parseTime(startTime);
+                        const end = parseTime(endTime);
+                        return end >= start ? end - start : (1440 - start) + end;
+                      };
+                      
+                      const startMinutes = parseTime(start);
+                      const duration = calculateTimeDifference(start, end);
+                      
+                      let ordinaryMinutes = 0;
+                      
+                      for (let i = 0; i < duration; i++) {
+                        const currentMinute = (startMinutes + i) % 1440;
+                        const hour = Math.floor(currentMinute / 60);
+                        
+                        // Verifica se questo minuto è nella fascia diurna (6:00-20:00)
+                        if (hour >= 6 && hour < 20) {
+                          ordinaryMinutes++;
+                        }
+                      }
+                      
+                      return Math.round((ordinaryMinutes / 60) * 100) / 100;
+                    };
+
+                    // Funzione per calcolare gli orari effettivi nella fascia diurna
+                    const calculateTimeSlotRanges = (start, end) => {
+                      if (!start || !end) return [];
+                      
+                      const parseTime = (timeString) => {
+                        const [hours, minutes] = timeString.split(':').map(Number);
+                        return { hours, minutes, totalMinutes: hours * 60 + minutes };
+                      };
+                      
+                      const formatTime = (minutes) => {
+                        const h = Math.floor(minutes / 60);
+                        const m = minutes % 60;
+                        return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+                      };
+                      
+                      const startTime = parseTime(start);
+                      const endTime = parseTime(end);
+                      let currentMinutes = startTime.totalMinutes;
+                      const endMinutes = endTime.totalMinutes >= startTime.totalMinutes ? 
+                        endTime.totalMinutes : endTime.totalMinutes + 1440;
+                      
+                      const ranges = [];
+                      let rangeStart = null;
+                      
+                      while (currentMinutes < endMinutes) {
+                        const hour = Math.floor((currentMinutes % 1440) / 60);
+                        const inDiurno = hour >= 6 && hour < 20;
+                        
+                        if (inDiurno && rangeStart === null) {
+                          rangeStart = currentMinutes % 1440;
+                        } else if (!inDiurno && rangeStart !== null) {
+                          ranges.push(`${formatTime(rangeStart)}-${formatTime(currentMinutes % 1440)}`);
+                          rangeStart = null;
+                        }
+                        
+                        currentMinutes++;
+                      }
+                      
+                      // Chiudi l'ultimo range se necessario
+                      if (rangeStart !== null) {
+                        ranges.push(`${formatTime(rangeStart)}-${formatTime(endMinutes % 1440)}`);
+                      }
+                      
+                      return ranges;
+                    };
+
+                    // Trova gli interventi che hanno ore nella fascia diurna e calcola gli orari reali per fascia
+                    const diurnaInterventions = form.interventi?.filter(intervento => {
+                      let hasDiurnaHours = false;
+                      
+                      // Controlla primo turno lavoro
+                      if (intervento.work_start_1 && intervento.work_end_1) {
+                        const hours = calculateSegmentHoursByTimeSlot(intervento.work_start_1, intervento.work_end_1);
+                        if (hours > 0) hasDiurnaHours = true;
+                      }
+                      
+                      // Controlla secondo turno lavoro
+                      if (intervento.work_start_2 && intervento.work_end_2) {
+                        const hours = calculateSegmentHoursByTimeSlot(intervento.work_start_2, intervento.work_end_2);
+                        if (hours > 0) hasDiurnaHours = true;
+                      }
+                      
+                      return hasDiurnaHours;
+                    }).map(intervento => {
+                      // Crea una rappresentazione degli orari che cadono nella fascia diurna
+                      const segments = [];
+                      
+                      if (intervento.work_start_1 && intervento.work_end_1) {
+                        const hours = calculateSegmentHoursByTimeSlot(intervento.work_start_1, intervento.work_end_1);
+                        if (hours > 0) {
+                          const ranges = calculateTimeSlotRanges(intervento.work_start_1, intervento.work_end_1);
+                          segments.push(...ranges);
+                        }
+                      }
+                      
+                      if (intervento.work_start_2 && intervento.work_end_2) {
+                        const hours = calculateSegmentHoursByTimeSlot(intervento.work_start_2, intervento.work_end_2);
+                        if (hours > 0) {
+                          const ranges = calculateTimeSlotRanges(intervento.work_start_2, intervento.work_end_2);
+                          segments.push(...ranges);
+                        }
+                      }
+                      
+                      return segments.join(', ');
+                    }).filter(segment => segment) || [];
+                    
+                    const orari = diurnaInterventions.length > 0 
+                      ? ` (${diurnaInterventions.join(', ')})`
+                      : '';
+                    
                     const isOvertime = breakdown?.standby?.isOvertimeApplied;
                     const rate = breakdown?.standby?.workEarnings?.ordinary && breakdown?.standby?.workHours?.ordinary > 0 
                       ? breakdown.standby.workEarnings.ordinary / breakdown.standby.workHours.ordinary
@@ -1148,117 +1353,837 @@ const EarningsSummary = ({ form, settings, isDateInStandbyCalendar, isStandbyCal
                     const percentage = Math.round((rate / baseRate - 1) * 100);
                     const percentageText = percentage > 0 ? ` (+${percentage}%)` : '';
                     
-                    if (isOvertime) {
-                      return `Straordinario diurno (reperibilità)${percentageText}`;
-                    } else {
-                      return `Lavoro diurno${percentageText}`;
-                    }
+                    const labelText = isOvertime ? `Straordinario diurno` : `Lavoro diurno`;
+                    const earnings = breakdown?.standby?.workEarnings?.ordinary || 0;
+                    
+                    return `   ${labelText}${orari}${percentageText}: ${formatSafeHours(breakdown?.standby?.workHours?.ordinary)} = €${earnings.toFixed(2).replace('.', ',')}`;
                   })()}
                 </Text>
-                <Text style={styles.breakdownValue}>{formatSafeHours(breakdown?.standby?.workHours?.ordinary)}</Text>
-              </View>
-              {breakdown?.standby?.workEarnings?.ordinary > 0 && breakdown?.standby?.workHours?.ordinary > 0 && (
-                <Text style={styles.rateCalc}>
-                  {(breakdown.standby.workEarnings.ordinary / breakdown.standby.workHours.ordinary).toFixed(2).replace('.', ',')} € x {formatSafeHours(breakdown?.standby?.workHours?.ordinary)} = {breakdown?.standby?.workEarnings?.ordinary.toFixed(2).replace('.', ',')} €
+              )}
+              
+              {/* Dettaglio Viaggio */}
+              {breakdown?.standby?.travelHours?.ordinary > 0 && (
+                <Text style={styles.breakdownDetail}>
+                  {(() => {
+                    // Calcola ore e orari viaggio per la fascia diurna
+                    const calculateTravelSegmentHoursByTimeSlot = (start, end) => {
+                      if (!start || !end) return {};
+                      
+                      const parseTime = (timeString) => {
+                        const [hours, minutes] = timeString.split(':').map(Number);
+                        return hours * 60 + minutes;
+                      };
+                      
+                      const calculateTimeDifference = (startTime, endTime) => {
+                        const start = parseTime(startTime);
+                        const end = parseTime(endTime);
+                        return end >= start ? end - start : (1440 - start) + end;
+                      };
+                      
+                      const startMinutes = parseTime(start);
+                      const duration = calculateTimeDifference(start, end);
+                      
+                      let ordinaryMinutes = 0;
+                      
+                      for (let i = 0; i < duration; i++) {
+                        const currentMinute = (startMinutes + i) % 1440;
+                        const hour = Math.floor(currentMinute / 60);
+                        
+                        // Verifica se questo minuto è nella fascia diurna (6:00-20:00)
+                        if (hour >= 6 && hour < 20) {
+                          ordinaryMinutes++;
+                        }
+                      }
+                      
+                      return Math.round((ordinaryMinutes / 60) * 100) / 100;
+                    };
+
+                    // Funzione per calcolare gli orari effettivi viaggio nella fascia diurna
+                    const calculateTravelTimeSlotRanges = (start, end) => {
+                      if (!start || !end) return [];
+                      
+                      const parseTime = (timeString) => {
+                        const [hours, minutes] = timeString.split(':').map(Number);
+                        return { hours, minutes, totalMinutes: hours * 60 + minutes };
+                      };
+                      
+                      const formatTime = (minutes) => {
+                        const h = Math.floor(minutes / 60);
+                        const m = minutes % 60;
+                        return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+                      };
+                      
+                      const startTime = parseTime(start);
+                      const endTime = parseTime(end);
+                      let currentMinutes = startTime.totalMinutes;
+                      const endMinutes = endTime.totalMinutes >= startTime.totalMinutes ? 
+                        endTime.totalMinutes : endTime.totalMinutes + 1440;
+                      
+                      const ranges = [];
+                      let rangeStart = null;
+                      
+                      while (currentMinutes < endMinutes) {
+                        const hour = Math.floor((currentMinutes % 1440) / 60);
+                        const inDiurno = hour >= 6 && hour < 20;
+                        
+                        if (inDiurno && rangeStart === null) {
+                          rangeStart = currentMinutes % 1440;
+                        } else if (!inDiurno && rangeStart !== null) {
+                          ranges.push(`${formatTime(rangeStart)}-${formatTime(currentMinutes % 1440)}`);
+                          rangeStart = null;
+                        }
+                        
+                        currentMinutes++;
+                      }
+                      
+                      // Chiudi l'ultimo range se necessario
+                      if (rangeStart !== null) {
+                        ranges.push(`${formatTime(rangeStart)}-${formatTime(endMinutes % 1440)}`);
+                      }
+                      
+                      return ranges;
+                    };
+
+                    // Trova gli interventi che hanno viaggi nella fascia diurna
+                    const viaggiDiurni = form.interventi?.filter(intervento => {
+                      let hasDiurnoTravel = false;
+                      
+                      // Controlla viaggio andata
+                      if (intervento.departure_company && intervento.arrival_site) {
+                        const hours = calculateTravelSegmentHoursByTimeSlot(intervento.departure_company, intervento.arrival_site);
+                        if (hours > 0) hasDiurnoTravel = true;
+                      }
+                      
+                      // Controlla viaggio ritorno
+                      if (intervento.departure_return && intervento.arrival_company) {
+                        const hours = calculateTravelSegmentHoursByTimeSlot(intervento.departure_return, intervento.arrival_company);
+                        if (hours > 0) hasDiurnoTravel = true;
+                      }
+                      
+                      return hasDiurnoTravel;
+                    }).map(intervento => {
+                      // Crea una rappresentazione degli orari viaggio che cadono nella fascia diurna
+                      const segments = [];
+                      
+                      if (intervento.departure_company && intervento.arrival_site) {
+                        const hours = calculateTravelSegmentHoursByTimeSlot(intervento.departure_company, intervento.arrival_site);
+                        if (hours > 0) {
+                          const ranges = calculateTravelTimeSlotRanges(intervento.departure_company, intervento.arrival_site);
+                          segments.push(...ranges);
+                        }
+                      }
+                      
+                      if (intervento.departure_return && intervento.arrival_company) {
+                        const hours = calculateTravelSegmentHoursByTimeSlot(intervento.departure_return, intervento.arrival_company);
+                        if (hours > 0) {
+                          const ranges = calculateTravelTimeSlotRanges(intervento.departure_return, intervento.arrival_company);
+                          segments.push(...ranges);
+                        }
+                      }
+                      
+                      return segments.join(', ');
+                    }).filter(segment => segment) || [];
+                    
+                    const orariViaggio = viaggiDiurni.length > 0 
+                      ? ` (${viaggiDiurni.join(', ')})`
+                      : '';
+                    
+                    return `   Viaggio diurno${orariViaggio}: ${formatSafeHours(breakdown?.standby?.travelHours?.ordinary)} = €${breakdown?.standby?.travelEarnings?.ordinary?.toFixed(2)?.replace('.', ',')}`;
+                  })()}
                 </Text>
               )}
             </View>
           )}
           
-          {/* Lavoro serale reperibilità */}
-          {breakdown?.standby?.workHours?.evening > 0 && (
+          {/* Fascia Serale */}
+          {(breakdown?.standby?.workHours?.evening > 0 || breakdown?.standby?.travelHours?.evening > 0) && (
             <View style={styles.breakdownItem}>
+              {/* Header fascia con emoji e totale ore */}
               <View style={styles.breakdownRow}>
                 <Text style={styles.breakdownLabel}>
+                  🟢 Fascia Serale
+                </Text>
+                <Text style={styles.breakdownValue}>
+                  {formatSafeHours((breakdown?.standby?.workHours?.evening || 0) + (breakdown?.standby?.travelHours?.evening || 0))}
+                </Text>
+              </View>
+              
+              {/* Dettaglio Lavoro */}
+              {breakdown?.standby?.workHours?.evening > 0 && (
+                <Text style={styles.breakdownDetail}>
                   {(() => {
+                    // Calcola ore corrette per la fascia serale usando la nuova logica
+                    const calculateSegmentHoursByTimeSlot = (start, end) => {
+                      if (!start || !end) return {};
+                      
+                      const parseTime = (timeString) => {
+                        const [hours, minutes] = timeString.split(':').map(Number);
+                        return hours * 60 + minutes;
+                      };
+                      
+                      const calculateTimeDifference = (startTime, endTime) => {
+                        const start = parseTime(startTime);
+                        const end = parseTime(endTime);
+                        return end >= start ? end - start : (1440 - start) + end;
+                      };
+                      
+                      const startMinutes = parseTime(start);
+                      const duration = calculateTimeDifference(start, end);
+                      
+                      let eveningMinutes = 0;
+                      
+                      for (let i = 0; i < duration; i++) {
+                        const currentMinute = (startMinutes + i) % 1440;
+                        const hour = Math.floor(currentMinute / 60);
+                        
+                        // Verifica se questo minuto è nella fascia serale (20:00-22:00)
+                        if (hour >= 20 && hour < 22) {
+                          eveningMinutes++;
+                        }
+                      }
+                      
+                      return Math.round((eveningMinutes / 60) * 100) / 100;
+                    };
+
+                    // Funzione per calcolare gli orari effettivi nella fascia serale
+                    const calculateTimeSlotRanges = (start, end) => {
+                      if (!start || !end) return [];
+                      
+                      const parseTime = (timeString) => {
+                        const [hours, minutes] = timeString.split(':').map(Number);
+                        return { hours, minutes, totalMinutes: hours * 60 + minutes };
+                      };
+                      
+                      const formatTime = (minutes) => {
+                        const h = Math.floor(minutes / 60);
+                        const m = minutes % 60;
+                        return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+                      };
+                      
+                      const startTime = parseTime(start);
+                      const endTime = parseTime(end);
+                      let currentMinutes = startTime.totalMinutes;
+                      const endMinutes = endTime.totalMinutes >= startTime.totalMinutes ? 
+                        endTime.totalMinutes : endTime.totalMinutes + 1440;
+                      
+                      const ranges = [];
+                      let rangeStart = null;
+                      
+                      while (currentMinutes < endMinutes) {
+                        const hour = Math.floor((currentMinutes % 1440) / 60);
+                        const inSerale = hour >= 20 && hour < 22;
+                        
+                        if (inSerale && rangeStart === null) {
+                          rangeStart = currentMinutes % 1440;
+                        } else if (!inSerale && rangeStart !== null) {
+                          ranges.push(`${formatTime(rangeStart)}-${formatTime(currentMinutes % 1440)}`);
+                          rangeStart = null;
+                        }
+                        
+                        currentMinutes++;
+                      }
+                      
+                      // Chiudi l'ultimo range se necessario
+                      if (rangeStart !== null) {
+                        ranges.push(`${formatTime(rangeStart)}-${formatTime(endMinutes % 1440)}`);
+                      }
+                      
+                      return ranges;
+                    };
+
+                    // Trova gli interventi che hanno ore nella fascia serale e calcola gli orari reali per fascia
+                    const seraleInterventions = form.interventi?.filter(intervento => {
+                      let hasSeraleHours = false;
+                      
+                      // Controlla primo turno lavoro
+                      if (intervento.work_start_1 && intervento.work_end_1) {
+                        const hours = calculateSegmentHoursByTimeSlot(intervento.work_start_1, intervento.work_end_1);
+                        if (hours > 0) hasSeraleHours = true;
+                      }
+                      
+                      // Controlla secondo turno lavoro
+                      if (intervento.work_start_2 && intervento.work_end_2) {
+                        const hours = calculateSegmentHoursByTimeSlot(intervento.work_start_2, intervento.work_end_2);
+                        if (hours > 0) hasSeraleHours = true;
+                      }
+                      
+                      return hasSeraleHours;
+                    }).map(intervento => {
+                      // Crea una rappresentazione degli orari che cadono nella fascia serale
+                      const segments = [];
+                      
+                      if (intervento.work_start_1 && intervento.work_end_1) {
+                        const hours = calculateSegmentHoursByTimeSlot(intervento.work_start_1, intervento.work_end_1);
+                        if (hours > 0) {
+                          const ranges = calculateTimeSlotRanges(intervento.work_start_1, intervento.work_end_1);
+                          segments.push(...ranges);
+                        }
+                      }
+                      
+                      if (intervento.work_start_2 && intervento.work_end_2) {
+                        const hours = calculateSegmentHoursByTimeSlot(intervento.work_start_2, intervento.work_end_2);
+                        if (hours > 0) {
+                          const ranges = calculateTimeSlotRanges(intervento.work_start_2, intervento.work_end_2);
+                          segments.push(...ranges);
+                        }
+                      }
+                      
+                      return segments.join(', ');
+                    }).filter(segment => segment) || [];
+                    
+                    const orari = seraleInterventions.length > 0 
+                      ? ` (${seraleInterventions.join(', ')})`
+                      : '';
+                    
                     const isOvertime = breakdown?.standby?.isOvertimeApplied;
                     const rate = breakdown?.standby?.workEarnings?.evening && breakdown?.standby?.workHours?.evening > 0 
                       ? breakdown.standby.workEarnings.evening / breakdown.standby.workHours.evening
-                      : (settings.contract?.hourlyRate || 16.41) * 1.25;
+                      : (settings.contract?.hourlyRate || 16.41);
                     const baseRate = settings.contract?.hourlyRate || 16.41;
                     const percentage = Math.round((rate / baseRate - 1) * 100);
                     const percentageText = percentage > 0 ? ` (+${percentage}%)` : '';
                     
-                    if (isOvertime) {
-                      return `Straordinario serale (reperibilità)${percentageText}`;
-                    } else {
-                      return `Lavoro serale${percentageText}`;
-                    }
+                    const labelText = isOvertime ? `Straordinario serale` : `Lavoro serale`;
+                    const earnings = breakdown?.standby?.workEarnings?.evening || 0;
+                    
+                    return `   ${labelText}${orari}${percentageText}: ${formatSafeHours(breakdown?.standby?.workHours?.evening)} = €${earnings.toFixed(2).replace('.', ',')}`;
                   })()}
                 </Text>
-                <Text style={styles.breakdownValue}>{formatSafeHours(breakdown?.standby?.workHours?.evening)}</Text>
-              </View>
-              {breakdown?.standby?.workEarnings?.evening > 0 && breakdown?.standby?.workHours?.evening > 0 && (
-                <Text style={styles.rateCalc}>
-                  {(breakdown.standby.workEarnings.evening / breakdown.standby.workHours.evening).toFixed(2).replace('.', ',')} € x {formatSafeHours(breakdown?.standby?.workHours?.evening)} = {breakdown?.standby?.workEarnings?.evening.toFixed(2).replace('.', ',')} €
+              )}
+              
+              {/* Dettaglio Viaggio */}
+              {breakdown?.standby?.travelHours?.evening > 0 && (
+                <Text style={styles.breakdownDetail}>
+                  {(() => {
+                    // Calcola ore e orari viaggio per la fascia serale
+                    const calculateTravelSegmentHoursByTimeSlot = (start, end) => {
+                      if (!start || !end) return {};
+                      
+                      const parseTime = (timeString) => {
+                        const [hours, minutes] = timeString.split(':').map(Number);
+                        return hours * 60 + minutes;
+                      };
+                      
+                      const calculateTimeDifference = (startTime, endTime) => {
+                        const start = parseTime(startTime);
+                        const end = parseTime(endTime);
+                        return end >= start ? end - start : (1440 - start) + end;
+                      };
+                      
+                      const startMinutes = parseTime(start);
+                      const duration = calculateTimeDifference(start, end);
+                      
+                      let seraleMinutes = 0;
+                      
+                      for (let i = 0; i < duration; i++) {
+                        const currentMinute = (startMinutes + i) % 1440;
+                        const hour = Math.floor(currentMinute / 60);
+                        
+                        // Verifica se questo minuto è nella fascia serale (20:00-22:00)
+                        if (hour >= 20 && hour < 22) {
+                          seraleMinutes++;
+                        }
+                      }
+                      
+                      return Math.round((seraleMinutes / 60) * 100) / 100;
+                    };
+
+                    // Funzione per calcolare gli orari effettivi viaggio nella fascia serale
+                    const calculateTravelTimeSlotRanges = (start, end) => {
+                      if (!start || !end) return [];
+                      
+                      const parseTime = (timeString) => {
+                        const [hours, minutes] = timeString.split(':').map(Number);
+                        return { hours, minutes, totalMinutes: hours * 60 + minutes };
+                      };
+                      
+                      const formatTime = (minutes) => {
+                        const h = Math.floor(minutes / 60);
+                        const m = minutes % 60;
+                        return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+                      };
+                      
+                      const startTime = parseTime(start);
+                      const endTime = parseTime(end);
+                      let currentMinutes = startTime.totalMinutes;
+                      const endMinutes = endTime.totalMinutes >= startTime.totalMinutes ? 
+                        endTime.totalMinutes : endTime.totalMinutes + 1440;
+                      
+                      const ranges = [];
+                      let rangeStart = null;
+                      
+                      while (currentMinutes < endMinutes) {
+                        const hour = Math.floor((currentMinutes % 1440) / 60);
+                        const inSerale = hour >= 20 && hour < 22;
+                        
+                        if (inSerale && rangeStart === null) {
+                          rangeStart = currentMinutes % 1440;
+                        } else if (!inSerale && rangeStart !== null) {
+                          ranges.push(`${formatTime(rangeStart)}-${formatTime(currentMinutes % 1440)}`);
+                          rangeStart = null;
+                        }
+                        
+                        currentMinutes++;
+                      }
+                      
+                      // Chiudi l'ultimo range se necessario
+                      if (rangeStart !== null) {
+                        ranges.push(`${formatTime(rangeStart)}-${formatTime(endMinutes % 1440)}`);
+                      }
+                      
+                      return ranges;
+                    };
+
+                    // Trova gli interventi che hanno viaggi nella fascia serale
+                    const viaggiSerali = form.interventi?.filter(intervento => {
+                      let hasSeraleTravel = false;
+                      
+                      // Controlla viaggio andata
+                      if (intervento.departure_company && intervento.arrival_site) {
+                        const hours = calculateTravelSegmentHoursByTimeSlot(intervento.departure_company, intervento.arrival_site);
+                        if (hours > 0) hasSeraleTravel = true;
+                      }
+                      
+                      // Controlla viaggio ritorno
+                      if (intervento.departure_return && intervento.arrival_company) {
+                        const hours = calculateTravelSegmentHoursByTimeSlot(intervento.departure_return, intervento.arrival_company);
+                        if (hours > 0) hasSeraleTravel = true;
+                      }
+                      
+                      return hasSeraleTravel;
+                    }).map(intervento => {
+                      // Crea una rappresentazione degli orari viaggio che cadono nella fascia serale
+                      const segments = [];
+                      
+                      if (intervento.departure_company && intervento.arrival_site) {
+                        const hours = calculateTravelSegmentHoursByTimeSlot(intervento.departure_company, intervento.arrival_site);
+                        if (hours > 0) {
+                          const ranges = calculateTravelTimeSlotRanges(intervento.departure_company, intervento.arrival_site);
+                          segments.push(...ranges);
+                        }
+                      }
+                      
+                      if (intervento.departure_return && intervento.arrival_company) {
+                        const hours = calculateTravelSegmentHoursByTimeSlot(intervento.departure_return, intervento.arrival_company);
+                        if (hours > 0) {
+                          const ranges = calculateTravelTimeSlotRanges(intervento.departure_return, intervento.arrival_company);
+                          segments.push(...ranges);
+                        }
+                      }
+                      
+                      return segments.join(', ');
+                    }).filter(segment => segment) || [];
+                    
+                    const orariViaggio = viaggiSerali.length > 0 
+                      ? ` (${viaggiSerali.join(', ')})`
+                      : '';
+                    
+                    return `   Viaggio serale${orariViaggio}: ${formatSafeHours(breakdown?.standby?.travelHours?.evening)} = €${breakdown?.standby?.travelEarnings?.evening?.toFixed(2)?.replace('.', ',')}`;
+                  })()}
                 </Text>
               )}
             </View>
           )}
           
-          {/* Lavoro notturno reperibilità */}
-          {breakdown?.standby?.workHours?.night > 0 && (
+          {/* Fascia Notturna */}
+          {(breakdown?.standby?.workHours?.night > 0 || breakdown?.standby?.travelHours?.night > 0) && (
             <View style={styles.breakdownItem}>
+              {/* Header fascia con emoji e totale ore */}
               <View style={styles.breakdownRow}>
                 <Text style={styles.breakdownLabel}>
+                  🌙 Fascia Notturna
+                </Text>
+                <Text style={styles.breakdownValue}>
+                  {formatSafeHours((breakdown?.standby?.workHours?.night || 0) + (breakdown?.standby?.travelHours?.night || 0))}
+                </Text>
+              </View>
+              
+              {/* Dettaglio Lavoro */}
+              {breakdown?.standby?.workHours?.night > 0 && (
+                <Text style={styles.breakdownDetail}>
                   {(() => {
+                    // Calcola ore corrette per la fascia notturna usando la nuova logica
+                    const calculateSegmentHoursByTimeSlot = (start, end) => {
+                      if (!start || !end) return {};
+                      
+                      const parseTime = (timeString) => {
+                        const [hours, minutes] = timeString.split(':').map(Number);
+                        return hours * 60 + minutes;
+                      };
+                      
+                      const calculateTimeDifference = (startTime, endTime) => {
+                        const start = parseTime(startTime);
+                        const end = parseTime(endTime);
+                        return end >= start ? end - start : (1440 - start) + end;
+                      };
+                      
+                      const startMinutes = parseTime(start);
+                      const duration = calculateTimeDifference(start, end);
+                      
+                      let nightMinutes = 0;
+                      
+                      for (let i = 0; i < duration; i++) {
+                        const currentMinute = (startMinutes + i) % 1440;
+                        const hour = Math.floor(currentMinute / 60);
+                        
+                        // Verifica se questo minuto è nella fascia notturna (22:00-06:00)
+                        if (hour >= 22 || hour < 6) {
+                          nightMinutes++;
+                        }
+                      }
+                      
+                      return Math.round((nightMinutes / 60) * 100) / 100;
+                    };
+
+                    // Funzione per calcolare gli orari effettivi nella fascia notturna
+                    const calculateTimeSlotRanges = (start, end) => {
+                      if (!start || !end) return [];
+                      
+                      const parseTime = (timeString) => {
+                        const [hours, minutes] = timeString.split(':').map(Number);
+                        return { hours, minutes, totalMinutes: hours * 60 + minutes };
+                      };
+                      
+                      const formatTime = (minutes) => {
+                        const h = Math.floor(minutes / 60);
+                        const m = minutes % 60;
+                        return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+                      };
+                      
+                      const startTime = parseTime(start);
+                      const endTime = parseTime(end);
+                      let currentMinutes = startTime.totalMinutes;
+                      const endMinutes = endTime.totalMinutes >= startTime.totalMinutes ? 
+                        endTime.totalMinutes : endTime.totalMinutes + 1440;
+                      
+                      const ranges = [];
+                      let rangeStart = null;
+                      
+                      while (currentMinutes < endMinutes) {
+                        const hour = Math.floor((currentMinutes % 1440) / 60);
+                        const inNotturno = hour >= 22 || hour < 6;
+                        
+                        if (inNotturno && rangeStart === null) {
+                          rangeStart = currentMinutes % 1440;
+                        } else if (!inNotturno && rangeStart !== null) {
+                          ranges.push(`${formatTime(rangeStart)}-${formatTime(currentMinutes % 1440)}`);
+                          rangeStart = null;
+                        }
+                        
+                        currentMinutes++;
+                      }
+                      
+                      // Chiudi l'ultimo range se necessario
+                      if (rangeStart !== null) {
+                        ranges.push(`${formatTime(rangeStart)}-${formatTime(endMinutes % 1440)}`);
+                      }
+                      
+                      return ranges;
+                    };
+
+                    // Trova gli interventi che hanno ore nella fascia notturna e calcola gli orari reali per fascia
+                    const notturnaInterventions = form.interventi?.filter(intervento => {
+                      let hasNotturnaHours = false;
+                      
+                      // Controlla primo turno lavoro
+                      if (intervento.work_start_1 && intervento.work_end_1) {
+                        const hours = calculateSegmentHoursByTimeSlot(intervento.work_start_1, intervento.work_end_1);
+                        if (hours > 0) hasNotturnaHours = true;
+                      }
+                      
+                      // Controlla secondo turno lavoro
+                      if (intervento.work_start_2 && intervento.work_end_2) {
+                        const hours = calculateSegmentHoursByTimeSlot(intervento.work_start_2, intervento.work_end_2);
+                        if (hours > 0) hasNotturnaHours = true;
+                      }
+                      
+                      return hasNotturnaHours;
+                    }).map(intervento => {
+                      // Crea una rappresentazione degli orari che cadono nella fascia notturna
+                      const segments = [];
+                      
+                      if (intervento.work_start_1 && intervento.work_end_1) {
+                        const hours = calculateSegmentHoursByTimeSlot(intervento.work_start_1, intervento.work_end_1);
+                        if (hours > 0) {
+                          const ranges = calculateTimeSlotRanges(intervento.work_start_1, intervento.work_end_1);
+                          segments.push(...ranges);
+                        }
+                      }
+                      
+                      if (intervento.work_start_2 && intervento.work_end_2) {
+                        const hours = calculateSegmentHoursByTimeSlot(intervento.work_start_2, intervento.work_end_2);
+                        if (hours > 0) {
+                          const ranges = calculateTimeSlotRanges(intervento.work_start_2, intervento.work_end_2);
+                          segments.push(...ranges);
+                        }
+                      }
+                      
+                      return segments.join(', ');
+                    }).filter(segment => segment) || [];
+                    
+                    const orari = notturnaInterventions.length > 0 
+                      ? ` (${notturnaInterventions.join(', ')})`
+                      : '';
+                    
                     const isOvertime = breakdown?.standby?.isOvertimeApplied;
                     const rate = breakdown?.standby?.workEarnings?.night && breakdown?.standby?.workHours?.night > 0 
                       ? breakdown.standby.workEarnings.night / breakdown.standby.workHours.night
-                      : (settings.contract?.hourlyRate || 16.41) * (isOvertime ? 1.35 : 1.25);
+                      : (settings.contract?.hourlyRate || 16.41);
                     const baseRate = settings.contract?.hourlyRate || 16.41;
                     const percentage = Math.round((rate / baseRate - 1) * 100);
                     const percentageText = percentage > 0 ? ` (+${percentage}%)` : '';
                     
-                    if (isOvertime) {
-                      return `Straordinario notturno (reperibilità)${percentageText}`;
-                    } else {
-                      return `Lavoro notturno${percentageText}`;
-                    }
+                    const labelText = isOvertime ? `Straordinario notturno` : `Lavoro notturno`;
+                    const earnings = breakdown?.standby?.workEarnings?.night || 0;
+                    
+                    return `   ${labelText}${orari}${percentageText}: ${formatSafeHours(breakdown?.standby?.workHours?.night)} = €${earnings.toFixed(2).replace('.', ',')}`;
                   })()}
                 </Text>
-                <Text style={styles.breakdownValue}>{formatSafeHours(breakdown?.standby?.workHours?.night)}</Text>
-              </View>
-              {breakdown?.standby?.workEarnings?.night > 0 && breakdown?.standby?.workHours?.night > 0 && (
-                <Text style={styles.rateCalc}>
-                  {(breakdown.standby.workEarnings.night / breakdown.standby.workHours.night).toFixed(2).replace('.', ',')} € x {formatSafeHours(breakdown?.standby?.workHours?.night)} = {breakdown?.standby?.workEarnings?.night.toFixed(2).replace('.', ',')} €
+              )}
+              
+              {/* Dettaglio Viaggio */}
+              {breakdown?.standby?.travelHours?.night > 0 && (
+                <Text style={styles.breakdownDetail}>
+                  {(() => {
+                    // Calcola ore e orari viaggio per la fascia notturna
+                    const calculateTravelSegmentHoursByTimeSlot = (start, end) => {
+                      if (!start || !end) return {};
+                      
+                      const parseTime = (timeString) => {
+                        const [hours, minutes] = timeString.split(':').map(Number);
+                        return hours * 60 + minutes;
+                      };
+                      
+                      const calculateTimeDifference = (startTime, endTime) => {
+                        const start = parseTime(startTime);
+                        const end = parseTime(endTime);
+                        return end >= start ? end - start : (1440 - start) + end;
+                      };
+                      
+                      const startMinutes = parseTime(start);
+                      const duration = calculateTimeDifference(start, end);
+                      
+                      let notturnoMinutes = 0;
+                      
+                      for (let i = 0; i < duration; i++) {
+                        const currentMinute = (startMinutes + i) % 1440;
+                        const hour = Math.floor(currentMinute / 60);
+                        
+                        // Verifica se questo minuto è nella fascia notturna (22:00-06:00)
+                        if (hour >= 22 || hour < 6) {
+                          notturnoMinutes++;
+                        }
+                      }
+                      
+                      return Math.round((notturnoMinutes / 60) * 100) / 100;
+                    };
+
+                    // Funzione per calcolare gli orari effettivi viaggio nella fascia notturna
+                    const calculateTravelTimeSlotRanges = (start, end) => {
+                      if (!start || !end) return [];
+                      
+                      const parseTime = (timeString) => {
+                        const [hours, minutes] = timeString.split(':').map(Number);
+                        return { hours, minutes, totalMinutes: hours * 60 + minutes };
+                      };
+                      
+                      const formatTime = (minutes) => {
+                        const h = Math.floor(minutes / 60);
+                        const m = minutes % 60;
+                        return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+                      };
+                      
+                      const startTime = parseTime(start);
+                      const endTime = parseTime(end);
+                      let currentMinutes = startTime.totalMinutes;
+                      const endMinutes = endTime.totalMinutes >= startTime.totalMinutes ? 
+                        endTime.totalMinutes : endTime.totalMinutes + 1440;
+                      
+                      const ranges = [];
+                      let rangeStart = null;
+                      
+                      while (currentMinutes < endMinutes) {
+                        const hour = Math.floor((currentMinutes % 1440) / 60);
+                        const inNotturno = hour >= 22 || hour < 6;
+                        
+                        if (inNotturno && rangeStart === null) {
+                          rangeStart = currentMinutes % 1440;
+                        } else if (!inNotturno && rangeStart !== null) {
+                          ranges.push(`${formatTime(rangeStart)}-${formatTime(currentMinutes % 1440)}`);
+                          rangeStart = null;
+                        }
+                        
+                        currentMinutes++;
+                      }
+                      
+                      // Chiudi l'ultimo range se necessario
+                      if (rangeStart !== null) {
+                        ranges.push(`${formatTime(rangeStart)}-${formatTime(endMinutes % 1440)}`);
+                      }
+                      
+                      return ranges;
+                    };
+
+                    // Trova gli interventi che hanno viaggi nella fascia notturna
+                    const viaggiNotturni = form.interventi?.filter(intervento => {
+                      let hasNotturnoTravel = false;
+                      
+                      // Controlla viaggio andata
+                      if (intervento.departure_company && intervento.arrival_site) {
+                        const hours = calculateTravelSegmentHoursByTimeSlot(intervento.departure_company, intervento.arrival_site);
+                        if (hours > 0) hasNotturnoTravel = true;
+                      }
+                      
+                      // Controlla viaggio ritorno
+                      if (intervento.departure_return && intervento.arrival_company) {
+                        const hours = calculateTravelSegmentHoursByTimeSlot(intervento.departure_return, intervento.arrival_company);
+                        if (hours > 0) hasNotturnoTravel = true;
+                      }
+                      
+                      return hasNotturnoTravel;
+                    }).map(intervento => {
+                      // Crea una rappresentazione degli orari viaggio che cadono nella fascia notturna
+                      const segments = [];
+                      
+                      if (intervento.departure_company && intervento.arrival_site) {
+                        const hours = calculateTravelSegmentHoursByTimeSlot(intervento.departure_company, intervento.arrival_site);
+                        if (hours > 0) {
+                          const ranges = calculateTravelTimeSlotRanges(intervento.departure_company, intervento.arrival_site);
+                          segments.push(...ranges);
+                        }
+                      }
+                      
+                      if (intervento.departure_return && intervento.arrival_company) {
+                        const hours = calculateTravelSegmentHoursByTimeSlot(intervento.departure_return, intervento.arrival_company);
+                        if (hours > 0) {
+                          const ranges = calculateTravelTimeSlotRanges(intervento.departure_return, intervento.arrival_company);
+                          segments.push(...ranges);
+                        }
+                      }
+                      
+                      return segments.join(', ');
+                    }).filter(segment => segment) || [];
+                    
+                    const orariViaggio = viaggiNotturni.length > 0 
+                      ? ` (${viaggiNotturni.join(', ')})`
+                      : '';
+                    
+                    return `   Viaggio notturno${orariViaggio}: ${formatSafeHours(breakdown?.standby?.travelHours?.night)} = €${breakdown?.standby?.travelEarnings?.night?.toFixed(2)?.replace('.', ',')}`;
+                  })()}
                 </Text>
               )}
             </View>
           )}
 
-          {/* Lavoro sabato reperibilità */}
-          {breakdown?.standby?.workHours?.saturday > 0 && (
+          {/* Fascia Sabato */}
+          {(breakdown?.standby?.workHours?.saturday > 0 || breakdown?.standby?.travelHours?.saturday > 0) && (
             <View style={styles.breakdownItem}>
+              {/* Header fascia con emoji e totale ore */}
               <View style={styles.breakdownRow}>
                 <Text style={styles.breakdownLabel}>
+                  📅 Fascia Sabato
+                </Text>
+                <Text style={styles.breakdownValue}>
+                  {formatSafeHours((breakdown?.standby?.workHours?.saturday || 0) + (breakdown?.standby?.travelHours?.saturday || 0))}
+                </Text>
+              </View>
+              
+              {/* Dettaglio Lavoro */}
+              {breakdown?.standby?.workHours?.saturday > 0 && (
+                <Text style={styles.breakdownDetail}>
                   {(() => {
+                    // Per il sabato, tutti gli interventi nella giornata di sabato appartengono a questa fascia
+                    // Non c'è bisogno di calcolare ore per fasce orarie specifiche
+                    const workDate = new Date(form.date);
+                    const isSaturday = workDate.getDay() === 6;
+                    
+                    if (!isSaturday) return '';
+                    
+                    const sabatoInterventions = form.interventi?.filter(intervento => {
+                      // Filtra interventi che hanno lavoro
+                      return (intervento.work_start_1 && intervento.work_end_1) || 
+                             (intervento.work_start_2 && intervento.work_end_2);
+                    }).map(intervento => {
+                      const segments = [];
+                      if (intervento.work_start_1 && intervento.work_end_1) {
+                        segments.push(`${intervento.work_start_1}-${intervento.work_end_1}`);
+                      }
+                      if (intervento.work_start_2 && intervento.work_end_2) {
+                        segments.push(`${intervento.work_start_2}-${intervento.work_end_2}`);
+                      }
+                      return segments.join(', ');
+                    }).filter(segment => segment) || [];
+                    
+                    const orari = sabatoInterventions.length > 0 
+                      ? ` (${sabatoInterventions.join(', ')})`
+                      : '';
+                    
                     const rate = breakdown?.standby?.workEarnings?.saturday && breakdown?.standby?.workHours?.saturday > 0 
                       ? breakdown.standby.workEarnings.saturday / breakdown.standby.workHours.saturday
-                      : (settings.contract?.hourlyRate || 16.41) * 1.25;
+                      : (settings.contract?.hourlyRate || 16.41);
                     const baseRate = settings.contract?.hourlyRate || 16.41;
                     const percentage = Math.round((rate / baseRate - 1) * 100);
                     const percentageText = percentage > 0 ? ` (+${percentage}%)` : '';
+                    const earnings = breakdown?.standby?.workEarnings?.saturday || 0;
                     
-                    return `Lavoro sabato${percentageText}`;
+                    return `   Lavoro sabato${orari}${percentageText}: ${formatSafeHours(breakdown?.standby?.workHours?.saturday)} = €${earnings.toFixed(2).replace('.', ',')}`;
                   })()}
                 </Text>
-                <Text style={styles.breakdownValue}>{formatSafeHours(breakdown?.standby?.workHours?.saturday)}</Text>
-              </View>
-              {breakdown?.standby?.workEarnings?.saturday > 0 && breakdown?.standby?.workHours?.saturday > 0 && (
-                <Text style={styles.rateCalc}>
-                  {(breakdown.standby.workEarnings.saturday / breakdown.standby.workHours.saturday).toFixed(2).replace('.', ',')} € x {formatSafeHours(breakdown?.standby?.workHours?.saturday)} = {breakdown?.standby?.workEarnings?.saturday.toFixed(2).replace('.', ',')} €
+              )}
+              
+              {/* Dettaglio Viaggio */}
+              {breakdown?.standby?.travelHours?.saturday > 0 && (
+                <Text style={styles.breakdownDetail}>
+                  {'   '}Viaggio sabato: {formatSafeHours(breakdown?.standby?.travelHours?.saturday)} = €{breakdown?.standby?.travelEarnings?.saturday?.toFixed(2)?.replace('.', ',')}
                 </Text>
               )}
             </View>
           )}
 
-          {/* Lavoro festivo/domenica reperibilità */}
-          {breakdown?.standby?.workHours?.holiday > 0 && (
+          {/* Fascia Festiva */}
+          {((breakdown?.standby?.workHours?.holiday || 0) > 0 || (breakdown?.standby?.travelHours?.holiday || 0) > 0) && (
             <View style={styles.breakdownItem}>
               <View style={styles.breakdownRow}>
                 <Text style={styles.breakdownLabel}>
+                  🎉 Fascia Festiva
+                </Text>
+                <Text style={styles.breakdownValue}>
+                  {formatSafeHours((breakdown?.standby?.workHours?.holiday || 0) + (breakdown?.standby?.travelHours?.holiday || 0))}
+                </Text>
+              </View>
+              
+              {/* Lavoro festivo reperibilità */}
+              {breakdown?.standby?.workHours?.holiday > 0 && (
+                <Text style={styles.breakdownDetail}>
                   {(() => {
+                    // Per i giorni festivi, tutti gli interventi nella giornata festiva appartengono a questa fascia
+                    // Non c'è bisogno di calcolare ore per fasce orarie specifiche
+                    const workDate = new Date(form.date);
+                    const isSunday = workDate.getDay() === 0;
+                    // TODO: Qui dovresti aggiungere la logica per i giorni festivi italiani
+                    const isHoliday = isSunday; // Per ora solo domenica
+                    
+                    if (!isHoliday) return '';
+                    
+                    const festivaInterventions = form.interventi?.filter(intervento => {
+                      // Filtra interventi che hanno lavoro
+                      return (intervento.work_start_1 && intervento.work_end_1) || 
+                             (intervento.work_start_2 && intervento.work_end_2);
+                    }).map(intervento => {
+                      const segments = [];
+                      if (intervento.work_start_1 && intervento.work_end_1) {
+                        segments.push(`${intervento.work_start_1}-${intervento.work_end_1}`);
+                      }
+                      if (intervento.work_start_2 && intervento.work_end_2) {
+                        segments.push(`${intervento.work_start_2}-${intervento.work_end_2}`);
+                      }
+                      return segments.join(', ');
+                    }).filter(segment => segment) || [];
+                    
+                    const orari = festivaInterventions.length > 0 
+                      ? ` (${festivaInterventions.join(', ')})`
+                      : '';
+                    
                     const isOvertime = breakdown?.standby?.isOvertimeApplied;
                     const rate = breakdown?.standby?.workEarnings?.holiday && breakdown?.standby?.workHours?.holiday > 0 
                       ? breakdown.standby.workEarnings.holiday / breakdown.standby.workHours.holiday
@@ -1266,210 +2191,33 @@ const EarningsSummary = ({ form, settings, isDateInStandbyCalendar, isStandbyCal
                     const baseRate = settings.contract?.hourlyRate || 16.41;
                     const percentage = Math.round((rate / baseRate - 1) * 100);
                     const percentageText = percentage > 0 ? ` (+${percentage}%)` : '';
+                    const earnings = breakdown?.standby?.workEarnings?.holiday || 0;
                     
-                    if (isOvertime) {
-                      return `Straordinario festivo (reperibilità)${percentageText}`;
-                    } else {
-                      return `Lavoro festivo${percentageText}`;
-                    }
+                    const labelText = isOvertime ? `Straordinario festivo` : `Lavoro festivo`;
+                    
+                    return `   ${labelText}${orari}${percentageText}: ${formatSafeHours(breakdown?.standby?.workHours?.holiday)} = €${earnings.toFixed(2).replace('.', ',')}`;
                   })()}
                 </Text>
-                <Text style={styles.breakdownValue}>{formatSafeHours(breakdown?.standby?.workHours?.holiday)}</Text>
-              </View>
-              {breakdown?.standby?.workEarnings?.holiday > 0 && breakdown?.standby?.workHours?.holiday > 0 && (
-                <Text style={styles.rateCalc}>
-                  {(breakdown.standby.workEarnings.holiday / breakdown.standby.workHours.holiday).toFixed(2).replace('.', ',')} € x {formatSafeHours(breakdown?.standby?.workHours?.holiday)} = {breakdown?.standby?.workEarnings?.holiday.toFixed(2).replace('.', ',')} €
+              )}
+              
+              {/* Viaggio festivo reperibilità */}
+              {breakdown?.standby?.travelHours?.holiday > 0 && (
+                <Text style={styles.breakdownDetail}>
+                  {'   '}Viaggio festivo: {formatSafeHours(breakdown?.standby?.travelHours?.holiday)} = €{breakdown?.standby?.travelEarnings?.holiday?.toFixed(2)?.replace('.', ',')}
                 </Text>
               )}
             </View>
           )}
           
-          {/* Viaggi reperibilità */}
-          {breakdown?.standby?.travelHours?.ordinary > 0 && (
-            <View style={styles.breakdownItem}>
-              <View style={styles.breakdownRow}>
-                <Text style={styles.breakdownLabel}>
-                  {(() => {
-                    if (settings?.travelHoursSetting === 'EXCESS_AS_OVERTIME') {
-                      // Verifica se le ore totali superano 8h per determinare se è straordinario
-                      const totalOrdinaryHours = (breakdown?.ordinary?.hours?.lavoro_giornaliera || 0) + 
-                                                 (breakdown?.ordinary?.hours?.viaggio_giornaliera || 0);
-                      const isOvertime = totalOrdinaryHours >= 8;
-                      return isOvertime ? 'Straordinario diurno (da viaggio reperibilità)' : 'Viaggio diurno';
-                    }
-                    return 'Viaggio diurno';
-                  })()}
-                </Text>
-                <Text style={styles.breakdownValue}>{formatSafeHours(breakdown?.standby?.travelHours?.ordinary)}</Text>
-              </View>
-              {breakdown?.standby?.travelEarnings?.ordinary > 0 && breakdown?.standby?.travelHours?.ordinary > 0 && (
-                <Text style={styles.rateCalc}>
-                  {(() => {
-                    const base = settings.contract?.hourlyRate || 16.41;
-                    if (settings?.travelHoursSetting === 'EXCESS_AS_OVERTIME') {
-                      const totalOrdinaryHours = (breakdown?.ordinary?.hours?.lavoro_giornaliera || 0) + 
-                                                 (breakdown?.ordinary?.hours?.viaggio_giornaliera || 0);
-                      const isOvertime = totalOrdinaryHours >= 8;
-                      if (isOvertime) {
-                        const overtimeRate = settings.contract?.overtimeRates?.day || 1.2;
-                        const rate = base * overtimeRate;
-                        return `${rate.toFixed(2).replace('.', ',')} € x ${formatSafeHours(breakdown?.standby?.travelHours?.ordinary)} (Straordinario +20%) = ${breakdown?.standby?.travelEarnings?.ordinary.toFixed(2).replace('.', ',')} €`;
-                      }
-                    }
-                    // Tariffa viaggio normale
-                    const rate = base * (settings.travelCompensationRate || 1.0);
-                    return `${rate.toFixed(2).replace('.', ',')} € x ${formatSafeHours(breakdown?.standby?.travelHours?.ordinary)} (Tariffa viaggio ${Math.round((settings.travelCompensationRate || 1.0) * 100)}%) = ${breakdown?.standby?.travelEarnings?.ordinary.toFixed(2).replace('.', ',')} €`;
-                  })()}
-                </Text>
-              )}
-            </View>
-          )}
-          
-          {/* Viaggio serale reperibilità */}
-          {breakdown?.standby?.travelHours?.evening > 0 && (
-            <View style={styles.breakdownItem}>
-              <View style={styles.breakdownRow}>
-                <Text style={styles.breakdownLabel}>
-                  {(() => {
-                    const travelWithBonus = settings?.standbySettings?.travelWithBonus === true;
-                    
-                    if (settings?.travelHoursSetting === 'EXCESS_AS_OVERTIME') {
-                      const totalOrdinaryHours = (breakdown?.ordinary?.hours?.lavoro_giornaliera || 0) + 
-                                                 (breakdown?.ordinary?.hours?.viaggio_giornaliera || 0);
-                      const isOvertime = totalOrdinaryHours >= 8;
-                      if (isOvertime) {
-                        return travelWithBonus ? 'Straordinario serale (da viaggio reperibilità) (+25%)' : 'Straordinario serale (da viaggio reperibilità)';
-                      } else {
-                        return travelWithBonus ? 'Viaggio serale (+25%)' : 'Viaggio serale';
-                      }
-                    }
-                    return travelWithBonus ? 'Viaggio serale (+25%)' : 'Viaggio serale';
-                  })()}
-                </Text>
-                <Text style={styles.breakdownValue}>{formatSafeHours(breakdown?.standby?.travelHours?.evening)}</Text>
-              </View>
-              {breakdown?.standby?.travelEarnings?.evening > 0 && breakdown?.standby?.travelHours?.evening > 0 && (
-                <Text style={styles.rateCalc}>
-                  {(() => {
-                    const base = settings.contract?.hourlyRate || 16.41;
-                    const travelWithBonus = settings?.standbySettings?.travelWithBonus === true;
-                    
-                    if (settings?.travelHoursSetting === 'EXCESS_AS_OVERTIME') {
-                      const totalOrdinaryHours = (breakdown?.ordinary?.hours?.lavoro_giornaliera || 0) + 
-                                                 (breakdown?.ordinary?.hours?.viaggio_giornaliera || 0);
-                      const isOvertime = totalOrdinaryHours >= 8;
-                      if (isOvertime) {
-                        const multiplier = travelWithBonus ? 1.25 : 1.0;
-                        const rate = base * multiplier;
-                        const label = travelWithBonus ? 'Straordinario serale +25%' : 'Straordinario serale';
-                        return `${rate.toFixed(2).replace('.', ',')} € x ${formatSafeHours(breakdown?.standby?.travelHours?.evening)} (${label}) = ${breakdown?.standby?.travelEarnings?.evening.toFixed(2).replace('.', ',')} €`;
-                      }
-                    }
-                    // Tariffa viaggio con maggiorazione serale se abilitata
-                    const multiplier = travelWithBonus ? 1.25 : 1.0;
-                    const rate = base * multiplier * (settings.travelCompensationRate || 1.0);
-                    const label = travelWithBonus ? 'Viaggio serale +25%' : 'Viaggio serale';
-                    return `${rate.toFixed(2).replace('.', ',')} € x ${formatSafeHours(breakdown?.standby?.travelHours?.evening)} (${label}) = ${breakdown?.standby?.travelEarnings?.evening.toFixed(2).replace('.', ',')} €`;
-                  })()}
-                </Text>
-              )}
-            </View>
-          )}
-          
-          {/* Viaggio notturno reperibilità */}
-          {breakdown?.standby?.travelHours?.night > 0 && (
-            <View style={styles.breakdownItem}>
-              <View style={styles.breakdownRow}>
-                <Text style={styles.breakdownLabel}>
-                  {(() => {
-                    const travelWithBonus = settings?.standbySettings?.travelWithBonus === true;
-                    
-                    if (settings?.travelHoursSetting === 'EXCESS_AS_OVERTIME') {
-                      const totalOrdinaryHours = (breakdown?.ordinary?.hours?.lavoro_giornaliera || 0) + 
-                                                 (breakdown?.ordinary?.hours?.viaggio_giornaliera || 0);
-                      const isOvertime = totalOrdinaryHours >= 8;
-                      if (isOvertime) {
-                        return travelWithBonus ? 'Straordinario notturno (da viaggio reperibilità) (+35%)' : 'Straordinario notturno (da viaggio reperibilità)';
-                      } else {
-                        return travelWithBonus ? 'Viaggio notturno (+35%)' : 'Viaggio notturno';
-                      }
-                    }
-                    return travelWithBonus ? 'Viaggio notturno (+35%)' : 'Viaggio notturno';
-                  })()}
-                </Text>
-                <Text style={styles.breakdownValue}>{formatSafeHours(breakdown?.standby?.travelHours?.night)}</Text>
-              </View>
-              {breakdown?.standby?.travelEarnings?.night > 0 && breakdown?.standby?.travelHours?.night > 0 && (
-                <Text style={styles.rateCalc}>
-                  {(() => {
-                    const base = settings.contract?.hourlyRate || 16.41;
-                    const nightMultiplier = settings.contract?.overtimeRates?.nightAfter22 || 1.35; // Maggiorazione notturna dopo 22:00
-                    const travelWithBonus = settings?.standbySettings?.travelWithBonus === true;
-                    
-                    if (settings?.travelHoursSetting === 'EXCESS_AS_OVERTIME') {
-                      const totalOrdinaryHours = (breakdown?.ordinary?.hours?.lavoro_giornaliera || 0) + 
-                                                 (breakdown?.ordinary?.hours?.viaggio_giornaliera || 0);
-                      const isOvertime = totalOrdinaryHours >= 8;
-                      if (isOvertime) {
-                        const rate = base * nightMultiplier;
-                        const label = travelWithBonus ? 'Straordinario notturno +35%' : 'Straordinario notturno';
-                        return `${rate.toFixed(2).replace('.', ',')} € x ${formatSafeHours(breakdown?.standby?.travelHours?.night)} (${label}) = ${breakdown?.standby?.travelEarnings?.night.toFixed(2).replace('.', ',')} €`;
-                      }
-                    }
-                    // Tariffa viaggio con maggiorazione notturna se abilitata
-                    const multiplier = travelWithBonus ? 1.35 : 1.0;
-                    const rate = base * multiplier * (settings.travelCompensationRate || 1.0);
-                    const label = travelWithBonus ? 'Viaggio notturno +35%' : 'Viaggio notturno';
-                    return `${rate.toFixed(2).replace('.', ',')} € x ${formatSafeHours(breakdown?.standby?.travelHours?.night)} (${label}) = ${breakdown?.standby?.travelEarnings?.night.toFixed(2).replace('.', ',')} €`;
-                  })()}
-                </Text>
-              )}
-            </View>
-          )}
 
-          {/* Viaggio sabato reperibilità */}
-          {breakdown?.standby?.travelHours?.saturday > 0 && (
-            <View style={styles.breakdownItem}>
-              <View style={styles.breakdownRow}>
-                <Text style={styles.breakdownLabel}>
-                  Viaggio sabato (+25%)
-                </Text>
-                <Text style={styles.breakdownValue}>{formatSafeHours(breakdown?.standby?.travelHours?.saturday)}</Text>
-              </View>
-              {breakdown?.standby?.travelEarnings?.saturday > 0 && breakdown?.standby?.travelHours?.saturday > 0 && (
-                <Text style={styles.rateCalc}>
-                  {(() => {
-                    const base = settings.contract?.hourlyRate || 16.41;
-                    const saturdayMultiplier = settings.contract?.overtimeRates?.saturday || 1.25;
-                    const rate = base * saturdayMultiplier * (settings.travelCompensationRate || 1.0);
-                    return `${rate.toFixed(2).replace('.', ',')} € x ${formatSafeHours(breakdown?.standby?.travelHours?.saturday)} (Viaggio sabato +25%) = ${breakdown?.standby?.travelEarnings?.saturday.toFixed(2).replace('.', ',')} €`;
-                  })()}
-                </Text>
-              )}
-            </View>
-          )}
+          
 
-          {/* Viaggio festivo/domenica reperibilità */}
-          {breakdown?.standby?.travelHours?.holiday > 0 && (
-            <View style={styles.breakdownItem}>
-              <View style={styles.breakdownRow}>
-                <Text style={styles.breakdownLabel}>
-                  Viaggio festivo (+30%)
-                </Text>
-                <Text style={styles.breakdownValue}>{formatSafeHours(breakdown?.standby?.travelHours?.holiday)}</Text>
-              </View>
-              {breakdown?.standby?.travelEarnings?.holiday > 0 && breakdown?.standby?.travelHours?.holiday > 0 && (
-                <Text style={styles.rateCalc}>
-                  {(() => {
-                    const base = settings.contract?.hourlyRate || 16.41;
-                    const holidayMultiplier = settings.contract?.overtimeRates?.holiday || 1.3;
-                    const rate = base * holidayMultiplier * (settings.travelCompensationRate || 1.0);
-                    return `${rate.toFixed(2).replace('.', ',')} € x ${formatSafeHours(breakdown?.standby?.travelHours?.holiday)} (Viaggio festivo +30%) = ${breakdown?.standby?.travelEarnings?.holiday.toFixed(2).replace('.', ',')} €`;
-                  })()}
-                </Text>
-              )}
-            </View>
-          )}
+          
+
+
+
+
+
           
           <View style={[styles.breakdownRow, styles.totalRow]}>
             <Text style={styles.breakdownLabel}>Totale reperibilità</Text>
@@ -1740,6 +2488,16 @@ const TimeEntryForm = ({ route, navigation }) => {
   const { settings } = useSettings();
   const calculationService = useCalculationService();
   
+  // 🔍 DEBUG: Log delle impostazioni ricevute
+  useEffect(() => {
+    console.log('🔍 TimeEntryForm - Settings ricevute:', {
+      hasSettings: !!settings,
+      hasSpecialDayTravelSettings: !!settings?.specialDayTravelSettings,
+      specialDayTravelSettings: settings?.specialDayTravelSettings,
+      keysInSettings: settings ? Object.keys(settings) : 'null'
+    });
+  }, [settings]);
+  
   // Crea stili dinamici basati sul tema
   const styles = createStyles(theme);
   
@@ -1764,6 +2522,7 @@ const TimeEntryForm = ({ route, navigation }) => {
     extraTurns: [],
     reperibilita: false,
     reperibilityManualOverride: false, // Nuovo flag per tracciare override manuale
+    standbyAllowance: false, // Flag per indennità di reperibilità
     interventi: [],
     pasti: { pranzo: false, cena: false },
     pastipranzoManualOverride: false, // Flag per override manuale pranzo
@@ -1882,6 +2641,7 @@ const TimeEntryForm = ({ route, navigation }) => {
         })(),
         reperibilita: entryToEdit.is_standby_day === 1 || entryToEdit.isStandbyDay === 1,
         reperibilityManualOverride: entryToEdit.reperibilityManualOverride === true || false,
+        standbyAllowance: entryToEdit.standby_allowance === 1 || entryToEdit.standbyAllowance === 1,
         // Carica l'array di interventi direttamente dal DB
         interventi: entryToEdit.interventi && Array.isArray(entryToEdit.interventi) ? entryToEdit.interventi : [],
         pasti: {
@@ -1921,7 +2681,7 @@ const TimeEntryForm = ({ route, navigation }) => {
       console.log('Auto-compilazione attivata per:', dayType);
       
       // Calcola la retribuzione giornaliera secondo CCNL
-      const ccnlDailyRate = settings?.contract?.dailyRate || 107.69;
+      const ccnlDailyRate = settings?.contract?.dailyRate || 109.19;
       
       // Applica i dati di auto-compilazione sempre per giorni di ferie/malattia/riposo/permesso
       setForm(prev => ({
@@ -2155,7 +2915,7 @@ const TimeEntryForm = ({ route, navigation }) => {
         setForm({ ...form, viaggi });
       } else if (dateField.startsWith('intervento')) {
         const [_, idx, field] = dateField.split('-');
-        const interventi = [...form.interventi];
+        const interventi = form.interventi.map(i => ({...i}));
         interventi[parseInt(idx)][field] = timeString;
         
         // Auto-compilazione orari specifici per interventi - sempre attiva
@@ -2337,7 +3097,7 @@ const TimeEntryForm = ({ route, navigation }) => {
     const handleClearTime = (field) => {
       const key = `${isIntervento ? 'intervento' : 'viaggio'}-${idx}-${field}`;
       if (isIntervento) {
-        const interventi = [...form.interventi];
+        const interventi = form.interventi.map(i => ({...i}));
         interventi[idx][field] = '';
         setForm({...form, interventi});
       } else {
@@ -2469,7 +3229,7 @@ const TimeEntryForm = ({ route, navigation }) => {
           setForm({ ...form, viaggi });
         } else if (fieldId.startsWith('intervento')) {
           const [type, idx, field] = fieldId.split('-');
-          const interventi = [...form.interventi];
+          const interventi = form.interventi.map(i => ({...i}));
           interventi[parseInt(idx)][field] = '';
           setForm({ ...form, interventi });
         }
@@ -2519,8 +3279,8 @@ const TimeEntryForm = ({ route, navigation }) => {
             try {
               await DatabaseService.deleteWorkEntry(entryId);
               Alert.alert('Eliminato', 'Inserimento eliminato con successo.');
-              // Torna alla TimeEntryScreen e refresh automatico sia TimeEntry che Dashboard
-              navigation.navigate('TimeEntryScreen', { refresh: true, refreshDashboard: true });
+              // Torna alla schermata precedente con refresh
+              navigation.navigate('TimeEntryScreen', { refreshFromForm: true });
             } catch (e) {
               Alert.alert('Errore', 'Errore durante la cancellazione dal database.');
             }
@@ -2697,9 +3457,70 @@ const TimeEntryForm = ({ route, navigation }) => {
     }
   }, [form.viaggi, form.interventi, form.trasfertaManualOverride, form.pasti, settings]);
 
+  // � Funzione per fare screenshot del form
+  const printForm = async () => {
+    try {
+      console.log('� FORM SCREENSHOT - Avvio cattura schermata...');
+      
+      Alert.alert(
+        '� Screenshot Form',
+        'Vuoi salvare una foto dell\'inserimento corrente?',
+        [
+          { text: 'Annulla', style: 'cancel' },
+          {
+            text: 'Cattura Screenshot',
+            onPress: async () => {
+              try {
+                // Cattura lo screenshot della vista
+                const uri = await captureRef(viewRef, {
+                  format: 'png',
+                  quality: 1,
+                  result: 'tmpfile',
+                });
+
+                console.log('📸 Screenshot catturato:', uri);
+
+                // Condividi l'immagine
+                if (await Sharing.isAvailableAsync()) {
+                  await Sharing.shareAsync(uri, {
+                    mimeType: 'image/png',
+                    dialogTitle: 'Condividi Screenshot Form',
+                  });
+                  
+                  Alert.alert(
+                    '✅ Screenshot Completato',
+                    'Lo screenshot del form è stato salvato e condiviso con successo!',
+                    [{ text: 'OK' }]
+                  );
+                } else {
+                  Alert.alert(
+                    '❌ Condivisione Non Disponibile',
+                    'Impossibile condividere lo screenshot su questo dispositivo.',
+                    [{ text: 'OK' }]
+                  );
+                }
+                
+              } catch (error) {
+                console.error('❌ FORM SCREENSHOT - Errore cattura:', error);
+                Alert.alert(
+                  'Errore Screenshot',
+                  `Impossibile catturare lo screenshot:\n\n${error.message}`,
+                  [{ text: 'OK' }]
+                );
+              }
+            }
+          }
+        ]
+      );
+    } catch (error) {
+      console.error('❌ FORM SCREENSHOT - Errore:', error);
+      Alert.alert('Errore', 'Impossibile avviare la cattura screenshot');
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar style={theme.isDark ? 'light' : 'dark'} backgroundColor={theme.colors.background} />
+      <StatusBar style={theme.isDark ? 'light' : 'dark'} />
       
       <ScrollView 
         style={styles.scrollView} 
@@ -2717,7 +3538,16 @@ const TimeEntryForm = ({ route, navigation }) => {
           <Text style={styles.headerTitle}>
             {isEdit ? 'Modifica Inserimento' : 'Nuovo Inserimento'}
           </Text>
-          <View style={styles.headerSpacer} />
+          <TouchableOpacity 
+            style={styles.printButton} 
+            onPress={printForm}
+          >
+            <MaterialCommunityIcons 
+              name="printer" 
+              size={24} 
+              color={theme.colors.primary} 
+            />
+          </TouchableOpacity>
         </View>
 
         {/* Messaggio Auto-compilazione */}
@@ -3528,7 +4358,7 @@ const TimeEntryForm = ({ route, navigation }) => {
                 dayType,
                 // Nuovi campi per giorni fissi
                 isFixedDay: form.isFixedDay || ['ferie', 'malattia', 'riposo', 'permesso'].includes(dayType),
-                fixedEarnings: form.fixedEarnings || ((['ferie', 'malattia', 'riposo', 'permesso'].includes(dayType)) ? (settings?.contract?.dailyRate || 107.69) : 0)
+                fixedEarnings: form.fixedEarnings || ((['ferie', 'malattia', 'riposo', 'permesso'].includes(dayType)) ? (settings?.contract?.dailyRate || 109.19) : 0)
               };
               
               const settingsObj = settings || {};
@@ -3537,7 +4367,7 @@ const TimeEntryForm = ({ route, navigation }) => {
               if (entry.isFixedDay) {
                 entry.totalEarnings = entry.fixedEarnings;
               } else {
-                const result = calculationService.calculateEarningsBreakdown(entry, settingsObj);
+                const result = await calculationService.calculateEarningsBreakdown(entry, settingsObj);
                 entry.totalEarnings = result.totalEarnings || 0;
               }
               
@@ -3581,7 +4411,8 @@ const TimeEntryForm = ({ route, navigation }) => {
                 }
               }
               
-              navigation.navigate('TimeEntryScreen', { refresh: true, refreshDashboard: true });
+              // Torna alla schermata precedente con refresh
+              navigation.navigate('TimeEntryScreen', { refreshFromForm: true });
             } catch (e) {
               console.error('Save Error:', e);
               Alert.alert('Errore', `Errore durante il salvataggio su database: ${e.message}`)
@@ -3645,6 +4476,15 @@ const createStyles = (theme) => StyleSheet.create({
   },
   headerSpacer: {
     width: 40,
+  },
+  printButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: theme.colors.card,
+    justifyContent: 'center',
+    alignItems: 'center',
+    ...theme.colors.cardElevation,
   },
 
   // Auto-compile notice styles

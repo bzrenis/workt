@@ -14,6 +14,31 @@ class JavaScriptBackupService {
     console.log('🚀 JavaScriptBackupService inizializzato');
   }
 
+  // 🕐 Genera timestamp nel fuso orario locale italiano
+  getLocalTimestamp() {
+    const now = new Date();
+    // Semplice: aggiungi 1 ora (UTC+1) o 2 ore (UTC+2) in base al DST
+    const isDST = this.isDaylightSavingTime(now);
+    const hoursToAdd = isDST ? 2 : 1; // UTC+2 in estate, UTC+1 in inverno
+    const italianTime = new Date(now.getTime() + (hoursToAdd * 60 * 60 * 1000));
+    return italianTime.toISOString();
+  }
+
+  // Verifica se siamo in ora legale (DST)
+  isDaylightSavingTime(date) {
+    const year = date.getFullYear();
+    // L'ora legale in Europa va dall'ultima domenica di marzo all'ultima domenica di ottobre
+    const march = new Date(year, 2, 31); // 31 marzo
+    const october = new Date(year, 9, 31); // 31 ottobre
+    
+    // Trova l'ultima domenica di marzo
+    const lastSundayMarch = new Date(march.getTime() - (march.getDay() * 24 * 60 * 60 * 1000));
+    // Trova l'ultima domenica di ottobre  
+    const lastSundayOctober = new Date(october.getTime() - (october.getDay() * 24 * 60 * 60 * 1000));
+    
+    return date >= lastSundayMarch && date < lastSundayOctober;
+  }
+
   // ✅ INIZIALIZZA SISTEMA BACKUP JAVASCRIPT
   async initialize() {
     if (this.isInitialized) {
@@ -55,57 +80,10 @@ class JavaScriptBackupService {
 
   // ✅ PROGRAMMA PROSSIMO BACKUP con JavaScript Timer
   async scheduleNextBackup(settings = null) {
-    try {
-      if (this.backupTimer) {
-        clearTimeout(this.backupTimer);
-        this.backupTimer = null;
-      }
-
-      if (!settings) {
-        settings = await this.getBackupSettings();
-      }
-
-      if (!settings.enabled) {
-        console.log('📱 Backup automatico disabilitato, timer non programmato');
-        return;
-      }
-
-      const now = new Date();
-      const [hours, minutes] = settings.time.split(':').map(Number);
-      
-      // Calcola prossimo backup
-      const nextBackup = new Date();
-      nextBackup.setHours(hours, minutes, 0, 0);
-      
-      // Se l'orario è già passato oggi, programma per domani
-      if (nextBackup <= now) {
-        nextBackup.setDate(nextBackup.getDate() + 1);
-      }
-
-
-      let msUntilBackup = nextBackup.getTime() - now.getTime();
-      // Se il tempo è minore di 10 secondi, programma per il giorno dopo
-      if (msUntilBackup < 10000) {
-        nextBackup.setDate(nextBackup.getDate() + 1);
-        msUntilBackup = nextBackup.getTime() - now.getTime();
-        console.log('⏩ Orario troppo vicino, backup programmato per il giorno dopo');
-      }
-
-      console.log(`🕐 Prossimo backup programmato per: ${nextBackup.toLocaleString('it-IT')}`);
-      console.log(`⏱️ Tempo rimanente: ${Math.round(msUntilBackup / 3600000)}h ${Math.round((msUntilBackup % 3600000) / 60000)}m`);
-
-      // Programma timer JavaScript
-      this.backupTimer = setTimeout(async () => {
-        await this.executeBackup();
-        // Programma il prossimo backup per 24 ore dopo
-        await this.scheduleNextBackup();
-      }, msUntilBackup);
-
-      console.log('✅ Timer JavaScript backup programmato');
-
-    } catch (error) {
-      console.error('❌ Errore programmazione backup:', error);
-    }
+    // In questa versione, il backup automatico viene eseguito solo tramite trigger esterno (es. background task, push notification, ecc.)
+    // Nessun setTimeout, nessun backup automatico su salvataggio/cambio dati
+    // Puoi integrare qui eventuali hook con librerie di background task se necessario
+    console.log('🕐 [JS] Backup automatico pianificato solo tramite trigger esterno/orario.');
   }
 
   // ✅ ESEGUI BACKUP AUTOMATICO
@@ -120,7 +98,7 @@ class JavaScriptBackupService {
     try {
       console.log('🔄 === INIZIO BACKUP AUTOMATICO JAVASCRIPT ===');
       
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const timestamp = this.getLocalTimestamp().replace(/[:.]/g, '-');
       const fileName = `auto-backup-${timestamp}.json`;
       
       // Ottieni tutti i dati dal database
@@ -228,17 +206,12 @@ class JavaScriptBackupService {
 
   // ✅ STOP BACKUP AUTOMATICO
   async stopAutoBackup() {
-    if (this.backupTimer) {
-      clearTimeout(this.backupTimer);
-      this.backupTimer = null;
-      console.log('🛑 Timer backup automatico fermato');
-    }
+    console.log('🛑 [JS] Backup automatico fermato (nessun timer attivo)');
   }
 
   // ✅ RIAVVIA BACKUP AUTOMATICO
   async restartAutoBackup() {
-    console.log('🔄 Riavvio backup automatico...');
-    await this.stopAutoBackup();
+    console.log('🔄 [JS] Riavvio backup automatico (nessun timer, solo re-inizializzazione)');
     await this.initialize();
   }
 

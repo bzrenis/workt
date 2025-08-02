@@ -12,19 +12,54 @@ class BackupService {
     // 🚀 SISTEMA IBRIDO: Prova NATIVO prima, poi fallback JavaScript
     this.nativeBackupService = NativeBackupService;
     this.jsBackupService = JavaScriptBackupService;
-    this.useJavaScriptSystem = false; // Inizia con nativo
+    this.useJavaScriptSystem = false; // Prova prima il nativo
     
     console.log('🚀 BackupService inizializzato con SISTEMA IBRIDO (Nativo + JavaScript)');
     console.log('📱 Tentativo sistema NATIVO per app builds, fallback JavaScript per Expo');
   }
 
+  // 🕐 Genera timestamp nel fuso orario locale italiano
+  getLocalTimestamp() {
+    const now = new Date();
+    // Semplice: aggiungi 1 ora (UTC+1) o 2 ore (UTC+2) in base al DST
+    const isDST = this.isDaylightSavingTime(now);
+    const hoursToAdd = isDST ? 2 : 1; // UTC+2 in estate, UTC+1 in inverno
+    const italianTime = new Date(now.getTime() + (hoursToAdd * 60 * 60 * 1000));
+    return italianTime.toISOString();
+  }
+
+  // Verifica se siamo in ora legale (DST)
+  isDaylightSavingTime(date) {
+    const year = date.getFullYear();
+    // L'ora legale in Europa va dall'ultima domenica di marzo all'ultima domenica di ottobre
+    const march = new Date(year, 2, 31); // 31 marzo
+    const october = new Date(year, 9, 31); // 31 ottobre
+    
+    // Trova l'ultima domenica di marzo
+    const lastSundayMarch = new Date(march.getTime() - (march.getDay() * 24 * 60 * 60 * 1000));
+    // Trova l'ultima domenica di ottobre  
+    const lastSundayOctober = new Date(october.getTime() - (october.getDay() * 24 * 60 * 60 * 1000));
+    
+    return date >= lastSundayMarch && date < lastSundayOctober;
+  }
+
   // ✅ INIZIALIZZA BACKUP AUTOMATICO (Nativo o JavaScript)
   async initialize() {
     try {
-      // Prova prima il sistema nativo
-      const nativeStatus = this.nativeBackupService.getSystemStatus();
+      // Prova prima il sistema nativo - aspetta che si inizializzi
+      let nativeStatus = null;
+      try {
+        // Aspetta che NativeBackupService finisca l'inizializzazione
+        if (this.nativeBackupService.initialize) {
+          await this.nativeBackupService.initialize();
+        }
+        nativeStatus = this.nativeBackupService.getSystemStatus();
+      } catch (nativeError) {
+        console.log('⚠️ NativeBackupService non disponibile:', nativeError.message);
+        nativeStatus = { isNativeReady: false };
+      }
       
-      if (nativeStatus.isNativeReady) {
+      if (nativeStatus && nativeStatus.isNativeReady) {
         console.log('🚀 Usando sistema backup NATIVO (expo-notifications)');
         console.log('✅ Backup automatico funzionerà anche con app chiusa!');
         this.useJavaScriptSystem = false;
@@ -48,21 +83,9 @@ class BackupService {
   // Verifica se il backup automatico è abilitato
   async isEnabled() {
     try {
-      // Controlla prima lo stato nelle impostazioni
-      const backupSettings = await AsyncStorage.getItem('backupSettings');
-      if (backupSettings) {
-        const settings = JSON.parse(backupSettings);
-        return settings.autoBackupEnabled === true;
-      }
-      
-      // Se non ci sono impostazioni, controlla i servizi
-      if (this.useJavaScriptSystem) {
-        // Per il sistema JavaScript, verifica che il servizio sia inizializzato
-        return this.jsBackupService.isInitialized === true;
-      } else {
-        // Per il sistema nativo, controlla lo stato del servizio
-        return this.nativeBackupService?.isInitialized === true;
-      }
+      // Usa getBackupSettings() che gestisce sia nativo che JavaScript
+      const settings = await this.getBackupSettings();
+      return settings.enabled === true;
     } catch (error) {
       console.error('❌ Errore verifica stato backup:', error);
       return false;
@@ -74,7 +97,7 @@ class BackupService {
     try {
       console.log('🔄 Creazione backup locale JavaScript...');
       
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const timestamp = this.getLocalTimestamp().replace(/[:.]/g, '-');
       const fileName = backupName || `worktracker-backup-${timestamp}.json`;
 
       let data;
@@ -534,7 +557,31 @@ class BackupService {
   // ⚙️ AGGIORNA IMPOSTAZIONI BACKUP (Nativo o JavaScript)
   async updateBackupSettings(enabled, time) {
     try {
-      if (!this.useJavaScriptSystem && this.nativeBackupService.getSystemStatus().isNativeReady) {
+      // Previeni aggiornamenti duplicati con timestamp più preciso
+      const currentUpdate = `${enabled}_${time}_${Date.now()}`;
+      const timeSinceLastUpdate = this._lastUpdateTime ? Date.now() - this._lastUpdateTime : 99999;
+      
+      if (this._lastUpdate === `${enabled}_${time}` && timeSinceLastUpdate < 2000) {
+        console.log('⚠️ Prevenuto aggiornamento duplicato:', `${enabled}_${time}`, `(${timeSinceLastUpdate}ms fa)`);
+        return true;
+      }
+      
+      this._lastUpdate = `${enabled}_${time}`;
+      this._lastUpdateTime = Date.now();
+      
+      // Controlla se il sistema nativo è disponibile e pronto
+      let useNative = false;
+      if (!this.useJavaScriptSystem) {
+        try {
+          const nativeStatus = this.nativeBackupService.getSystemStatus();
+          useNative = nativeStatus && nativeStatus.isNativeReady;
+        } catch (error) {
+          console.log('⚠️ Sistema nativo non disponibile per updateBackupSettings');
+          useNative = false;
+        }
+      }
+
+      if (useNative) {
         // Usa sistema nativo
         console.log('🔄 Aggiornamento impostazioni backup NATIVO');
         return await this.nativeBackupService.updateBackupSettings(enabled, time);
@@ -552,7 +599,19 @@ class BackupService {
   // 📋 OTTIENI IMPOSTAZIONI BACKUP (Nativo o JavaScript)
   async getBackupSettings() {
     try {
-      if (!this.useJavaScriptSystem && this.nativeBackupService.getSystemStatus().isNativeReady) {
+      // Controlla se il sistema nativo è disponibile e pronto
+      let useNative = false;
+      if (!this.useJavaScriptSystem) {
+        try {
+          const nativeStatus = this.nativeBackupService.getSystemStatus();
+          useNative = nativeStatus && nativeStatus.isNativeReady;
+        } catch (error) {
+          console.log('⚠️ Sistema nativo non disponibile per getBackupSettings');
+          useNative = false;
+        }
+      }
+
+      if (useNative) {
         // Usa sistema nativo
         return await this.nativeBackupService.getBackupSettings();
       } else {
@@ -636,11 +695,32 @@ class BackupService {
             });
             
             console.log('✅ Backup condiviso con expo-sharing');
+            
+            // Salva SOLO in AsyncStorage per referenza nella lista (senza duplicare il file)
+            const backupKey = `manual_backup_${timestamp.replace(/[:.]/g, '_')}`;
+            const backupMetadata = {
+              backupInfo: {
+                name: fileName,
+                created: timestamp,
+                type: 'manual',
+                version: '1.0',
+                app: 'WorkTracker',
+                entries: data.work_entries?.length || 0,
+                destination: 'sharing',
+                path: `Salvato dall'utente`,
+                filePath: `File salvato nella destinazione scelta dall'utente`,
+                fullPath: `File condiviso: ${fileName}`
+              }
+            };
+            await AsyncStorage.setItem(backupKey, JSON.stringify(backupMetadata));
+            console.log('💾 Metadata salvato in AsyncStorage:', backupKey);
+            
             return { 
               success: true, 
               method: 'expo-sharing', 
               fileName,
               path: fileUri,
+              backupKey,
               message: 'Backup salvato e condiviso con successo!'
             };
           }
@@ -657,9 +737,23 @@ class BackupService {
           });
           
           if (shareResult.action === Share.sharedAction) {
-            // Salva anche in AsyncStorage per riferimento
+            // Salva SOLO metadata in AsyncStorage per referenza
             const backupKey = `manual_backup_${timestamp.replace(/[:.]/g, '_')}`;
-            await AsyncStorage.setItem(backupKey, jsonString);
+            const backupMetadata = {
+              backupInfo: {
+                name: fileName,
+                created: timestamp,
+                type: 'manual',
+                version: '1.0',
+                app: 'WorkTracker',
+                entries: data.work_entries?.length || 0,
+                destination: 'sharing',
+                path: 'Condiviso tramite sistema',
+                filePath: fileName,
+                fullPath: `Condiviso: ${fileName}`
+              }
+            };
+            await AsyncStorage.setItem(backupKey, JSON.stringify(backupMetadata));
             await this.updateBackupList(fileName, backupKey, 'manual');
             
             console.log('✅ Backup condiviso con Share API');
@@ -681,7 +775,16 @@ class BackupService {
       
       // Ultimo fallback: AsyncStorage
       const backupKey = `manual_backup_${timestamp.replace(/[:.]/g, '_')}`;
-      await AsyncStorage.setItem(backupKey, JSON.stringify(backupData));
+      const backupWithAsyncMetadata = {
+        ...backupData,
+        backupInfo: {
+          ...backupData.backupInfo,
+          destination: 'asyncstorage',
+          path: backupKey,
+          filePath: `AsyncStorage: ${backupKey}`
+        }
+      };
+      await AsyncStorage.setItem(backupKey, JSON.stringify(backupWithAsyncMetadata));
       
       // Aggiorna lista backup
       await this.updateBackupList(fileName, backupKey, 'manual');
@@ -761,6 +864,73 @@ class BackupService {
     } catch (error) {
       console.error('❌ Errore aggiornamento completo impostazioni backup:', error);
       return false;
+    }
+  }
+
+  // 📂 OTTIENI LISTA BACKUP ESISTENTI
+  async getExistingBackups() {
+    try {
+      const keys = await AsyncStorage.getAllKeys();
+      console.log(`🔍 [DEBUG] Tutte le chiavi AsyncStorage (${keys.length}):`, keys.slice(0, 10)); // Mostra prime 10
+      
+      const backupKeys = keys.filter(key => 
+        key.startsWith('backup_') || 
+        key.startsWith('manual-backup-') || 
+        key.startsWith('manual_backup_') || // Nuovo formato
+        key.startsWith('auto-backup-') ||
+        key.startsWith('worktracker-backup-')
+      );
+      
+      console.log(`🔍 [DEBUG] Chiavi backup filtrate (${backupKeys.length}):`, backupKeys);
+      
+      if (backupKeys.length === 0) {
+        console.log('📂 Nessun backup trovato in AsyncStorage');
+        return [];
+      }
+
+      const backups = [];
+      for (const key of backupKeys) {
+        try {
+          const backupData = await AsyncStorage.getItem(key);
+          if (backupData) {
+            const parsed = JSON.parse(backupData);
+            // Supporta sia il formato nuovo (metadata) che quello vecchio (backupInfo)
+            const metadata = parsed.metadata || parsed.backupInfo || {};
+            
+            console.log(`🔍 [DEBUG] Backup ${key}:`, {
+              hasMetadata: !!metadata,
+              metadataKeys: Object.keys(metadata),
+              type: metadata.type,
+              destination: metadata.destination,
+              path: metadata.path
+            });
+            
+            const backup = {
+              key: key,
+              name: metadata.name || key,
+              createdAt: metadata.created || metadata.createdAt || new Date().toISOString(),
+              size: backupData.length, // Usa length invece di Blob per React Native
+              type: metadata.type || 'manual',
+              entries: parsed.workEntries?.length || parsed.data?.workEntries?.length || 0,
+              destination: metadata.destination || 'asyncstorage',
+              path: metadata.path || key, // Percorso completo o chiave AsyncStorage
+              filePath: metadata.filePath || metadata.path || key // Campo filePath aggiunto
+            };
+            backups.push(backup);
+          }
+        } catch (parseError) {
+          console.warn(`⚠️ Errore parsing backup ${key}:`, parseError);
+        }
+      }
+
+      // Ordina per data di creazione (più recenti prima)
+      backups.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+      
+      console.log(`📂 Trovati ${backups.length} backup esistenti`);
+      return backups;
+    } catch (error) {
+      console.error('❌ Errore lettura backup esistenti:', error);
+      return [];
     }
   }
 }
