@@ -34,11 +34,26 @@ TaskManager.defineTask(BACKUP_TASK, async () => {
 
 export async function registerBackgroundBackupTask() {
   try {
-    const status = await BackgroundFetch.getStatusAsync();
-    if (status === BackgroundFetch.Status.Restricted || status === BackgroundFetch.Status.Denied) {
+    // Verifica se BackgroundFetch è disponibile
+    if (!BackgroundFetch || !BackgroundFetch.getStatusAsync) {
+      console.log('⚠️ [BackgroundFetch] Modulo non disponibile - saltando registrazione');
+      return false;
+    }
+    
+    let status;
+    try {
+      status = await BackgroundFetch.getStatusAsync();
+    } catch (statusError) {
+      console.log('⚠️ [BackgroundFetch] Impossibile verificare status:', statusError.message);
+      return false;
+    }
+    
+    // Verifica se le costanti di status esistono prima di usarle
+    if (BackgroundFetch.Status && (status === BackgroundFetch.Status.Restricted || status === BackgroundFetch.Status.Denied)) {
       console.warn('❌ [BackgroundFetch] Permessi background negati');
       return false;
     }
+    
     await BackgroundFetch.registerTaskAsync(BACKUP_TASK, {
       minimumInterval: 60 * 60, // 1 ora (in secondi)
       stopOnTerminate: false,

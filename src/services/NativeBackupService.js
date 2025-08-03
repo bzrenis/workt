@@ -15,6 +15,7 @@ class NativeBackupService {
     this.scheduledBackupId = null;
     this.lastAutoBackupTime = 0; // Timestamp ultimo backup automatico (anti-loop)
     this.notificationListenerSetup = false; // Flag per evitare listener multipli
+    this.backupCheckInterval = null; // Interval per check periodico backup automatico
     console.log('🚀 NativeBackupService inizializzato con supporto destinazioni multiple');
     // Avvia inizializzazione in background
     this.initialize();
@@ -81,7 +82,8 @@ class NativeBackupService {
       // Configura il comportamento delle notifiche
       Notifications.setNotificationHandler({
         handleNotification: async () => ({
-          shouldShowAlert: true,
+          shouldShowBanner: true,  // Sostituisce shouldShowAlert
+          shouldShowList: true,    // Sostituisce shouldShowAlert
           shouldPlaySound: true,
           shouldSetBadge: true,
         }),
@@ -259,32 +261,40 @@ class NativeBackupService {
       console.log(`[DEBUG] 📅 Differenza finale: ${finalDiffInSeconds} secondi`);
       
       // Nessun backup immediato, solo all'orario programmato
-      console.log(`🔔 [NATIVE] Programmando backup per: ${nextTrigger.toLocaleString('it-IT')} (tra ${finalDiffInSeconds} secondi)`);
+      console.log(`🔔 [NATIVE] Programmando backup automatico per: ${nextTrigger.toLocaleString('it-IT')} (tra ${finalDiffInSeconds} secondi)`);
+      
+      // Crea notifica SILENZIOSA che esegue backup automaticamente
       const notificationId = await this.notificationsModule.scheduleNotificationAsync({
         content: {
           title: '💾 WorkT - Backup Automatico',
-          body: 'Avvio backup automatico dei dati lavorativi...',
+          body: 'Esecuzione backup automatico in corso...',
           data: {
-            type: 'auto_backup_trigger',
-            action: 'perform_backup',
-            timestamp: new Date().toISOString()
+            type: 'auto_backup_silent',
+            action: 'perform_backup_now',
+            timestamp: new Date().toISOString(),
+            destination: settings.destination || 'asyncstorage'
           },
-          sound: false,
-          priority: this.notificationsModule.AndroidNotificationPriority.LOW,
-          categoryIdentifier: 'BACKUP_CATEGORY'
+          sound: false, // SILENZIOSO
+          priority: this.notificationsModule.AndroidNotificationPriority.MIN, // PRIORITÀ MINIMA
+          categoryIdentifier: 'BACKUP_SILENT',
+          badge: 0, // Nessun badge
+          autoDismiss: true // Auto-rimozione
         },
         trigger: {
           seconds: finalDiffInSeconds,
           repeats: false,
         },
       });
+      
       this.scheduledBackupId = notificationId;
+      
       if (!this.notificationListenerSetup) {
-        this.setupBackupNotificationListener();
+        this.setupSilentBackupListener();
         this.notificationListenerSetup = true;
       }
-      console.log(`✅ [NATIVE] Backup programmato con ID: ${notificationId}`);
-      console.log(`📅 [NATIVE] Prossimo backup: ${nextTrigger.toLocaleString('it-IT')}`);
+      
+      console.log(`✅ [NATIVE] Backup silenzioso programmato con ID: ${notificationId}`);
+      console.log(`📅 [NATIVE] Esecuzione automatica: ${nextTrigger.toLocaleString('it-IT')}`);
       return true;
     } catch (error) {
       console.error(`❌ [NATIVE] Errore programmazione backup: ${error.message}`);
@@ -292,92 +302,215 @@ class NativeBackupService {
     }
   }
 
-  // Listener notifiche backup: più flessibile e con debug esteso
-  setupBackupNotificationListener() {
+  // 🔇 Listener SILENZIOSO per backup automatico (come notifiche di sistema)
+  setupSilentBackupListener() {
     if (!this.notificationsModule) return;
     if (this.notificationListenerSetup) return;
     this.notificationListenerSetup = true;
-    console.log('👂 [NATIVE] Setup listener notifiche backup');
+    console.log('� [NATIVE] Setup listener SILENZIOSO per backup automatico');
     
+    // 1️⃣ LISTENER PRIMARIO: Notifica ricevuta (app in background/chiusa)
     this.notificationsModule.addNotificationReceivedListener(async (notification) => {
-      console.log('🔔 [NATIVE] Notifica ricevuta:', JSON.stringify(notification.request.content));
       const data = notification.request.content.data;
-      if (data?.type === 'auto_backup_trigger') {
-        // Anti-trigger rafforzato: blocca backup immediati
-        const scheduleTimeStr = await AsyncStorage.getItem('last_backup_schedule_time');
-        if (scheduleTimeStr) {
-          const scheduleTime = parseInt(scheduleTimeStr, 10);
-          const timeSinceSchedule = Date.now() - scheduleTime;
-          const secondsSinceSchedule = timeSinceSchedule / 1000;
+      console.log('🔇 [NATIVE] Notifica backup ricevuta (app in background):', JSON.stringify(data));
+      
+      if (data?.type === 'auto_backup_silent' && data?.action === 'perform_backup_now') {
+        console.log('🔇 [NATIVE] Esecuzione backup automatico SILENZIOSO...');
+        
+        try {
+          // Esegui backup automaticamente SENZA UI
+          const backupResult = await this.executeSilentBackup(data.destination || 'asyncstorage');
           
-          console.log(`[DEBUG] ⏱️ Tempo dalla programmazione: ${secondsSinceSchedule.toFixed(0)} secondi`);
-          
-          // Blocca se il backup si sta eseguendo troppo presto (meno di 20 secondi dalla programmazione)
-          if (secondsSinceSchedule < 20) {
-            console.log(`⏳ [NATIVE] Backup bloccato: troppo presto dalla programmazione (${secondsSinceSchedule.toFixed(0)}s)`);
+          if (backupResult.success) {
+            console.log('✅ [NATIVE] Backup silenzioso completato con successo');
             
-            // 🔧 FALLBACK per Expo Development: programma timer JavaScript
-            const triggerTimeStr = await AsyncStorage.getItem('last_backup_trigger_time');
-            if (triggerTimeStr) {
-              const triggerTime = parseInt(triggerTimeStr, 10);
-              const now = Date.now();
-              const delayMs = triggerTime - now;
-              
-              if (delayMs > 0 && delayMs < 24 * 60 * 60 * 1000) { // max 24 ore
-                console.log(`🔄 [NATIVE] Programmando fallback JavaScript timer in ${Math.round(delayMs/1000)} secondi`);
-                setTimeout(async () => {
-                  console.log(`⏰ [NATIVE] Esecuzione backup tramite timer JavaScript fallback`);
-                  await this.executeBackup(true);
-                }, delayMs);
-              }
-            }
-            return;
+            // Programma il prossimo backup automaticamente
+            setTimeout(async () => {
+              await this.scheduleNextAutoBackup();
+            }, 1000);
+            
+            // Notifica discreta di completamento (se richiesta)
+            await this.showSilentBackupCompletedNotification(backupResult);
+          } else {
+            console.error('❌ [NATIVE] Backup silenzioso fallito:', backupResult.error);
+            await this.showSilentBackupErrorNotification(backupResult.error);
           }
+          
+        } catch (error) {
+          console.error('❌ [NATIVE] Errore durante backup silenzioso:', error);
+          await this.showSilentBackupErrorNotification(error.message);
         }
-        
-        // Anti-trigger tempo dall'ultimo backup
-        const lastBackupTimeStr = await AsyncStorage.getItem('last_backup_date');
-        const now = Date.now();
-        
-        if (lastBackupTimeStr) {
-          const lastBackupTime = new Date(lastBackupTimeStr).getTime();
-          const timeSinceLastBackup = now - lastBackupTime;
-          const minutesSinceLastBackup = timeSinceLastBackup / (1000 * 60);
-          
-          console.log(`[DEBUG] 📅 Ultimo backup: ${new Date(lastBackupTime).toLocaleString('it-IT')}`);
-          console.log(`[DEBUG] 📅 Tempo trascorso: ${minutesSinceLastBackup.toFixed(1)} minuti`);
-          
-          // Blocca backup se l'ultimo è stato fatto meno di 10 minuti fa
-          if (minutesSinceLastBackup < 10) {
-            console.log(`⏳ [NATIVE] Backup automatico bloccato: ultimo backup troppo recente (${minutesSinceLastBackup.toFixed(1)} min fa)`);
-            return;
-          }
-        }
-        
-        // Verifica orario programmato (tolleranza più ragionevole)
-        const triggerTimeStr = await AsyncStorage.getItem('last_backup_trigger_time');
-        if (triggerTimeStr) {
-          const triggerTime = parseInt(triggerTimeStr, 10);
-          const diff = Math.abs(now - triggerTime);
-          const hoursDiff = diff / (1000 * 60 * 60);
-          
-          console.log(`[DEBUG] ⏰ Orario trigger: ${new Date(triggerTime).toLocaleString('it-IT')}`);
-          console.log(`[DEBUG] ⏰ Differenza: ${hoursDiff.toFixed(2)} ore`);
-          
-          // Blocca se siamo troppo distanti dall'orario programmato (max 2 ore)
-          if (hoursDiff > 2) {
-            console.log(`⏳ [NATIVE] Backup bloccato: troppo distante dall'orario programmato (${hoursDiff.toFixed(2)}h)`);
-            return;
-          }
-        }
-        
-        console.log('🔔 [NATIVE] Notifica backup automatico triggerata');
-        await this.executeBackup(true);
-        console.log(`📅 [NATIVE] Backup completato.`);
-      } else {
-        console.log(`[DEBUG] 🔔 Notifica ricevuta ma non è backup trigger:`, data?.type);
       }
     });
+    
+    // 2️⃣ LISTENER SECONDARIO: Risposta utente (se app viene riaperta)
+    this.notificationsModule.addNotificationResponseReceivedListener(async (response) => {
+      const data = response.notification.request.content.data;
+      console.log('� [NATIVE] Risposta utente a notifica backup:', JSON.stringify(data));
+      
+      if (data?.type === 'backup_completed_silent') {
+        console.log('ℹ️ [NATIVE] Utente ha visualizzato notifica backup completato');
+        // Nessuna azione richiesta - solo log
+      }
+    });
+    
+    console.log('✅ [NATIVE] Listener silenzioso configurato per backup automatico');
+  }
+
+  // Metodo per eseguire backup silenzioso senza UI
+  async executeSilentBackup(destination = 'asyncstorage') {
+    try {
+      console.log('🔇 [NATIVE] Avvio backup silenzioso...');
+      
+      // Verifica anti-duplicato
+      const lastAutoBackupStr = await AsyncStorage.getItem('last_auto_backup_date');
+      const now = Date.now();
+      
+      if (lastAutoBackupStr) {
+        const lastAutoTime = new Date(lastAutoBackupStr).getTime();
+        const hoursSinceLast = (now - lastAutoTime) / (1000 * 60 * 60);
+        
+        if (hoursSinceLast < 8) { // Almeno 8 ore tra backup automatici
+          console.log(`⏳ [NATIVE] Backup silenzioso saltato: già eseguito ${hoursSinceLast.toFixed(1)}h fa`);
+          return { success: false, reason: 'too_recent' };
+        }
+      }
+      
+      // Ottieni i dati dal database
+      const timeEntries = await DatabaseService.getAllTimeEntries() || [];
+      const settings = await DatabaseService.getSettings() || {};
+      
+      const backupData = {
+        timeEntries,
+        settings,
+        metadata: {
+          version: '1.2.1',
+          createdAt: new Date().toISOString(),
+          type: 'auto_silent',
+          platform: 'native'
+        }
+      };
+      
+      const backupKey = `auto_backup_silent_${new Date().toISOString().split('T')[0]}_${Date.now()}`;
+      
+      // Salva in base alla destinazione
+      let saveResult;
+      switch (destination) {
+        case 'filesystem':
+          saveResult = await this.saveToFileSystem(backupKey, backupData);
+          break;
+        case 'cloud':
+          saveResult = await this.saveToCloud(backupKey, backupData);
+          break;
+        default:
+          saveResult = await this.saveToAsyncStorage(backupKey, backupData);
+      }
+      
+      if (saveResult.success) {
+        // Aggiorna timestamp ultimo backup
+        await AsyncStorage.setItem('last_auto_backup_date', new Date().toISOString());
+        console.log('✅ [NATIVE] Backup silenzioso completato con successo');
+        
+        return {
+          success: true,
+          destination: saveResult.destination,
+          key: backupKey,
+          size: JSON.stringify(backupData).length,
+          entriesCount: timeEntries.length
+        };
+      } else {
+        throw new Error(saveResult.error || 'Errore salvataggio backup');
+      }
+      
+    } catch (error) {
+      console.error('❌ [NATIVE] Errore backup silenzioso:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  // Notifica discreta di backup completato
+  async showSilentBackupCompletedNotification(backupResult) {
+    if (!this.notificationsModule) return;
+    
+    try {
+      await this.notificationsModule.scheduleNotificationAsync({
+        content: {
+          title: '✅ Backup Completato',
+          body: `Backup automatico salvato con successo (${backupResult.entriesCount} registrazioni)`,
+          data: {
+            type: 'backup_completed_silent',
+            result: backupResult
+          },
+          sound: false,
+          priority: this.notificationsModule.AndroidNotificationPriority.LOW,
+          badge: 0,
+          autoDismiss: true
+        },
+        trigger: null // Immediata
+      });
+      
+      console.log('📲 [NATIVE] Notifica backup completato inviata');
+    } catch (error) {
+      console.error('❌ [NATIVE] Errore notifica backup completato:', error);
+    }
+  }
+
+  // Notifica di errore backup
+  async showSilentBackupErrorNotification(errorMessage) {
+    if (!this.notificationsModule) return;
+    
+    try {
+      await this.notificationsModule.scheduleNotificationAsync({
+        content: {
+          title: '⚠️ Errore Backup',
+          body: `Backup automatico fallito: ${errorMessage}`,
+          data: {
+            type: 'backup_error_silent',
+            error: errorMessage
+          },
+          sound: true, // Solo per errori
+          priority: this.notificationsModule.AndroidNotificationPriority.DEFAULT
+        },
+        trigger: null // Immediata
+      });
+      
+      console.log('📲 [NATIVE] Notifica errore backup inviata');
+    } catch (error) {
+      console.error('❌ [NATIVE] Errore notifica errore backup:', error);
+    }
+  }
+
+  // Programma automaticamente il prossimo backup
+  async scheduleNextAutoBackup() {
+    try {
+      const settings = await this.getBackupSettings();
+      if (settings.enabled) {
+        console.log('🔄 [NATIVE] Programmazione automatica prossimo backup...');
+        await this.updateBackupSettings(settings);
+        console.log('✅ [NATIVE] Prossimo backup programmato automaticamente');
+      }
+    } catch (error) {
+      console.error('❌ [NATIVE] Errore programmazione prossimo backup:', error);
+    }
+  }
+
+  // Listener per compatibilità con SuperBackupService
+  setupBackupCompatibilityListener() {
+    if (!this.notificationsModule) return;
+    
+    this.notificationsModule.addNotificationReceivedListener(async (notification) => {
+      const data = notification.request.content.data;
+      
+      if (data?.type === 'backup_reminder') {
+        // Gestione backup_reminder da SuperBackupService
+        console.log('💾 [NATIVE] Ricevuto backup_reminder da SuperBackupService');
+        await this.executeBackup(true);
+        return;
+      } else if (data?.type !== 'auto_backup_trigger') {
+        console.log(`[DEBUG] 🔔 Notifica ricevuta (non backup):`, data?.type || 'unknown');
+      }
+    });
+    
     this.notificationsModule.addNotificationResponseReceivedListener(async (response) => {
       const data = response.notification.request.content.data;
       if (data?.type === 'auto_backup_trigger') {
@@ -385,6 +518,7 @@ class NativeBackupService {
         await this.executeBackup(true);
       }
     });
+    
     this.notificationsModule.setNotificationHandler({
       handleNotification: async (notification) => {
         const data = notification.request.content.data;
@@ -393,14 +527,16 @@ class NativeBackupService {
         // Mostra solo le notifiche di conferma backup, non quelle di trigger
         if (data?.type === 'backup_complete') {
           return {
-            shouldShowAlert: true,
+            shouldShowBanner: true,  // Sostituisce shouldShowAlert
+            shouldShowList: true,    // Sostituisce shouldShowAlert
             shouldPlaySound: true,
             shouldSetBadge: true,
           };
         } else {
           // Per tutte le altre notifiche (incluso auto_backup_trigger), non mostrare
           return {
-            shouldShowAlert: false,
+            shouldShowBanner: false, // Sostituisce shouldShowAlert
+            shouldShowList: false,   // Sostituisce shouldShowAlert
             shouldPlaySound: false,
             shouldSetBadge: false,
           };
@@ -412,19 +548,52 @@ class NativeBackupService {
   // 💾 Esegui backup con destinazione configurabile
   async executeBackup(isAutomatic = false) {
     try {
-      console.log(`🔄 [NATIVE] Esecuzione backup ${isAutomatic ? 'automatico' : 'manuale'}...`);
+      const executionTime = new Date().toLocaleString('it-IT', { 
+        hour: '2-digit', 
+        minute: '2-digit', 
+        second: '2-digit',
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric'
+      });
+      
+      console.log(`🔄 [NATIVE] 🚀 INIZIO BACKUP ${isAutomatic ? 'AUTOMATICO' : 'MANUALE'} alle ${executionTime}...`);
 
-      // ANTI-LOOP: blocca backup automatico se già fatto nelle ultime 12 ore
+      // ANTI-LOOP: blocca backup automatico solo se già fatto automaticamente nelle ultime 20 ore
+      // Ma permetti backup automatici programmati anche se ci sono stati backup manuali recenti
       if (isAutomatic) {
-        const lastBackupDateStr = await AsyncStorage.getItem('last_backup_date');
-        if (lastBackupDateStr) {
-          const lastBackupDate = new Date(lastBackupDateStr);
-          const now = new Date();
-          const diffMs = now - lastBackupDate;
-          if (diffMs < 12 * 60 * 60 * 1000) { // 12 ore
-            console.log('⏳ [NATIVE] Backup automatico già eseguito nelle ultime 12 ore, skip!');
-            return { success: false, error: 'Backup già eseguito di recente' };
+        const lastAutoBackupDateStr = await AsyncStorage.getItem('last_auto_backup_date');
+        if (lastAutoBackupDateStr) {
+          // ✅ VERIFICA CONSISTENZA: Se non ci sono backup fisici, rimuovi il timestamp
+          const allKeys = await AsyncStorage.getAllKeys();
+          const actualBackups = allKeys.filter(key => 
+            key.startsWith('backup_auto_') || 
+            key.startsWith('auto_backup_2')
+          );
+          
+          if (actualBackups.length === 0) {
+            console.log(`🧹 [NATIVE] Nessun backup fisico trovato ma timestamp presente - rimuovo timestamp inconsistente`);
+            await AsyncStorage.removeItem('last_auto_backup_date');
+            console.log(`✅ [NATIVE] Timestamp inconsistente rimosso - OK per nuovo backup`);
+          } else {
+            const lastAutoBackupDate = new Date(lastAutoBackupDateStr);
+            const now = new Date();
+            const diffMs = now - lastAutoBackupDate;
+            
+            // Se il timestamp è nel futuro, è corrotto - rimuovilo
+            if (diffMs < 0) {
+              console.log(`🧹 [NATIVE] Timestamp corrotto nel futuro (${Math.round(diffMs / (60 * 60 * 1000))}h), rimuovo la chiave`);
+              await AsyncStorage.removeItem('last_auto_backup_date');
+              console.log(`✅ [NATIVE] Timestamp corrotto rimosso - OK per nuovo backup`);
+            } else if (diffMs < 20 * 60 * 60 * 1000) { // 20 ore (per gestire backup programmati il giorno dopo)
+              console.log('⏳ [NATIVE] Backup automatico già eseguito nelle ultime 20 ore, skip!');
+              return { success: false, error: 'Backup automatico già eseguito di recente' };
+            } else {
+              console.log(`✅ [NATIVE] Ultimo backup automatico: ${Math.round(diffMs / (60 * 60 * 1000))}h fa - OK per nuovo backup`);
+            }
           }
+        } else {
+          console.log(`✅ [NATIVE] Nessun backup automatico precedente trovato - OK per nuovo backup`);
         }
       }
 
@@ -473,8 +642,11 @@ class NativeBackupService {
         throw new Error(`Errore salvataggio in ${settings.destination}: ${saveResult.error}`);
       }
 
-      // Aggiorna timestamp ultimo backup
+      // Aggiorna timestamp ultimo backup (generale e specifico per tipo)
       await AsyncStorage.setItem('last_backup_date', timestamp);
+      if (isAutomatic) {
+        await AsyncStorage.setItem('last_auto_backup_date', timestamp);
+      }
 
       console.log(`✅ [NATIVE] Backup ${isAutomatic ? 'automatico' : 'manuale'} completato in ${settings.destination}: ${saveResult.path || backupKey}`);
 
@@ -514,25 +686,25 @@ class NativeBackupService {
 
           console.log('📝 [NATIVE] Notifica conferma backup inviata');
           
-          // Test aggiuntivo: prova a inviare una notifica di test per verificare i permessi
-          setTimeout(async () => {
-            try {
-              await this.notificationsModule.scheduleNotificationAsync({
-                content: {
-                  title: '🔔 Test Notifica',
-                  body: 'Se vedi questo messaggio, le notifiche funzionano correttamente.',
-                  data: { type: 'test' },
-                },
-                trigger: { seconds: 2, repeats: false }
-              });
-              console.log('🔔 [NATIVE] Notifica di test programmata');
-            } catch (testError) {
-              console.error('❌ [NATIVE] Errore notifica di test:', testError);
-            }
-          }, 1000);
         } catch (notificationError) {
           console.warn('⚠️ [NATIVE] Errore invio notifica conferma:', notificationError.message);
         }
+      }
+
+      const completionTime = new Date().toLocaleString('it-IT', { 
+        hour: '2-digit', 
+        minute: '2-digit', 
+        second: '2-digit',
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric'
+      });
+      
+      console.log(`✅ [NATIVE] 🎉 BACKUP ${isAutomatic ? 'AUTOMATICO' : 'MANUALE'} COMPLETATO alle ${completionTime}!`);
+      if (isAutomatic) {
+        // Salva timestamp backup automatico per anti-loop
+        await AsyncStorage.setItem('last_auto_backup_date', new Date().toISOString());
+        console.log(`📅 [NATIVE] Timestamp backup automatico salvato: ${completionTime}`);
       }
 
       return { success: true, backupKey, timestamp };
@@ -817,36 +989,198 @@ class NativeBackupService {
     return false;
   }
 
-  // �🔄 Aggiorna impostazioni backup (enabled/time)
+  // 🔄 Aggiorna impostazioni backup (enabled/time) - NUOVO APPROCCIO CON CHECK PERIODICO
   async updateBackupSettings(enabled, time) {
     try {
       console.log(`🔄 [NATIVE] Aggiornamento impostazioni: ${enabled ? 'Abilitato' : 'Disabilitato'} alle ${time}`);
       
-      // Cancella sempre il backup precedente
+      // Cancella sempre il backup precedente e il check periodico
       await this.cancelScheduledBackup();
+      if (this.backupCheckInterval) {
+        clearInterval(this.backupCheckInterval);
+        this.backupCheckInterval = null;
+      }
+      
+      // Cancella tutte le notifiche backup programmate
+      try {
+        await this.notificationsModule.cancelAllScheduledNotificationsAsync();
+        console.log('🗑️ [NATIVE] Notifiche backup precedenti cancellate');
+      } catch (cancelError) {
+        console.warn('⚠️ [NATIVE] Errore cancellazione notifiche:', cancelError.message);
+      }
       
       // Salva nuove impostazioni
       await AsyncStorage.setItem('auto_backup_enabled', JSON.stringify(enabled));
       await AsyncStorage.setItem('auto_backup_time', time);
       
-      const settings = { enabled, time };
-      
-      if (enabled && this.isNativeReady) {
-        // Programma nuovo backup con le nuove impostazioni
-        const success = await this.scheduleNativeBackup(settings);
-        
-        if (success) {
-          console.log(`✅ [NATIVE] Backup automatico riprogrammato per le ${time}`);
-        } else {
-          console.error('❌ [NATIVE] Errore riprogrammazione backup');
-          return false;
-        }
-      } else if (enabled && !this.isNativeReady) {
-        console.log('⚠️ [NATIVE] Backup abilitato ma sistema nativo non disponibile');
-      } else {
+      if (!enabled) {
         console.log('📱 [NATIVE] Backup automatico disabilitato');
+        return true;
+      }
+
+      // NUOVO APPROCCIO: Check periodico invece di notifiche schedulate
+      const [hour, minute] = time.split(':').map(Number);
+      const now = new Date();
+      const nextTrigger = new Date(now);
+      nextTrigger.setHours(hour, minute, 0, 0);
+      
+      // Se l'ora è già passata oggi, programma per domani
+      if (nextTrigger <= now) {
+        nextTrigger.setDate(nextTrigger.getDate() + 1);
       }
       
+      // Salva il trigger time
+      await AsyncStorage.setItem('last_backup_schedule_time', Date.now().toString());
+      await AsyncStorage.setItem('last_backup_trigger_time', nextTrigger.getTime().toString());
+      
+      const currentTimeFormatted = now.toLocaleString('it-IT', { 
+        hour: '2-digit', 
+        minute: '2-digit', 
+        second: '2-digit',
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric'
+      });
+      
+      const triggerTimeFormatted = nextTrigger.toLocaleString('it-IT', { 
+        hour: '2-digit', 
+        minute: '2-digit', 
+        second: '2-digit',
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric'
+      });
+      
+      console.log(`[DEBUG] 📅 Ora attuale: ${currentTimeFormatted}`);
+      console.log(`[DEBUG] 📅 Prossimo backup programmato per: ${triggerTimeFormatted}`);
+      
+      // 🔔 SISTEMA IBRIDO: Notifica programmata + Check periodico
+      // 1️⃣ Programma notifica per quando l'app è chiusa
+      try {
+        await this.notificationsModule.scheduleNotificationAsync({
+          content: {
+            title: '⏰ Backup Automatico Programmato',
+            body: `È l'ora del backup automatico (${time})`,
+            data: { 
+              type: 'backup_trigger',
+              scheduledTime: triggerTime.getTime(),
+              destination: destination
+            },
+          },
+          trigger: triggerTime,
+        });
+        console.log(`🔔 [NATIVE] Notifica backup programmata per le ${triggerTimeFormatted} (funziona con app chiusa)`);
+      } catch (notifError) {
+        console.warn('⚠️ [NATIVE] Errore programmazione notifica backup:', notifError.message);
+      }
+      
+      // 2️⃣ Imposta check periodico per quando l'app è aperta
+      this.backupCheckInterval = setInterval(async () => {
+        try {
+          const now = new Date();
+          const currentTime = now.toLocaleString('it-IT', { 
+            hour: '2-digit', 
+            minute: '2-digit', 
+            second: '2-digit',
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric'
+          });
+          
+          const triggerTimeStr = await AsyncStorage.getItem('last_backup_trigger_time');
+          
+          if (triggerTimeStr) {
+            const triggerTime = parseInt(triggerTimeStr, 10);
+            const diff = Math.abs(now.getTime() - triggerTime);
+            const minutesDiff = diff / (1000 * 60);
+            
+            const triggerTimeFormatted = new Date(triggerTime).toLocaleString('it-IT', {
+              hour: '2-digit', 
+              minute: '2-digit', 
+              second: '2-digit',
+              day: '2-digit',
+              month: '2-digit',
+              year: 'numeric'
+            });
+            
+            // Log di monitoraggio ogni minuto
+            console.log(`🕐 [NATIVE CHECK - APP APERTA] Ora attuale: ${currentTime} | Backup programmato: ${triggerTimeFormatted} | Differenza: ${minutesDiff.toFixed(1)} min`);
+            
+            // Se siamo nel range di 1 minuto dal trigger time
+            if (minutesDiff <= 1) {
+              console.log(`⏰ [NATIVE CHECK - APP APERTA] 🎯 ORARIO BACKUP RAGGIUNTO! Ora attuale: ${currentTime}`);
+              
+              // Check anti-duplicate
+              const lastAutoBackupStr = await AsyncStorage.getItem('last_auto_backup_date');
+              console.log(`🔍 [DEBUG] lastAutoBackupStr valore: "${lastAutoBackupStr}"`);
+              
+              if (lastAutoBackupStr) {
+                // ✅ VERIFICA CONSISTENZA: Se non ci sono backup fisici, rimuovi il timestamp
+                const allKeys = await AsyncStorage.getAllKeys();
+                const actualBackups = allKeys.filter(key => 
+                  key.startsWith('backup_auto_') || 
+                  key.startsWith('auto_backup_2')
+                );
+                
+                if (actualBackups.length === 0) {
+                  console.log(`🧹 [NATIVE] Nessun backup fisico trovato ma timestamp presente - rimuovo timestamp inconsistente`);
+                  await AsyncStorage.removeItem('last_auto_backup_date');
+                  console.log(`✅ [NATIVE] Timestamp inconsistente rimosso - OK per nuovo backup`);
+                } else {
+                  const lastAutoTime = new Date(lastAutoBackupStr).getTime();
+                  const hoursSinceLast = (now.getTime() - lastAutoTime) / (1000 * 60 * 60);
+                  
+                  console.log(`🔍 [DEBUG] lastAutoTime: ${lastAutoTime} (${new Date(lastAutoTime).toLocaleString('it-IT')})`);
+                  console.log(`🔍 [DEBUG] now.getTime(): ${now.getTime()} (${now.toLocaleString('it-IT')})`);
+                  console.log(`🔍 [DEBUG] hoursSinceLast calcolato: ${hoursSinceLast.toFixed(2)}h`);
+                  console.log(`🔍 [DEBUG] Backup fisici trovati: ${actualBackups.length} (${actualBackups.join(', ')})`);
+                  
+                  // Se il timestamp è nel futuro, è corrotto - rimuovilo
+                  if (hoursSinceLast < 0) {
+                    console.log(`🧹 [NATIVE] Timestamp corrotto nel futuro (${hoursSinceLast.toFixed(1)}h), rimuovo la chiave`);
+                    await AsyncStorage.removeItem('last_auto_backup_date');
+                    console.log(`✅ [NATIVE] Timestamp corrotto rimosso - OK per nuovo backup`);
+                  } else if (hoursSinceLast < 8) {
+                    console.log(`⏳ [NATIVE] Backup automatico già eseguito ${hoursSinceLast.toFixed(1)}h fa, skip`);
+                    return;
+                  } else {
+                    console.log(`✅ [NATIVE] Ultimo backup automatico: ${hoursSinceLast.toFixed(1)}h fa - OK per nuovo backup`);
+                  }
+                }
+              } else {
+                console.log(`✅ [NATIVE] Nessun backup automatico precedente trovato - OK per nuovo backup`);
+              }
+              
+              console.log(`✅ [NATIVE] 🚀 AVVIO BACKUP AUTOMATICO alle ${currentTime}`);
+              await this.executeBackup(true);
+              
+              // Programma il prossimo backup per domani
+              const tomorrow = new Date(triggerTime);
+              tomorrow.setDate(tomorrow.getDate() + 1);
+              const tomorrowFormatted = tomorrow.toLocaleString('it-IT', {
+                hour: '2-digit', 
+                minute: '2-digit', 
+                day: '2-digit',
+                month: '2-digit',
+                year: 'numeric'
+              });
+              await AsyncStorage.setItem('last_backup_trigger_time', tomorrow.getTime().toString());
+              console.log(`📅 [NATIVE] Prossimo backup programmato per: ${tomorrowFormatted}`);
+            }
+          } else {
+            console.log(`🕐 [NATIVE CHECK] Ora attuale: ${currentTime} | Nessun backup programmato`);
+          }
+        } catch (checkError) {
+          const errorTime = new Date().toLocaleString('it-IT', { 
+            hour: '2-digit', 
+            minute: '2-digit', 
+            second: '2-digit' 
+          });
+          console.error(`❌ [NATIVE] Errore nel check periodico alle ${errorTime}:`, checkError);
+        }
+      }, 60000); // Check ogni minuto
+      
+      console.log(`✅ [NATIVE] Sistema backup automatico attivato con check periodico per le ${time}`);
       return true;
     } catch (error) {
       console.error('❌ Errore aggiornamento impostazioni backup:', error);
@@ -944,6 +1278,40 @@ class NativeBackupService {
   // 💾 Alias per compatibilità - backup locale 
   async createLocalBackup(backupName = null, filteredData = null) {
     return await this.executeBackup(false); // false = manuale
+  }
+
+  // 🧪 TEST BACKUP CON APP CHIUSA
+  async testBackupWithAppClosed() {
+    console.log('🧪 === TEST BACKUP NATIVO CON APP CHIUSA ===');
+    
+    try {
+      // Programma un backup tra 2 minuti
+      const testTime = new Date();
+      testTime.setMinutes(testTime.getMinutes() + 2);
+      const timeString = `${testTime.getHours().toString().padStart(2, '0')}:${testTime.getMinutes().toString().padStart(2, '0')}`;
+      
+      console.log(`🧪 Programmando backup test per le ${timeString} (tra 2 minuti)`);
+      console.log('🧪 Per testare:');
+      console.log('🧪 1. Chiudi completamente l\'app (background + swipe up)');
+      console.log('🧪 2. Spegni lo schermo');
+      console.log('🧪 3. Aspetta la notifica alle ' + timeString);
+      console.log('🧪 4. Tocca la notifica per riaprire l\'app');
+      console.log('🧪 5. Controlla se il backup è stato eseguito');
+      
+      // Attiva il backup automatico per il test
+      const success = await this.updateBackupSettings(true, timeString);
+      if (success) {
+        console.log('✅ 🧪 Test programmato con successo!');
+        console.log('💡 🧪 ISTRUZIONI: Chiudi l\'app ADESSO e aspetta la notifica!');
+        return true;
+      } else {
+        console.error('❌ 🧪 Errore programmazione test');
+        return false;
+      }
+    } catch (error) {
+      console.error('❌ 🧪 Errore test backup app chiusa:', error);
+      return false;
+    }
   }
 }
 

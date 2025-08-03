@@ -246,30 +246,60 @@ class SuperBackupService {
     try {
       const settings = await this.getBackupSettings();
       
-      if (!settings.enabled) {
-        console.log('📱 Backup automatico disabilitato - nessun promemoria');
-        return 0;
+      // 🚨 ANTI-SPAM: Verifica se sono già stati programmati di recente
+      const lastScheduleTime = await AsyncStorage.getItem('last_backup_schedule_time');
+      const now = Date.now();
+      
+      if (lastScheduleTime) {
+        const timeSinceLastSchedule = now - parseInt(lastScheduleTime);
+        const hoursAgo = timeSinceLastSchedule / (1000 * 60 * 60);
+        
+        if (hoursAgo < 1) { // Meno di 1 ora fa
+          console.log(`⏭️ ANTI-SPAM: Promemoria già programmati ${Math.round(hoursAgo * 60)} minuti fa, saltando...`);
+          return 0;
+        }
       }
       
-      // Cancella promemoria backup esistenti
+      // 🚨 CORREZIONE CRITICA: Cancella TUTTE le notifiche backup all'avvio per fermare loop
+      console.log('🗑️ ANTI-LOOP: Cancellando tutte le notifiche backup esistenti...');
       const existingNotifications = await Notifications.getAllScheduledNotificationsAsync();
       for (const notification of existingNotifications) {
         if (notification.content.data?.type === 'backup_reminder') {
           await Notifications.cancelScheduledNotificationAsync(notification.identifier);
         }
       }
+      console.log('✅ Notifiche backup esistenti cancellate');
+      
+      // Programma solo se backup automatico è veramente attivo
+      if (!settings.enabled) {
+        console.log('📱 Backup automatico disabilitato - nessun promemoria');
+        return 0;
+      }
       
       const [hours, minutes] = settings.time.split(':').map(Number);
       let scheduledCount = 0;
       
-      // Programma promemoria backup per i prossimi 30 giorni
-      for (let day = 1; day <= 30; day++) {
+      // 🚨 CORREZIONE: Programma solo 3 backup reminder invece di 30 per evitare spam
+      const maxDays = 3; // Solo i prossimi 3 giorni
+      for (let day = 1; day <= maxDays; day++) {
         const targetDate = new Date();
         targetDate.setDate(targetDate.getDate() + day);
         targetDate.setHours(hours, minutes, 0, 0);
         
+        const now = new Date();
+        const timeDiff = targetDate.getTime() - now.getTime();
+        const minutesUntil = Math.round(timeDiff / 1000 / 60);
+        
         // Solo se nel futuro
-        if (targetDate <= new Date()) continue;
+        if (targetDate <= now) {
+          console.log(`⏭️ Saltando backup per ${targetDate.toLocaleString('it-IT')} (nel passato)`);
+          continue;
+        }
+        
+        // 🚨 CORREZIONE: Log meno verboso
+        console.log(`💾 [REDUCED] Programmando backup ${day}/${maxDays}: ${targetDate.toLocaleDateString('it-IT')} alle ${settings.time}`);
+        
+        // 🚨 CORREZIONE: Rimuovi alert di debug per evitare spam
         
         await Notifications.scheduleNotificationAsync({
           content: {
@@ -290,7 +320,11 @@ class SuperBackupService {
         scheduledCount++;
       }
       
-      console.log(`✅ Programmati ${scheduledCount} promemoria backup`);
+      console.log(`✅ Programmati ${scheduledCount} promemoria backup (ridotto da 30 per evitare spam)`);
+      
+      // Salva timestamp programmazione per anti-spam
+      await AsyncStorage.setItem('last_backup_schedule_time', Date.now().toString());
+      
       return scheduledCount;
       
     } catch (error) {
@@ -304,11 +338,34 @@ class SuperBackupService {
     try {
       console.log('🔄 === BACKUP AUTOMATICO AVANZATO ===');
       
+      // Controllo semplice dello stato backup
+      if (__DEV__) {
+        console.log('🔧 DEBUG: executeAutomaticBackup chiamato in development');
+      } else {
+        console.log('🏭 PRODUZIONE: executeAutomaticBackup chiamato in build nativa');
+        // Rimosso Alert per evitare spam
+      }
+      
       const settings = await this.getBackupSettings();
       
       if (!settings.enabled) {
         console.log('📱 Backup automatico disabilitato');
         return { success: false, reason: 'Disabilitato' };
+      }
+      
+      // 🚨 CONTROLLO ANTI-SPAM RAFFORZATO: Minimo 2 ore tra backup
+      const lastScheduleTime = await AsyncStorage.getItem('last_backup_schedule_time');
+      if (lastScheduleTime) {
+        const timeSinceSchedule = Date.now() - parseInt(lastScheduleTime, 10);
+        const minutesSinceSchedule = timeSinceSchedule / (1000 * 60);
+        
+        if (minutesSinceSchedule < 120) { // 2 ore
+          console.log(`⏳ Backup bloccato: troppo presto dalla programmazione (${minutesSinceSchedule.toFixed(0)} min)`);
+          if (!__DEV__) {
+            console.log('🚨 SPAM PREVENTION: Backup bloccato per evitare spam');
+          }
+          return { success: false, reason: 'TroppoPresto' };
+        }
       }
       
       // Verifica se è troppo presto per un altro backup
@@ -375,22 +432,9 @@ class SuperBackupService {
       
       console.log(`✅ Backup automatico completato: ${fileName}`);
       
-      // Invia notifica di successo
-      if (this.hasNotificationPermission) {
-        await Notifications.scheduleNotificationAsync({
-          content: {
-            title: '✅ Backup Completato',
-            body: `Backup automatico creato: ${fileName}`,
-            data: { 
-              type: 'backup_success',
-              fileName: fileName,
-              time: new Date().toLocaleTimeString('it-IT')
-            },
-            sound: false, // Silenzioso per non disturbare
-          },
-          trigger: null, // Immediata
-        });
-      }
+      // 🚨 CORREZIONE: Rimuovi notifica di successo per evitare spam
+      // Invia solo log, non notifiche popup
+      console.log('📝 Backup completato - notifica popup disabilitata per evitare spam');
       
       return {
         success: true,
@@ -425,6 +469,20 @@ class SuperBackupService {
   // 💾 BACKUP MANUALE AVANZATO
   async executeManualBackup(customName = null) {
     try {
+      // 🚨 ANTI-SPAM: Controlla se è stato eseguito un backup di recente
+      const lastBackupTime = await AsyncStorage.getItem('last_manual_backup_time');
+      const now = Date.now();
+      
+      if (lastBackupTime && !customName) { // Non applicare anti-spam per backup custom/test
+        const timeSinceLastBackup = now - parseInt(lastBackupTime);
+        const minutesAgo = timeSinceLastBackup / (1000 * 60);
+        
+        if (minutesAgo < 5) { // Meno di 5 minuti fa
+          console.log(`⏭️ ANTI-SPAM: Backup già eseguito ${Math.round(minutesAgo)} minuti fa, saltando...`);
+          return { success: false, error: 'Backup già eseguito di recente (anti-spam)', spam: true };
+        }
+      }
+      
       console.log('🔄 === BACKUP MANUALE AVANZATO ===');
       
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
@@ -502,6 +560,11 @@ class SuperBackupService {
       await this.updateBackupList(fileName, backupKey, 'manual');
       
       console.log(`✅ Backup manuale completato: ${fileName}`);
+      
+      // 🚨 ANTI-SPAM: Salva timestamp ultimo backup manuale
+      if (!customName) { // Solo per backup non-custom
+        await AsyncStorage.setItem('last_manual_backup_time', Date.now().toString());
+      }
       
       return {
         success: true,
@@ -738,13 +801,31 @@ class SuperBackupService {
   // ⚙️ IMPOSTAZIONI BACKUP
   async getBackupSettings() {
     try {
-      const enabled = await AsyncStorage.getItem('super_backup_enabled');
-      const time = await AsyncStorage.getItem('super_backup_time');
+      // DEBUG: Leggi entrambe le chiavi per confrontare
+      const oldEnabled = await AsyncStorage.getItem('super_backup_enabled');
+      const oldTime = await AsyncStorage.getItem('super_backup_time');
+      const newEnabled = await AsyncStorage.getItem('auto_backup_enabled');
+      const newTime = await AsyncStorage.getItem('auto_backup_time');
       
-      return {
+      console.log('🔍 DEBUG getBackupSettings - Old keys:', { oldEnabled, oldTime });
+      console.log('🔍 DEBUG getBackupSettings - New keys:', { newEnabled, newTime });
+      
+      // Usa le chiavi standard del BackupScreen
+      const enabled = await AsyncStorage.getItem('auto_backup_enabled');
+      const time = await AsyncStorage.getItem('auto_backup_time');
+      
+      const result = {
         enabled: enabled ? JSON.parse(enabled) : false,
         time: time || '02:00'
       };
+      
+      console.log('🔍 DEBUG getBackupSettings - Result:', result);
+      
+      if (!__DEV__) {
+        Alert.alert('DEBUG Backup Settings', `Enabled: ${result.enabled}, Time: ${result.time}`);
+      }
+      
+      return result;
     } catch (error) {
       console.error('❌ Errore lettura impostazioni backup:', error);
       return { enabled: false, time: '02:00' };
@@ -753,8 +834,11 @@ class SuperBackupService {
 
   async updateBackupSettings(enabled, time) {
     try {
-      await AsyncStorage.setItem('super_backup_enabled', JSON.stringify(enabled));
-      await AsyncStorage.setItem('super_backup_time', time);
+      // Usa le chiavi standard del BackupScreen
+      await AsyncStorage.setItem('auto_backup_enabled', JSON.stringify(enabled));
+      await AsyncStorage.setItem('auto_backup_time', time);
+      
+      console.log('🔍 DEBUG updateBackupSettings:', { enabled, time });
       
       if (enabled) {
         // Riprogramma promemoria backup
@@ -869,6 +953,40 @@ class SuperBackupService {
   async forceBackupNow() {
     console.log('🔄 Backup immediato forzato...');
     return await this.executeAutomaticBackup();
+  }
+
+  // 🧪 TEST: Programma una notifica backup tra 2 minuti per debug
+  async testBackupNotification() {
+    try {
+      const targetDate = new Date();
+      targetDate.setMinutes(targetDate.getMinutes() + 2); // 2 minuti da ora
+      
+      console.log(`🧪 TEST: Programmando notifica backup test per: ${targetDate.toLocaleString('it-IT')}`);
+      
+      await Notifications.scheduleNotificationAsync({
+        content: {
+          title: '🧪 TEST Backup Automatico',
+          body: `Test notifica backup programmata per le ${targetDate.toLocaleTimeString('it-IT')}`,
+          data: { 
+            type: 'backup_reminder',
+            test: true,
+            scheduledTime: targetDate.toISOString()
+          },
+          sound: true,
+        },
+        trigger: {
+          date: targetDate,
+        },
+      });
+      
+      Alert.alert('Test Programmato', `Notifica backup test programmata per le ${targetDate.toLocaleTimeString('it-IT')}`);
+      
+      return true;
+    } catch (error) {
+      console.error('❌ Errore test backup notifica:', error);
+      Alert.alert('Errore Test', error.message);
+      return false;
+    }
   }
 }
 

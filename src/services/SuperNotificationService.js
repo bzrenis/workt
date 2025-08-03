@@ -64,7 +64,8 @@ class SuperNotificationService {
         // Configura handler notifiche
         Notifications.setNotificationHandler({
           handleNotification: async () => ({
-            shouldShowAlert: true,
+            shouldShowBanner: true,  // Sostituisce shouldShowAlert
+            shouldShowList: true,    // Sostituisce shouldShowAlert
             shouldPlaySound: true,
             shouldSetBadge: false,
           }),

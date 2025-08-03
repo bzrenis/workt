@@ -22,6 +22,39 @@ const AppInfoScreen = ({ navigation }) => {
 
   const changelog = [
     {
+      version: '1.2.2',
+      date: '3 Agosto 2025',
+      changes: [
+        'Nuovo: Sistema backup silenzioso con app chiusa usando notifiche native Android',
+        'Nuovo: Popup automatici per notificare aggiornamenti OTA completati',
+        'Miglioramento: Sistema backup garantito in background come email/weather',
+        'Miglioramento: Tracking versioni avanzato con cronologia aggiornamenti',
+        'Fix: Risolti problemi notifiche spam e loop backup automatico',
+        'Sistema robusto e auto-sostenuto per backup e aggiornamenti'
+      ]
+    },
+    {
+      version: '1.2.1',
+      date: '2 Agosto 2025',
+      changes: [
+        'Miglioramento: Sistema notifiche backup enhanced con controlli anti-spam',
+        'Fix: Risolti problemi timing e duplicazione notifiche backup',
+        'Miglioramento: Gestione backup automatico più stabile e affidabile',
+        'Aggiornamento: Documentazione sistema notifiche e backup'
+      ]
+    },
+    {
+      version: '1.2.0',
+      date: '2 Agosto 2025',
+      changes: [
+        'Nuovo: Sistema notifiche backup automatico avanzato',
+        'Nuovo: Backup programmato ogni 3 giorni con notifiche informative',
+        'Miglioramento: UpdateService per gestione aggiornamenti OTA',
+        'Miglioramento: Sistema notifiche più robusto e configurabile',
+        'Fix: Ottimizzazioni performance e stabilità generale'
+      ]
+    },
+    {
       version: '1.0.4',
       date: '1 Agosto 2025',
       changes: [
@@ -118,6 +151,9 @@ const AppInfoScreen = ({ navigation }) => {
           <Text style={[styles.appName, { color: theme.colors.text }]}> 
             {expo.name}
           </Text>
+          <Text style={[styles.appVersion, { color: theme.colors.primary }]}>
+            Versione {version} 
+          </Text>
           {/* Mostra la versione solo nella sezione info, non accanto al nome app */}
           <Text style={[styles.appDescription, { color: theme.colors.textSecondary }]}> 
             App professionale per il tracking delle ore di lavoro con calcoli automatici 
@@ -147,6 +183,27 @@ const AppInfoScreen = ({ navigation }) => {
               </View>
             </View>
           ))}
+        </FadeInCard>
+
+        {/* TEST: Pulsante per testare popup aggiornamento */}
+        <FadeInCard delay={150} style={[styles.sectionCard, { backgroundColor: theme.colors.card }]}>
+          <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>
+            Test Aggiornamento (Debug)
+          </Text>
+          <TouchableOpacity 
+            style={[styles.testButton, { backgroundColor: theme.colors.primary }]}
+            onPress={async () => {
+              try {
+                const result = await global.forceUpdatePopup();
+                console.log('✅ Test popup completato:', result);
+              } catch (error) {
+                console.error('❌ Errore test popup:', error);
+              }
+            }}
+          >
+            <MaterialCommunityIcons name="rocket-launch" size={20} color="white" />
+            <Text style={styles.testButtonText}>Testa Popup v1.2.2</Text>
+          </TouchableOpacity>
         </FadeInCard>
 
         {/* Cronologia Aggiornamenti */}
@@ -382,6 +439,20 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 14,
     lineHeight: 20,
+  },
+  testButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 12,
+    borderRadius: 8,
+    marginTop: 8,
+  },
+  testButtonText: {
+    color: 'white',
+    fontWeight: '600',
+    marginLeft: 8,
+    fontSize: 16,
   },
   legalText: {
     fontSize: 14,

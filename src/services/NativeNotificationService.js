@@ -29,7 +29,8 @@ class NativeNotificationService {
       // Configura il comportamento delle notifiche
       Notifications.setNotificationHandler({
         handleNotification: async () => ({
-          shouldShowAlert: true,
+          shouldShowBanner: true,  // Sostituisce shouldShowAlert
+          shouldShowList: true,    // Sostituisce shouldShowAlert
           shouldPlaySound: true,
           shouldSetBadge: true,
         }),

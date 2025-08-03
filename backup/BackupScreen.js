@@ -18,14 +18,105 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../contexts/ThemeContext';
 import DatabaseService from '../services/DatabaseService';
 import BackupService from '../services/BackupService';
-import { clearAllBackupsFromAsyncStorage } from '../../App';
+import NativeBackupService from '../services/NativeBackupService';
 
 const BackupScreen = ({ navigation }) => {
+  // Stato diagnostica backup nativo
+  const [nativeStatus, setNativeStatus] = useState({});
+  const [notificationPermission, setNotificationPermission] = useState(null);
+  const [nextNativeBackup, setNextNativeBackup] = useState(null);
   // Funzione per aprire il time picker
   const openTimePicker = () => {
     setShowTimePicker(true);
   };
 
+  // Carica stato diagnostica nativo
+  useEffect(() => {
+    const fetchNativeStatus = async () => {
+      try {
+        const status = NativeBackupService.getSystemStatus ? NativeBackupService.getSystemStatus() : {};
+        setNativeStatus(status);
+        // Permessi notifiche
+        let perm = null;
+        if (NativeBackupService.notificationsModule?.getPermissionsAsync) {
+          const { status: permStatus } = await NativeBackupService.notificationsModule.getPermissionsAsync();
+          perm = permStatus;
+        }
+        setNotificationPermission(perm);
+        // Prossimo backup
+        if (NativeBackupService.getBackupSettings && NativeBackupService.getNextBackupTime) {
+          const settings = await NativeBackupService.getBackupSettings();
+          const next = NativeBackupService.getNextBackupTime(settings);
+          setNextNativeBackup(next);
+        }
+      } catch (e) {
+        setNativeStatus({ error: e.message });
+      }
+    };
+    fetchNativeStatus();
+  }, [autoBackupEnabled, autoBackupTime]);
+  // ...existing code...
+  // DIAGNOSTICA BACKUP NATIVO
+  const renderNativeDiagnostics = () => (
+    <View style={{ marginVertical: 16, padding: 12, borderRadius: 8, backgroundColor: theme.colors.card, borderWidth: 1, borderColor: '#1976d2' }}>
+      <Text style={{ fontWeight: 'bold', color: theme.colors.primary, marginBottom: 4 }}>Diagnostica Backup Automatico Nativo</Text>
+      <Text style={{ color: theme.colors.text }}>Sistema nativo pronto: <Text style={{ fontWeight: 'bold', color: nativeStatus.isNativeReady ? 'green' : 'red' }}>{nativeStatus.isNativeReady ? 'SÌ' : 'NO'}</Text></Text>
+      <Text style={{ color: theme.colors.text }}>Permessi notifiche: <Text style={{ fontWeight: 'bold', color: notificationPermission === 'granted' ? 'green' : 'red' }}>{notificationPermission || '---'}</Text></Text>
+      <Text style={{ color: theme.colors.text }}>Prossimo backup automatico: <Text style={{ fontWeight: 'bold' }}>{nextNativeBackup ? new Date(nextNativeBackup).toLocaleString('it-IT') : '---'}</Text></Text>
+      {nativeStatus.error && <Text style={{ color: 'red' }}>Errore: {nativeStatus.error}</Text>}
+      {/* Pulsante test backup nativo */}
+      <TouchableOpacity
+        style={{ marginTop: 12, backgroundColor: '#1976d2', borderRadius: 6, padding: 10, alignItems: 'center' }}
+        onPress={async () => {
+          try {
+            if (NativeBackupService && NativeBackupService.executeBackup) {
+              const res = await NativeBackupService.executeBackup(true);
+              Alert.alert('Backup nativo eseguito', typeof res === 'string' ? res : JSON.stringify(res));
+              console.log('✅ TEST BACKUP NATIVO:', res);
+            } else {
+              Alert.alert('Errore', 'Funzione NativeBackupService.executeBackup non disponibile');
+            }
+          } catch (e) {
+            Alert.alert('Errore', e.message);
+            console.error('❌ Errore test backup nativo:', e);
+          }
+        }}
+      >
+        <Text style={{ color: 'white', fontWeight: 'bold' }}>Esegui subito backup nativo (TEST)</Text>
+      </TouchableOpacity>
+      {/* Pulsante cancella tutti i backup */}
+      <TouchableOpacity
+        style={{ marginTop: 10, backgroundColor: '#d32f2f', borderRadius: 6, padding: 10, alignItems: 'center' }}
+        onPress={async () => {
+          Alert.alert(
+            'Conferma eliminazione',
+            'Vuoi davvero eliminare TUTTI i backup? L’operazione è irreversibile.',
+            [
+              { text: 'Annulla', style: 'cancel' },
+              { text: 'Elimina tutto', style: 'destructive', onPress: async () => {
+                  try {
+                    if (BackupService && BackupService.deleteAllBackups) {
+                      await BackupService.deleteAllBackups();
+                    } else if (typeof clearAllBackupsFromAsyncStorage === 'function') {
+                      await clearAllBackupsFromAsyncStorage();
+                    }
+                    if (typeof loadExistingBackups === 'function') {
+                      await loadExistingBackups();
+                    }
+                    Alert.alert('Backup eliminati', 'Tutti i backup sono stati eliminati.');
+                  } catch (e) {
+                    Alert.alert('Errore', e.message);
+                  }
+                }
+              }
+            ]
+          );
+        }}
+      >
+        <Text style={{ color: 'white', fontWeight: 'bold' }}>Cancella tutti i backup</Text>
+      </TouchableOpacity>
+    </View>
+  );
   const { theme } = useTheme();
   const styles = createStyles(theme);
   const [isLoading, setIsLoading] = useState(false);
@@ -801,6 +892,9 @@ Backup: ${backupEntriesWithInterventi.length} entry con interventi`;
         <View style={{ width: 24 }} />
       </View>
 
+      {/* Diagnostica backup nativo sempre visibile in alto */}
+      {renderNativeDiagnostics()}
+
       <ScrollView style={styles.content}>
         {/* Sezione Backup Automatico */}
         <View style={styles.section}>
@@ -944,6 +1038,22 @@ Backup: ${backupEntriesWithInterventi.length} entry con interventi`;
             <Ionicons name="cloud-upload-outline" size={20} color="#FFFFFF" />
             <Text style={[styles.buttonText, { color: '#FFFFFF' }]}>Ripristina da File</Text>
           </TouchableOpacity>
+          <TouchableOpacity 
+            style={[styles.button, { backgroundColor: '#FFA500' }]}
+            onPress={cleanDuplicateBackups}
+            disabled={isLoading}
+          >
+            <Ionicons name="trash-outline" size={20} color="#FFFFFF" />
+            <Text style={[styles.buttonText, { color: '#FFFFFF' }]}>Pulisci Duplicati</Text>
+          </TouchableOpacity>
+          <TouchableOpacity 
+            style={[styles.button, { backgroundColor: theme.colors.secondary }]}
+            onPress={showBackupStats}
+            disabled={isLoading}
+          >
+            <Ionicons name="stats-chart-outline" size={20} color={theme.colors.onPrimary} />
+            <Text style={styles.buttonText}>Mostra Statistiche</Text>
+          </TouchableOpacity>
         </View>
 
         {/* ✅ BACKUP ESISTENTI */}
@@ -1043,83 +1153,6 @@ Backup: ${backupEntriesWithInterventi.length} entry con interventi`;
               })}
             </>
           )}
-          
-          {/* Pulsante Cancella Tutti i Backup sempre visibile */}
-          <TouchableOpacity
-            style={{ 
-              marginTop: 20, 
-              backgroundColor: existingBackups.length > 0 ? '#d32f2f' : '#757575', 
-              borderRadius: 6, 
-              padding: 12, 
-              alignItems: 'center' 
-            }}
-            disabled={existingBackups.length === 0}
-            onPress={async () => {
-                Alert.alert(
-                  'Conferma eliminazione',
-                  'Sei sicuro di voler eliminare tutti i backup? Questa azione non può essere annullata.',
-                  [
-                    { text: 'Annulla', style: 'cancel' },
-                    { text: 'Elimina tutto', style: 'destructive', onPress: async () => {
-                        try {
-                          console.log('🗑️ Avvio eliminazione tutti i backup...');
-                          
-                          let result = null;
-                          
-                          // Prova prima il metodo principale
-                          if (BackupService && typeof BackupService.deleteAllBackups === 'function') {
-                            console.log('🔄 Chiamando BackupService.deleteAllBackups...');
-                            result = await BackupService.deleteAllBackups();
-                            console.log('✅ BackupService.deleteAllBackups completato:', result);
-                          } else if (typeof clearAllBackupsFromAsyncStorage === 'function') {
-                            console.log('🔄 Chiamando clearAllBackupsFromAsyncStorage...');
-                            const deletedCount = await clearAllBackupsFromAsyncStorage();
-                            result = { success: true, deletedCount, message: `Eliminati ${deletedCount} backup` };
-                            console.log('✅ clearAllBackupsFromAsyncStorage completato:', result);
-                          } else {
-                            throw new Error('Nessun metodo di eliminazione disponibile');
-                          }
-                          
-                          // Ricarica la lista backup con protezione
-                          try {
-                            console.log('🔄 Ricaricando lista backup...');
-                            if (typeof loadExistingBackups === 'function') {
-                              await loadExistingBackups();
-                              console.log('✅ Lista backup ricaricata');
-                            } else {
-                              console.warn('⚠️ loadExistingBackups non disponibile');
-                            }
-                          } catch (reloadError) {
-                            console.warn('⚠️ Errore ricaricamento lista backup:', reloadError.message);
-                          }
-                          
-                          // Mostra risultato
-                          Alert.alert(
-                            result.success ? '✅ Backup Eliminati' : '❌ Errore', 
-                            result.message || `Eliminazione ${result.success ? 'completata' : 'fallita'}: ${result.deletedCount || 0} backup`
-                          );
-                          
-                        } catch (e) {
-                          console.error('❌ Errore eliminazione backup:', e);
-                          // Proteggi l'app da crash con timeout
-                          setTimeout(() => {
-                            Alert.alert('❌ Errore', `Errore durante l'eliminazione: ${e.message}`);
-                          }, 100);
-                        }
-                      }
-                    }
-                  ]
-                );
-              }}
-            >
-              <Text style={{ 
-                color: existingBackups.length > 0 ? 'white' : '#bdbdbd', 
-                fontWeight: 'bold', 
-                fontSize: 16 
-              }}>
-                🗑️ Cancella tutti i backup {existingBackups.length === 0 ? '(0)' : `(${existingBackups.length})`}
-              </Text>
-            </TouchableOpacity>
         </View>
 
         {/* Info Sistema */}

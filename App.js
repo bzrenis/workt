@@ -11,6 +11,108 @@ import * as Notifications from 'expo-notifications';
 import * as Updates from 'expo-updates';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+// 🧪 TEST BACKUP NATIVO - Carica il comando globale
+try {
+  require('./test-backup-app-closed');
+  
+  // Aggiungi comando per test backup silenzioso
+  const NativeBackupService = require('./src/services/NativeBackupService').default;
+  global.testSilentBackup = async () => {
+    try {
+      console.log('🔇 TEST: Simulazione backup silenzioso...');
+      const result = await NativeBackupService.executeSilentBackup('asyncstorage');
+      console.log('✅ TEST: Risultato backup silenzioso:', result);
+      return result;
+    } catch (error) {
+      console.error('❌ TEST: Errore backup silenzioso:', error);
+      return { success: false, error: error.message };
+    }
+  };
+  console.log('🚀 Test backup nativo caricati!');
+  console.log('🚀 Comandi: testAppClosed(), testSilentBackup()');
+} catch (testError) {
+  console.log('⚠️ Test backup app chiusa non caricato:', testError.message);
+}
+
+// 🧪 TEST AGGIORNAMENTI OTA - Carica i comandi globali
+try {
+  const UpdateService = require('./src/services/UpdateService').default;
+  global.testUpdateCompleted = () => UpdateService.testUpdateCompletedMessage();
+  global.testUpdateAvailable = () => UpdateService.testUpdateAvailable();
+  global.checkForUpdates = () => UpdateService.checkManually();
+  global.forceShowUpdateMessage = () => UpdateService.forceShowCurrentUpdateMessage();
+  console.log('🚀 Test aggiornamenti OTA caricati!');
+  console.log('🚀 Comandi: testUpdateCompleted(), testUpdateAvailable(), checkForUpdates(), forceShowUpdateMessage()');
+} catch (testError) {
+  console.log('⚠️ Test aggiornamenti non caricati:', testError.message);
+}
+
+// 🔍 DEBUG VERSIONI - Comando per verificare stato versioni
+try {
+  const simpleVersionDebug = require('./simple-version-debug').default;
+  global.simpleVersionDebug = simpleVersionDebug;
+  console.log('🔍 Debug versioni semplificato caricato!');
+  console.log('🔍 Comando: simpleVersionDebug()');
+} catch (debugError) {
+  console.log('⚠️ Debug versioni non caricato:', debugError.message);
+}
+
+// 🔧 RESET VERSION SYSTEM - Comandi per reset sistema versioni
+try {
+  const { resetVersionSystem, checkVersionState, clearAllVersionData } = require('./reset-version-system');
+  global.resetVersionSystem = resetVersionSystem;
+  global.checkVersionState = checkVersionState;
+  global.clearAllVersionData = clearAllVersionData;
+  console.log('🔧 Reset version system caricato!');
+  console.log('🔧 Comandi: resetVersionSystem(), checkVersionState(), clearAllVersionData()');
+} catch (resetError) {
+  console.log('⚠️ Reset version system non caricato:', resetError.message);
+}
+
+// 🚀 QUICK FIX - Comandi rapidi per popup aggiornamento
+try {
+  const { quickFixUpdatePopup, showPopupNow, checkStorageState } = require('./quick-fix-popup');
+  global.quickFixUpdatePopup = quickFixUpdatePopup;
+  global.showPopupNow = showPopupNow;
+  global.checkStorageState = checkStorageState;
+  console.log('🚀 Quick fix popup caricato!');
+  console.log('🚀 Comandi: quickFixUpdatePopup(), showPopupNow(), checkStorageState()');
+} catch (quickFixError) {
+  console.log('⚠️ Quick fix popup non caricato:', quickFixError.message);
+}
+
+// 🔍 VERIFICA VERSIONI - Comandi per verifica sincronizzazione
+try {
+  const { verifyVersionSync, syncAllVersions } = require('./verify-version-sync');
+  global.verifyVersionSync = verifyVersionSync;
+  global.syncAllVersions = syncAllVersions;
+  console.log('🔍 Verifica versioni caricato!');
+  console.log('🔍 Comandi: verifyVersionSync(), syncAllVersions()');
+} catch (verifyError) {
+  console.log('⚠️ Verifica versioni non caricato:', verifyError.message);
+}
+
+// 📱 ENHANCED UPDATE INFO - Info aggiornamenti avanzate
+try {
+  const showEnhancedUpdateInfo = require('./enhanced-update-info').default;
+  global.showEnhancedUpdateInfo = showEnhancedUpdateInfo;
+  console.log('📱 Enhanced update info caricato!');
+  console.log('📱 Comando: showEnhancedUpdateInfo()');
+} catch (enhancedError) {
+  console.log('⚠️ Enhanced update info non caricato:', enhancedError.message);
+}
+
+// 🔧 FORCE UPDATE POPUP - Test diretto popup aggiornamento
+try {
+  const { forceUpdatePopup, checkCurrentVersionState } = require('./force-update-popup');
+  global.forceUpdatePopup = forceUpdatePopup;
+  global.checkCurrentVersionState = checkCurrentVersionState;
+  console.log('🔧 Force update popup caricato!');
+  console.log('🔧 Comandi: forceUpdatePopup(), checkCurrentVersionState()');
+} catch (forceError) {
+  console.log('⚠️ Force update popup non caricato:', forceError.message);
+}
+
 // ✅ HANDLER NOTIFICHE CORRETTO - Mostra solo notifiche legittime
 Notifications.setNotificationHandler({
   handleNotification: async (notification) => {
@@ -19,11 +121,10 @@ Notifications.setNotificationHandler({
     
     // Mostra tutte le notifiche che arrivano (ora che il sistema funziona)
     return {
-      shouldShowAlert: true,    // ✅ Mostra popup
       shouldPlaySound: true,    // ✅ Suona
       shouldSetBadge: true,     // ✅ Badge
-      shouldShowBanner: true,   // ✅ Banner
-      shouldShowList: true,     // ✅ Lista notifiche
+      shouldShowBanner: true,   // ✅ Banner (sostituisce shouldShowAlert)
+      shouldShowList: true,     // ✅ Lista notifiche (sostituisce shouldShowAlert)
     };
   },
 });
@@ -469,66 +570,44 @@ export default function App() {
           console.log('💾 App: Inizializzazione SuperBackupService...');
           // Attesa aggiuntiva per evitare conflitti database
           await new Promise(resolve => setTimeout(resolve, 1000));
-          // Inizializza il nuovo sistema SuperBackup
-          const superInitialized = await SuperBackupService.initialize();
-          console.log(`🚀 App: SuperBackupService inizializzato: ${superInitialized ? '✅ OK' : '❌ FAILED'}`);
-          if (superInitialized) {
-            // Verifica automaticamente backup mancati e ripristina
-            console.log('🔄 App: Controllo recovery backup...');
-            const recoveredBackups = await SuperBackupService.checkAndRecoverMissedBackups();
-            if (recoveredBackups > 0) {
-              console.log(`✅ App: Recovery completato, recuperati ${recoveredBackups} backup`);
-            }
-            // Verifica statistiche backup
-            const stats = await SuperBackupService.getBackupStats();
-            console.log(`📊 App: Backup totali: ${stats.totalBackups || 0}, Ultimo: ${stats.lastBackupDate || 'Mai'}`);
-            // Se non ci sono backup recenti, esegui uno ora
-            if (!stats.lastBackupDate || (Date.now() - new Date(stats.lastBackupDate).getTime()) > 7 * 24 * 60 * 60 * 1000) {
-              console.log('⚠️ App: Nessun backup recente, esecuzione backup iniziale...');
-              const backupResult = await SuperBackupService.executeManualBackup();
-              if (backupResult.success) {
-                console.log(`✅ App: Backup iniziale completato: ${backupResult.fileName}`);
-              } else {
-                console.warn(`❌ App: Backup iniziale fallito: ${backupResult.error}`);
-              }
-            }
-            // REGISTRA TASK BACKGROUND SOLO SE IL BACKUP AUTOMATICO È ATTIVO
-            const backupSettings = await SuperBackupService.getBackupSettings();
-            if (backupSettings && backupSettings.enabled) {
-              await registerBackgroundBackupTask();
+          
+          // ✅ SISTEMA BACKUP SEMPLIFICATO - Solo NativeBackupService
+          console.log('App: Inizializzazione sistema backup ottimizzato...');
+          try {
+            console.log('App: Tentativo inizializzazione NativeBackupService...');
+            const NativeBackupService = require('./src/services/NativeBackupService').default;
+            if (NativeBackupService && typeof NativeBackupService.initialize === 'function') {
+              await NativeBackupService.initialize();
+              console.log('✅ App: NativeBackupService inizializzato (sistema principale)');
             } else {
-              console.log('ℹ️ [BackgroundFetch] Backup automatico non attivo, task non registrato');
+              throw new Error('NativeBackupService.initialize is not a function');
+            }
+          } catch (nativeError) {
+            console.warn('❌ App: NativeBackupService non disponibile:', nativeError.message);
+            // Fallback al SuperBackupService
+            try {
+              const superInitialized = await SuperBackupService.initialize();
+              console.log(`🔄 App: SuperBackupService fallback: ${superInitialized ? '✅ OK' : '❌ FAILED'}`);
+            } catch (superError) {
+              console.error('❌ App: Errore anche nel SuperBackupService:', superError.message);
             }
           }
-          // Mantieni anche il vecchio sistema per compatibility (se necessario)
+          // REGISTRA IL TASK DI BACKUP AUTOMATICO IN BACKGROUND (solo build native)
           try {
-            console.log('App: Inizializzazione sistema backup legacy per compatibility...');
-            // Prima prova il backup nativo
-            try {
-              console.log('App: Tentativo inizializzazione NativeBackupService...');
-              const NativeBackupService = require('./src/services/NativeBackupService');
-              await NativeBackupService.initializeNativeBackup();
-              console.log('✅ App: NativeBackupService inizializzato (compatibility)');
-            } catch (nativeError) {
-              console.warn('App: NativeBackupService non disponibile, usando BackupService:', nativeError.message);
-              // Fallback al backup JavaScript normale con attesa
-              await new Promise(resolve => setTimeout(resolve, 2000));
-              await BackupService.initialize();
-              console.log('✅ App: BackupService JavaScript inizializzato (compatibility)');
+            if (Platform.OS === 'android' || Platform.OS === 'ios') {
+              const ok = await registerBackgroundBackupTask();
+              if (ok) {
+                console.log('✅ App: Task di backup automatico in background registrato con successo');
+              } else {
+                console.warn('⚠️ App: Task di backup automatico NON registrato');
+              }
             }
-          } catch (legacyError) {
-            console.warn('App: Sistema backup legacy non disponibile:', legacyError.message);
+          } catch (e) {
+            console.error('❌ App: Errore registrazione task di backup automatico:', e.message);
           }
           console.log('✅ App: Sistema backup completo inizializzato');
         } catch (error) {
-          console.warn('App: Errore inizializzazione backup (fallback a vecchio sistema):', error.message);
-          // Fallback al vecchio sistema in caso di problemi
-          try {
-            await BackupService.initialize();
-            console.log('✅ App: Fallback vecchio sistema backup attivo');
-          } catch (fallbackError) {
-            console.error('❌ App: Errore anche nel fallback backup:', fallbackError.message);
-          }
+          console.error('❌ App: Errore inizializzazione sistema backup:', error.message);
         }
       };
       
@@ -561,15 +640,7 @@ export default function App() {
           } catch (notifError) {
             console.warn('⚠️ App: Errore pulizia notifiche:', notifError.message);
           }
-        }          // Verifica stato notifiche
-          try {
-            // ⚠️ TEST DISABILITATO - Causava notifiche immediate all'avvio
-            // await NotificationService.testNotificationSystem();
-            console.log('✅ Test sistema notifiche SALTATO (evita notifiche immediate)');
-          } catch (testError) {
-            console.warn('❌ Test notifiche fallito:', testError.message);
-          }
-          
+        }          
           // Verifica stato backup
           const backupEnabled = await BackupService.isEnabled();
           console.log('💾 Backup automatico enabled:', backupEnabled);

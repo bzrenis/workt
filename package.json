@@ -1,6 +1,6 @@
 {
   "name": "workt",
-  "version": "1.1.0",
+  "version": "1.2.2",
   "main": "index.js",
   "scripts": {
     "prestart": "node scripts/bump-version.js",
@@ -13,9 +13,12 @@
     "ios": "expo run:ios",
     "preweb": "node scripts/bump-version.js",
     "web": "expo start --web",
-    "bump-version": "node scripts/bump-version.js"
+    "bump-version": "node scripts/bump-version.js",
+    "publish-ota": "node publish-ota-update.js",
+    "publish-ota-quick": "node publish-ota-update.js \"Aggiornamento rapido - Correzioni e miglioramenti\""
   },
   "dependencies": {
+    "@expo/cli": "^0.24.20",
     "@expo/metro-runtime": "~5.0.4",
     "@expo/vector-icons": "^14.1.0",
     "@react-native-async-storage/async-storage": "2.1.2",

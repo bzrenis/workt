@@ -933,6 +933,67 @@ class BackupService {
       return [];
     }
   }
+
+  // 🗑️ CANCELLA TUTTI I BACKUP
+  async deleteAllBackups() {
+    try {
+      console.log('🗑️ Inizio eliminazione di tutti i backup...');
+      
+      const allKeys = await AsyncStorage.getAllKeys();
+      const backupKeys = allKeys.filter(key => 
+        key.startsWith('backup_') || 
+        key.startsWith('manual-backup-') || 
+        key.startsWith('manual_backup_') ||
+        key.startsWith('auto-backup-') ||
+        key.startsWith('emergency_backup_') ||
+        key.startsWith('worktracker-backup-')
+      ).filter(key => 
+        // Escludi le chiavi di configurazione
+        !key.endsWith('_enabled') &&
+        !key.endsWith('_time') &&
+        !key.endsWith('_destination') &&
+        key !== 'auto_backup_enabled' &&
+        key !== 'auto_backup_time' &&
+        key !== 'auto_backup_destination'
+      );
+      
+      console.log(`🔍 Trovate ${backupKeys.length} chiavi backup da eliminare:`, backupKeys);
+      
+      if (backupKeys.length === 0) {
+        console.log('ℹ️ Nessun backup trovato da eliminare');
+        return { success: true, deletedCount: 0, message: 'Nessun backup trovato' };
+      }
+      
+      // Elimina tutti i backup
+      await AsyncStorage.multiRemove(backupKeys);
+      
+      // Elimina anche le liste di backup
+      const listKeys = ['javascript_backups', 'super_backups', 'recent_backups'];
+      for (const listKey of listKeys) {
+        try {
+          await AsyncStorage.removeItem(listKey);
+        } catch (e) {
+          console.warn(`⚠️ Lista ${listKey} non trovata, saltando...`);
+        }
+      }
+      
+      console.log(`✅ Eliminati ${backupKeys.length} backup da AsyncStorage`);
+      
+      return { 
+        success: true, 
+        deletedCount: backupKeys.length,
+        message: `Eliminati ${backupKeys.length} backup con successo`
+      };
+      
+    } catch (error) {
+      console.error('❌ Errore eliminazione backup:', error);
+      return { 
+        success: false, 
+        error: error.message,
+        message: `Errore durante l'eliminazione: ${error.message}`
+      };
+    }
+  }
 }
 
 export default new BackupService();

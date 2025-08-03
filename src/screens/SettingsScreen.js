@@ -75,18 +75,25 @@ const SettingsScreen = ({ navigation }) => {
     
     setIsCheckingUpdates(true);
     try {
-      const hasUpdate = await UpdateService.checkManually();
-      if (!hasUpdate) {
-        Alert.alert(
-          '✅ App Aggiornata',
-          'Stai già utilizzando la versione più recente dell\'app.',
-          [{ text: 'OK' }]
-        );
+      // Usa la funzione migliorata per informazioni dettagliate
+      const showEnhancedUpdateInfo = require('../../enhanced-update-info').default;
+      await showEnhancedUpdateInfo();
+      
+      // Se non siamo in sviluppo, prova anche il controllo reale
+      if (!__DEV__) {
+        setTimeout(async () => {
+          try {
+            const hasUpdate = await UpdateService.checkManually();
+            // Il controllo viene gestito internamente dal service
+          } catch (error) {
+            console.log('Controllo aggiornamenti in background fallito:', error);
+          }
+        }, 1000);
       }
     } catch (error) {
       Alert.alert(
-        'Errore',
-        'Impossibile controllare gli aggiornamenti. Verifica la connessione internet.',
+        'Errore Controllo Aggiornamenti',
+        'Impossibile controllare gli aggiornamenti. Verifica la connessione internet e riprova.',
         [{ text: 'OK' }]
       );
     } finally {
@@ -226,7 +233,7 @@ const SettingsScreen = ({ navigation }) => {
               </View>
               <View style={styles.appTextInfo}>
                 <Text style={[styles.modernFooterText, { color: theme.colors.text }]}>
-                  {expo.name} v{expo.version}
+                  {expo.name} v{version}
                 </Text>
                 <Text style={[styles.modernFooterSubtext, { color: theme.colors.textSecondary }]}>
                   Tracking ore lavoro con calcoli CCNL conformi e personalizzabili

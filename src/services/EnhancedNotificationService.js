@@ -186,7 +186,6 @@ class EnhancedNotificationService {
       // Configura handler notifiche
       Notifications.setNotificationHandler({
         handleNotification: async () => ({
-          shouldShowAlert: true, // Deprecato ma mantenuto per compatibilità
           shouldPlaySound: true,
           shouldSetBadge: true,
           shouldShowBanner: true, // Nuovo flag che sostituisce shouldShowAlert
