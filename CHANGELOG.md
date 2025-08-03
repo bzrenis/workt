@@ -1,6 +1,36 @@
 # Changelog - WorkT Tracker Ore Lavoro
 
-## [1.1.0] - 2025-08-02
+## [1.2.2] - 2025-08-03
+
+### 🚀 **AGGIORNAMENTO CRITICO - Backup Automatico App Chiusa**
+
+#### 💾 **Sistema Backup Rivoluzionario**
+- **NUOVO: Backup automatico con app completamente chiusa**: Funziona anche quando l'app non è in esecuzione (solo build native)
+- **Task background automatico**: Registrazione automatica di expo-background-fetch all'avvio per persistenza backup
+- **Sistema ibrido intelligente**: Native per build produzione + JavaScript fallback per Expo Dev
+- **Compatibilità universale**: Rilevamento automatico ambiente di esecuzione
+
+#### 🔧 **Integrazione Tecnica Avanzata**
+- **registerBackgroundBackupTask()**: Integrato in App.js per attivazione automatica all'avvio
+- **Gestione errori robusta**: Fallback automatico tra sistemi nativi e JavaScript
+- **Background fetch configurato**: Intervallo ottimizzato per backup periodici senza impatto performance
+- **Cross-platform support**: Android e iOS con configurazioni specifiche per ciascuna piattaforma
+
+#### 📱 **Esperienza Utente Migliorata**
+- **Backup garantito**: Sistema backup funziona sempre, anche con device spento/app chiusa
+- **Notifiche informative**: Conferme backup completato in background
+- **Zero configurazione**: Sistema auto-attivante senza intervento utente
+- **Compatibilità preservata**: Funziona identico su Expo Go per sviluppo
+
+#### 🛠️ **Correzioni e Ottimizzazioni**
+- **Error handling avanzato**: Gestione errori specifica per ciascun ambiente
+- **Logging dettagliato**: Tracciamento completo attività background task
+- **Performance ottimizzate**: Registrazione task solo quando necessario
+- **Memoria efficiente**: Cleanup automatico task vecchi/non necessari
+
+---
+
+## [1.2.1] - 2025-08-02
 
 ### 🎉 AGGIORNAMENTO MAGGIORE - Sistema Notifiche Completo
 

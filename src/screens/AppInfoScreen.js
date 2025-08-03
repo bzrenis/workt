@@ -25,12 +25,15 @@ const AppInfoScreen = ({ navigation }) => {
       version: '1.2.2',
       date: '3 Agosto 2025',
       changes: [
-        'Nuovo: Sistema backup silenzioso con app chiusa usando notifiche native Android',
-        'Nuovo: Popup automatici per notificare aggiornamenti OTA completati',
-        'Miglioramento: Sistema backup garantito in background come email/weather',
-        'Miglioramento: Tracking versioni avanzato con cronologia aggiornamenti',
-        'Fix: Risolti problemi notifiche spam e loop backup automatico',
-        'Sistema robusto e auto-sostenuto per backup e aggiornamenti'
+        'NUOVO: Backup automatico funziona anche con app completamente chiusa (build native)',
+        'NUOVO: Task background registrato automaticamente all\'avvio per backup persistente',
+        'NUOVO: Sistema ibrido Native + JavaScript per massima compatibilità',
+        'MIGLIORAMENTO: Integrazione registerBackgroundBackupTask() in App.js',
+        'MIGLIORAMENTO: Gestione errori avanzata per registrazione task background',
+        'MIGLIORAMENTO: Rilevamento automatico ambiente (build native vs Expo Dev)',
+        'FIX: Fallback automatico per ambiente Expo Dev (solo app aperta)',
+        'TECNICO: Background fetch per Android/iOS con expo-background-fetch',
+        'TECNICO: Compatibilità garantita sia per build native che Expo Go'
       ]
     },
     {

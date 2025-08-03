@@ -5,7 +5,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 class UpdateService {
   constructor() {
     this.isChecking = false;
-    this.currentVersion = '1.2.2'; // Aggiornato alla versione attuale
+    this.currentVersion = '1.2.2'; // ✅ AGGIORNATO v1.2.2: Backup automatico con app chiusa
   }
 
   /**
@@ -380,9 +380,9 @@ class UpdateService {
       const fakeUpdate = {
         isAvailable: true,
         manifest: {
-          version: '1.2.0',
+          version: '1.2.2',
           extra: {
-            version: '1.2.0'
+            version: '1.2.2'
           }
         }
       };
