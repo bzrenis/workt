@@ -28,8 +28,13 @@ try {
       return { success: false, error: error.message };
     }
   };
+  
+  // Aggiungi comando per test background backup task
+  const { testBackgroundBackupTask } = require('./src/services/BackgroundBackupTask');
+  global.testBackgroundBackup = testBackgroundBackupTask;
+  
   console.log('🚀 Test backup nativo caricati!');
-  console.log('🚀 Comandi: testAppClosed(), testSilentBackup()');
+  console.log('🚀 Comandi: testAppClosed(), testSilentBackup(), testBackgroundBackup()');
 } catch (testError) {
   console.log('⚠️ Test backup app chiusa non caricato:', testError.message);
 }

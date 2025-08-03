@@ -236,6 +236,79 @@ class SuperBackupService {
     }
   }
 
+  // 🔄 BACKUP BACKGROUND (per task background - bypassa controlli anti-spam)
+  async executeBackgroundBackup() {
+    try {
+      console.log('🔄 === BACKUP BACKGROUND TASK ===');
+      console.log('🔄 Esecuzione backup tramite task background (app chiusa)');
+      
+      // Verifica se backup automatico è abilitato
+      const settings = await this.getBackupSettings();
+      if (!settings.enabled) {
+        console.log('⚠️ Backup automatico disabilitato nelle impostazioni');
+        return { success: false, reason: 'Backup automatico disabilitato' };
+      }
+      
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const fileName = `background-backup-${timestamp}.json`;
+      
+      // Ottieni database service dinamicamente
+      const DatabaseService = await this.getDatabaseService();
+      if (!DatabaseService) {
+        console.error('❌ DatabaseService non disponibile per backup background');
+        return { success: false, error: 'DatabaseService non disponibile' };
+      }
+      
+      // Ottieni tutti i dati
+      const data = await DatabaseService.getAllData();
+      
+      if (!data || Object.keys(data).length === 0) {
+        console.log('⚠️ Nessun dato trovato per il backup background');
+        return { success: false, error: 'Nessun dato' };
+      }
+      
+      // Crea backup con metadati speciali per background task
+      const backupData = {
+        ...data,
+        backupInfo: {
+          name: fileName,
+          created: new Date().toISOString(),
+          type: 'background_task',
+          reason: 'Backup automatico eseguito in background',
+          version: '1.0',
+          app: 'WorkTracker',
+          backgroundTask: true
+        }
+      };
+      
+      // Salva in AsyncStorage
+      const backupKey = `background_backup_${timestamp}`;
+      await AsyncStorage.setItem(backupKey, JSON.stringify(backupData));
+      
+      // Aggiorna lista backup
+      await this.updateBackupList(fileName, backupKey, 'background');
+      
+      // Aggiorna timestamp ultimo backup
+      await AsyncStorage.setItem('last_backup_date', new Date().toISOString());
+      
+      console.log(`✅ Backup background completato: ${fileName}`);
+      
+      return {
+        success: true,
+        fileName: fileName,
+        backupKey: backupKey,
+        type: 'background_task'
+      };
+      
+    } catch (error) {
+      console.error('❌ Errore backup background:', error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
+
   // 📅 PROGRAMMA NOTIFICHE PROMEMORIA BACKUP
   async scheduleBackupReminders() {
     if (!this.hasNotificationPermission) {
