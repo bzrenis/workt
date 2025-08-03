@@ -1,9 +1,47 @@
-// 🚀 SCRIPT PUBBLICAZIONE AGGIORNAMENTO OTA
+// 🚀 SCRIPT PUBBLICAZIONE AGGIORNAMENTO OTA CON AUTO-UPDATE DOCUMENTAZIONE
 // Uso: node publish-ota-update.js [messaggio]
+// Esempio: node publish-ota-update.js "Backup automatico app chiusa"
 
 const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+
+/**
+ * Aggiorna changelog in AppInfoScreen.js
+ */
+function updateAppInfoChangelog(version, message) {
+  const filePath = './src/screens/AppInfoScreen.js';
+  let content = fs.readFileSync(filePath, 'utf8');
+  
+  const today = new Date().toLocaleDateString('it-IT', {
+    day: '2-digit',
+    month: 'long',
+    year: 'numeric'
+  });
+  
+  const newChangelogEntry = `    {
+      version: '${version}',
+      date: '${today}',
+      changes: [
+        '${message}',
+        'Aggiornamento automatico versione e documentazione',
+        'Sincronizzazione informazioni app con release OTA',
+        'Sistema auto-update changelog implementato'
+      ]
+    },`;
+  
+  // Trova la posizione dopo "const changelog = [" e inserisci la nuova entry
+  const changelogStart = content.indexOf('const changelog = [');
+  if (changelogStart !== -1) {
+    const insertPosition = content.indexOf('\n', changelogStart) + 1;
+    content = content.slice(0, insertPosition) + newChangelogEntry + '\n' + content.slice(insertPosition);
+    
+    fs.writeFileSync(filePath, content);
+    console.log(`✅ AppInfoScreen.js aggiornato con changelog v${version}`);
+  } else {
+    console.warn('⚠️ Non trovato changelog in AppInfoScreen.js');
+  }
+}
 
 async function publishOTAUpdate() {
   try {
@@ -30,6 +68,20 @@ async function publishOTAUpdate() {
     const releaseMessage = process.argv[2] || `Aggiornamento v${packageJson.version} - Miglioramenti sistema backup e notifiche`;
     
     console.log(`📝 Messaggio rilascio: "${releaseMessage}"`);
+    
+    // Aggiorna changelog in AppInfoScreen
+    console.log('📋 Aggiornamento changelog...');
+    updateAppInfoChangelog(packageJson.version, releaseMessage);
+    
+    // Commit le modifiche al changelog se necessario
+    try {
+      execSync('git add src/screens/AppInfoScreen.js', { stdio: 'pipe' });
+      execSync(`git commit -m "📋 AUTO-UPDATE: Changelog v${packageJson.version}"`, { stdio: 'pipe' });
+      console.log('✅ Changelog committato automaticamente');
+    } catch (e) {
+      console.log('ℹ️ Nessuna modifica changelog da committare');
+    }
+    
     console.log('');
     console.log('⬆️ Pubblicazione in corso...');
     
