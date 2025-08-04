@@ -5,7 +5,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 class UpdateService {
   constructor() {
     this.isChecking = false;
-    this.currentVersion = '1.2.2'; // ✅ AGGIORNATO v1.2.2: Backup automatico con app chiusa
+    this.currentVersion = '1.3.1'; // ✅ AGGIORNATO v1.3.1: Notifiche continue, TimeEntry automatico, statistiche corrette
   }
 
   /**
@@ -144,6 +144,21 @@ class UpdateService {
       if (lastKnownVersion && lastKnownVersion !== this.currentVersion) {
         console.log(`🔄 UPDATE SERVICE - Rilevato cambio versione: ${lastKnownVersion} → ${this.currentVersion}`);
         
+        // ✅ PREVENZIONE POPUP DUPLICATI v1.3.1 + PULIZIA SISTEMA
+        if (this.currentVersion === '1.3.1') {
+          const popupShown = await AsyncStorage.getItem('update_popup_shown_v1_3_1');
+          if (popupShown === 'true') {
+            console.log('✅ Popup v1.3.1 già mostrato, skip automatico');
+            await AsyncStorage.setItem('last_known_version', this.currentVersion);
+            return;
+          }
+          
+          // 🧹 PULIZIA POPUP VERSIONI PRECEDENTI per evitare conflitti
+          await AsyncStorage.removeItem('update_popup_shown_v1_3_0');
+          await AsyncStorage.removeItem('pending_update_info');
+          console.log('🧹 Rimossi popup versioni precedenti per sistema pulito');
+        }
+        
         // Mostra popup di aggiornamento completato
         const updateInfo = {
           previousVersion: lastKnownVersion,
@@ -219,24 +234,75 @@ class UpdateService {
   /**
    * Mostra popup aggiornamento completato
    */
-  showUpdateCompletedMessage(updateInfo) {
-    const version = updateInfo.targetVersion;
-    const fromVersion = updateInfo.previousVersion;
-    
-    Alert.alert(
-      '🎉 Aggiornamento Completato!',
-      `L'app è stata aggiornata con successo alla versione ${version}!\n\n🚀 Novità e miglioramenti disponibili\n📱 Da versione ${fromVersion} → ${version}\n\n✅ L'app è ora pronta per l'uso.`,
-      [
-        {
-          text: 'Perfetto!',
-          style: 'default',
-          onPress: () => {
-            console.log('✅ UPDATE SERVICE - Popup aggiornamento completato confermato dall\'utente');
+  async showUpdateCompletedMessage(updateInfo) {
+    try {
+      const version = updateInfo.targetVersion;
+      const fromVersion = updateInfo.previousVersion;
+      
+      // ✅ CONTROLLO POPUP DUPLICATI PER v1.3.1
+      if (version === '1.3.1') {
+        const popupShown = await AsyncStorage.getItem('update_popup_shown_v1_3_1');
+        if (popupShown === 'true') {
+          console.log('✅ Popup v1.3.1 già mostrato, skip');
+          return;
+        }
+        
+        Alert.alert(
+          '✨ Ottimizzazione Sistema v1.3.1!',
+          `WorkT è stato aggiornato con miglioramenti importanti!\n\n🎯 NOVITÀ PRINCIPALI:\n• 📊 Statistiche backup corrette (conteggio reale)\n• 🔄 TimeEntry si aggiorna automaticamente\n• 📱 Notifiche continue anche ad app chiusa\n• 🧹 Pulizia automatica backup in eccesso\n• ⚡ Performance e stabilità migliorate\n\n✅ Sistema completamente ottimizzato!\n\nDa versione: ${fromVersion}`,
+          [
+            {
+              text: 'Perfetto! 🎉',
+              style: 'default',
+              onPress: async () => {
+                await AsyncStorage.setItem('update_popup_shown_v1_3_1', 'true');
+                console.log('✅ UPDATE SERVICE - Popup v1.3.1 confermato e marcato');
+              },
+            },
+          ],
+          { cancelable: false }
+        );
+        return;
+      }
+      
+      // ✅ POPUP PERSONALIZZATO PER v1.3.0
+      if (version === '1.3.0') {
+        Alert.alert(
+          '🎉 Aggiornamento Completato!',
+          `WorkT è stato aggiornato alla versione 1.3.0!\n\n🎯 NOVITÀ PRINCIPALI:\n• Backup completo con tutte le impostazioni\n• Sistema PDF perfetto e identico al form\n• Ripristino intelligente multi-formato\n• Campo reperibilità corretto\n\n✅ L'app è ora pronta con tutti i miglioramenti.`,
+          [
+            {
+              text: 'Perfetto! 🎉',
+              style: 'default',
+              onPress: () => {
+                console.log('✅ UPDATE SERVICE - Popup aggiornamento v1.3.0 confermato dall\'utente');
+              },
+            },
+          ],
+          { cancelable: false }
+        );
+        return;
+      }
+      
+      // 📝 POPUP GENERICO PER ALTRE VERSIONI
+      Alert.alert(
+        '🎉 Aggiornamento Completato!',
+        `L'app è stata aggiornata con successo alla versione ${version}!\n\n🚀 Novità e miglioramenti disponibili\n📱 Da versione ${fromVersion} → ${version}\n\n✅ L'app è ora pronta per l'uso.`,
+        [
+          {
+            text: 'Perfetto!',
+            style: 'default',
+            onPress: () => {
+              console.log('✅ UPDATE SERVICE - Popup aggiornamento completato confermato dall\'utente');
+            },
           },
-        },
-      ],
-      { cancelable: false }
-    );
+        ],
+        { cancelable: false }
+      );
+      
+    } catch (error) {
+      console.error('❌ UPDATE SERVICE - Errore popup aggiornamento:', error);
+    }
   }
 
   /**

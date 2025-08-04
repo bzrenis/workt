@@ -197,9 +197,21 @@ class BackupService {
       
       console.log('✅ Backup importato con successo');
       
+      // Determina il nome del backup basato sul formato
+      let backupName = 'backup-importato';
+      if (parsedData.backupInfo?.name) {
+        backupName = parsedData.backupInfo.name;
+      } else if (parsedData.metadata?.timestamp) {
+        const date = new Date(parsedData.metadata.timestamp);
+        backupName = `backup-auto-${date.toLocaleDateString('it-IT')}`;
+      } else if (parsedData.exportDate) {
+        const date = new Date(parsedData.exportDate);
+        backupName = `backup-${date.toLocaleDateString('it-IT')}`;
+      }
+      
       return {
         success: true,
-        backupName: parsedData.backupInfo?.name || 'backup-importato',
+        backupName: backupName,
         importDate: new Date().toISOString()
       };
       
@@ -337,7 +349,19 @@ class BackupService {
         return false;
       }
 
+      // Controlla se è un backup automatico (nuovo formato)
+      if (backupData.metadata && backupData.interventi) {
+        console.log('✅ Formato backup automatico valido');
+        return true;
+      }
+
+      // Controlla se è un backup manuale (formato legacy)
       if (!backupData.backupInfo) {
+        // Se ha gli interventi ma non i metadati, potrebbe essere un export diretto
+        if (backupData.interventi || Array.isArray(backupData)) {
+          console.log('✅ Formato backup diretto valido');
+          return true;
+        }
         console.log('❌ Metadati backup mancanti');
         return false;
       }
@@ -350,7 +374,7 @@ class BackupService {
         }
       }
 
-      console.log('✅ Formato backup valido');
+      console.log('✅ Formato backup manuale valido');
       return true;
       
     } catch (error) {
@@ -939,6 +963,9 @@ class BackupService {
     try {
       console.log('🗑️ Inizio eliminazione di tutti i backup...');
       
+      let totalDeleted = 0;
+      
+      // 1. Elimina backup da AsyncStorage (backup manuali)
       const allKeys = await AsyncStorage.getAllKeys();
       const backupKeys = allKeys.filter(key => 
         key.startsWith('backup_') || 
@@ -957,17 +984,53 @@ class BackupService {
         key !== 'auto_backup_destination'
       );
       
-      console.log(`🔍 Trovate ${backupKeys.length} chiavi backup da eliminare:`, backupKeys);
+      console.log(`🔍 Trovate ${backupKeys.length} chiavi backup AsyncStorage da eliminare:`, backupKeys);
       
-      if (backupKeys.length === 0) {
-        console.log('ℹ️ Nessun backup trovato da eliminare');
-        return { success: true, deletedCount: 0, message: 'Nessun backup trovato' };
+      if (backupKeys.length > 0) {
+        await AsyncStorage.multiRemove(backupKeys);
+        totalDeleted += backupKeys.length;
+        console.log(`✅ Eliminati ${backupKeys.length} backup da AsyncStorage`);
       }
       
-      // Elimina tutti i backup
-      await AsyncStorage.multiRemove(backupKeys);
+      // 2. Elimina file di backup automatici dal filesystem
+      try {
+        const FileSystem = await import('expo-file-system');
+        
+        // Lista delle cartelle da controllare per backup automatici
+        const backupDirs = [
+          `${FileSystem.documentDirectory}backups/`,
+          `${FileSystem.documentDirectory}Downloads/`,
+          `${FileSystem.documentDirectory}temp_backups/`
+        ];
+        
+        for (const backupDir of backupDirs) {
+          const dirInfo = await FileSystem.getInfoAsync(backupDir);
+          
+          if (dirInfo.exists) {
+            const files = await FileSystem.readDirectoryAsync(backupDir);
+            const backupFiles = files.filter(file => file.endsWith('.json'));
+            
+            console.log(`🔍 Cartella ${backupDir}: trovati ${backupFiles.length} file backup da eliminare`);
+            
+            for (const fileName of backupFiles) {
+              try {
+                const filePath = `${backupDir}${fileName}`;
+                await FileSystem.deleteAsync(filePath);
+                totalDeleted++;
+                console.log(`🗑️ File eliminato: ${fileName} da ${backupDir}`);
+              } catch (fileError) {
+                console.warn(`⚠️ Errore eliminazione file ${fileName}:`, fileError.message);
+              }
+            }
+          } else {
+            console.log(`ℹ️ Cartella ${backupDir} non esistente`);
+          }
+        }
+      } catch (fsError) {
+        console.warn('⚠️ Errore accesso filesystem backup automatici:', fsError.message);
+      }
       
-      // Elimina anche le liste di backup
+      // 3. Elimina anche le liste di backup
       const listKeys = ['javascript_backups', 'super_backups', 'recent_backups'];
       for (const listKey of listKeys) {
         try {
@@ -977,12 +1040,12 @@ class BackupService {
         }
       }
       
-      console.log(`✅ Eliminati ${backupKeys.length} backup da AsyncStorage`);
+      console.log(`✅ Eliminazione completata: ${totalDeleted} backup totali`);
       
       return { 
         success: true, 
-        deletedCount: backupKeys.length,
-        message: `Eliminati ${backupKeys.length} backup con successo`
+        deletedCount: totalDeleted,
+        message: `Eliminati ${totalDeleted} backup con successo`
       };
       
     } catch (error) {

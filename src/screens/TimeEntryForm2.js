@@ -3537,8 +3537,8 @@ const TimeEntryForm = ({ route, navigation }) => {
                     mealDinnerCash: 0,
                     travelAllowance: form.trasferta ? 1 : 0,
                     travelAllowancePercent: 1.0,
-                    isStandbyDay: form.reperibilita ? 1 : 0,
-                    standbyAllowance: form.reperibilita ? 1 : 0,
+                    isStandbyDay: form.standby ? 1 : 0,
+                    standbyAllowance: form.standby ? 1 : 0,
                     completamentoGiornata: 'nessuno',
                     isFixedDay: false,
                     fixedEarnings: 0,
@@ -3584,22 +3584,47 @@ const TimeEntryForm = ({ route, navigation }) => {
                   // Usa il metodo corretto: calculateEarningsBreakdown (asincrono)
                   breakdown = await calculationService.calculateEarningsBreakdown(workEntry, safeSettings);
                   console.log('✅ Breakdown calcolato per PDF:', breakdown);
-                  
-                  // Debug per verifica reperibilità nel PDF
-                  console.log('🔍 DEBUG PDF - Valori reperibilità:', {
-                    'form.reperibilita': form.reperibilita,
-                    'form.standby': form.standby,
-                    'workEntry.isStandbyDay': workEntry.isStandbyDay,
-                    'workEntry.standbyAllowance': workEntry.standbyAllowance,
-                    'breakdown.allowances.standby': breakdown?.allowances?.standby
-                  });
                 } catch (error) {
                   console.error('Errore calcolo breakdown per PDF:', error);
                 }
 
-                // SECONDA: Genera dati per il form  
+                // SECONDA: Genera dati per il form e define helper functions
                 const additionalShifts = form.viaggi.slice(1) || [];
                 const interventions = form.interventi || [];
+                
+                // Helper functions sanitarie per PDF - DEFINITE PRIMA DELL'HTML
+                const formatSafeHours = (hours) => {
+                  try {
+                    if (hours === undefined || hours === null || isNaN(hours)) return '0:00';
+                    const safeHours = Math.max(0, parseFloat(hours) || 0);
+                    const wholeHours = Math.floor(safeHours);
+                    const minutes = Math.round((safeHours - wholeHours) * 60);
+                    return wholeHours + ':' + minutes.toString().padStart(2, '0');
+                  } catch (e) {
+                    return '0:00';
+                  }
+                };
+                
+                const formatSafeAmount = (amount) => {
+                  try {
+                    if (amount === undefined || amount === null || isNaN(amount)) return '0,00 €';
+                    const safeAmount = parseFloat(amount) || 0;
+                    return safeAmount.toFixed(2).replace('.', ',') + ' €';
+                  } catch (e) {
+                    return '0,00 €';
+                  }
+                };
+                
+                // Sanitizza stringhe per HTML
+                const sanitizeHtml = (str) => {
+                  if (!str) return '';
+                  return String(str)
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;')
+                    .replace(/'/g, '&#39;');
+                };
                 
                 // HTML ottimizzato per formato A4 professionale
                 const htmlContent = `
@@ -3957,7 +3982,7 @@ const TimeEntryForm = ({ route, navigation }) => {
                           <div class="card-header">🏗️ Cantiere</div>
                           <div class="field-group">
                             <div class="field-label">Nome Cantiere</div>
-                            <div class="field-value ${!form.site_name ? 'empty' : ''}">${form.site_name || 'Non specificato'}</div>
+                            <div class="field-value ${!form.site_name ? 'empty' : ''}">${sanitizeHtml(form.site_name) || 'Non specificato'}</div>
                           </div>
                           <div class="field-group">
                             <div class="field-label">Modalità Veicolo</div>
@@ -3968,7 +3993,7 @@ const TimeEntryForm = ({ route, navigation }) => {
                           </div>
                           <div class="field-group">
                             <div class="field-label">Targa/Numero Veicolo</div>
-                            <div class="field-value ${!form.targa_veicolo ? 'empty' : ''}">${form.targa_veicolo || 'Non specificato'}</div>
+                            <div class="field-value ${!form.targa_veicolo ? 'empty' : ''}">${sanitizeHtml(form.targa_veicolo) || 'Non specificato'}</div>
                           </div>
                         </div>
                       </div>
@@ -4031,8 +4056,8 @@ const TimeEntryForm = ({ route, navigation }) => {
                             <span class="switch-indicator ${form.pasti.pranzo || form.pasti.cena ? 'switch-on' : 'switch-off'}">${form.pasti.pranzo || form.pasti.cena ? 'ATTIVA' : 'NON ATTIVA'}</span>
                           </div>
                           <div class="switch-row">
-                            <span class="switch-label">Standby${form.reperibilita && form.standby_start && form.standby_end ? ` (${form.standby_start} - ${form.standby_end})` : ''}</span>
-                            <span class="switch-indicator ${form.reperibilita ? 'switch-on' : 'switch-off'}">${form.reperibilita ? 'ATTIVA' : 'NON ATTIVA'}</span>
+                            <span class="switch-label">Standby${form.standby && form.standby_start && form.standby_end ? ` (${form.standby_start} - ${form.standby_end})` : ''}</span>
+                            <span class="switch-indicator ${form.standby ? 'switch-on' : 'switch-off'}">${form.standby ? 'ATTIVA' : 'NON ATTIVA'}</span>
                           </div>
                         </div>
                       </div>
@@ -4131,7 +4156,7 @@ const TimeEntryForm = ({ route, navigation }) => {
                                 ${intervention.description ? `
                                 <div class="field-group" style="margin-top: 8px;">
                                   <div class="field-label">Descrizione</div>
-                                  <div class="field-value">${intervention.description}</div>
+                                  <div class="field-value">${sanitizeHtml(intervention.description)}</div>
                                 </div>` : ''}
                               </div>
                             `).join('')}
@@ -4144,7 +4169,7 @@ const TimeEntryForm = ({ route, navigation }) => {
                           <div class="info-card">
                             <div class="card-header">📝 Note Libere</div>
                             <div class="field-group">
-                              <div class="field-value" style="min-height: 40px; white-space: pre-wrap;">${form.note_libere}</div>
+                              <div class="field-value" style="min-height: 40px; white-space: pre-wrap;">${sanitizeHtml(form.note_libere)}</div>
                             </div>
                           </div>
                         </div>` : ''}
@@ -4159,19 +4184,6 @@ const TimeEntryForm = ({ route, navigation }) => {
                             </div>
                           </div>`;
                         }
-                        
-                        // Helper functions come nel form
-                        const formatSafeHours = (hours) => {
-                          if (hours === undefined || hours === null) return '0:00';
-                          const wholeHours = Math.floor(hours);
-                          const minutes = Math.round((hours - wholeHours) * 60);
-                          return wholeHours + ':' + minutes.toString().padStart(2, '0');
-                        };
-                        
-                        const formatSafeAmount = (amount) => {
-                          if (amount === undefined || amount === null) return '0,00 €';
-                          return amount.toFixed(2).replace('.', ',') + ' €';
-                        };
                         
                         let calcHtml = `<div class="calculations-section no-break">
                           <div class="calc-header">💰 Riepilogo Guadagni</div>`;
@@ -4348,16 +4360,47 @@ const TimeEntryForm = ({ route, navigation }) => {
                             </div>`;
                         }
                         
-                        // INDENNITÀ
+                        // INDENNITÀ - Debug per capire il problema
                         const hasAllowances = breakdown?.allowances && 
                           (breakdown?.allowances?.travel > 0 || 
                            breakdown?.allowances?.meal > 0 || 
                            breakdown?.allowances?.standby > 0);
                         
+                        console.log('🔍 DEBUG PDF - TUTTO IL FORM:', JSON.stringify(form, null, 2));
+                        console.log('🔍 DEBUG PDF - Form values:', {
+                          reperibilita: form.reperibilita,
+                          trasferta: form.trasferta,
+                          pranzo: form.pasti.pranzo,
+                          cena: form.pasti.cena,
+                          isFixedDay: breakdown?.isFixedDay,
+                          standbyInBreakdown: breakdown?.allowances?.standby,
+                          // Debug anche i valori dal database se è un edit
+                          dbStandbyAllowance: form.standby_allowance || form.standbyAllowance,
+                          dbIsStandbyDay: form.is_standby_day || form.isStandbyDay
+                        });
+                        
+                        // Verifica sia form.reperibilita che i valori dal database per compatibilità
+                        const isReperibilityActive = form.reperibilita || 
+                                                    form.standby_allowance === 1 || 
+                                                    form.standbyAllowance === 1 ||
+                                                    form.is_standby_day === 1 ||
+                                                    form.isStandbyDay === 1;
+                        
                         // Verifica anche se standby/trasferta/pasti sono attivi nel form anche se allowances è 0
-                        const hasActiveIndennita = form.reperibilita || form.trasferta || form.pasti.pranzo || form.pasti.cena || hasAllowances;
+                        const hasActiveIndennita = isReperibilityActive || form.trasferta || form.pasti.pranzo || form.pasti.cena || hasAllowances;
+                        
+                        console.log('DEBUG PDF Indennità:', {
+                          isFixedDay: breakdown?.isFixedDay,
+                          hasActiveIndennita: hasActiveIndennita,
+                          standby: form.standby,
+                          trasferta: form.trasferta,
+                          pasti: form.pasti,
+                          hasAllowances: hasAllowances,
+                          allowances: breakdown?.allowances
+                        });
                            
                         if (!breakdown?.isFixedDay && hasActiveIndennita) {
+                          console.log('✅ Mostrando sezione indennità nel PDF');
                           calcHtml += `
                             <div style="margin-bottom: 15px;">
                               <div style="font-weight: 600; color: #333; margin-bottom: 8px; font-size: 12px;">
@@ -4390,20 +4433,27 @@ const TimeEntryForm = ({ route, navigation }) => {
                               </div>`;
                           }
                           
-                          // Indennità Standby/Reperibilità - mostra sempre se standby è attivo
-                          if (form.reperibilita) {
+                          // Indennità Standby/Reperibilità - mostra esattamente come nel form
+                          if (isReperibilityActive) {
+                            console.log('✅ Aggiungendo indennità reperibilità al PDF');
                             const standbyAmount = breakdown?.allowances?.standby || 0;
-                            const standbyLabel = standbyAmount > 0 ? 'Indennità Reperibilità' : 'Reperibilità (Inclusa in Standby)';
-                            const standbyDisplay = standbyAmount > 0 ? formatSafeAmount(standbyAmount) : 'Inclusa';
+                            
+                            // Mostra sempre l'indennità con l'importo calcolato, anche se è 0
+                            const standbyDisplay = formatSafeAmount(standbyAmount);
                             
                             calcHtml += `
                               <div class="calc-row">
-                                <span class="calc-label">${standbyLabel}${form.reperibilita && form.standby_start && form.standby_end ? ` (${form.standby_start}-${form.standby_end})` : ''}</span>
+                                <span class="calc-label">Indennità reperibilità${form.standby_start && form.standby_end ? ` (${form.standby_start}-${form.standby_end})` : ''}</span>
                                 <span class="calc-value">${standbyDisplay}</span>
                               </div>`;
                           }
                           
                           calcHtml += `</div>`;
+                        } else {
+                          console.log('❌ Sezione indennità NON mostrata:', {
+                            isFixedDay: breakdown?.isFixedDay,
+                            hasActiveIndennita: hasActiveIndennita
+                          });
                         }
                         
                         // STANDBY - Sezione completa con fasce orarie
@@ -4518,21 +4568,8 @@ const TimeEntryForm = ({ route, navigation }) => {
                             </div>`;
                         }
 
-                        // TOTALE FINALE - Calcola manualmente includendo tutti i componenti
-                        const totalStandbyCalculated = hasStandbyHours ? 
-                          (breakdown?.standby?.workEarnings?.ordinary || 0) +
-                          (breakdown?.standby?.workEarnings?.evening || 0) +
-                          (breakdown?.standby?.workEarnings?.night || 0) +
-                          (breakdown?.standby?.travelEarnings?.ordinary || 0) +
-                          (breakdown?.standby?.travelEarnings?.evening || 0) +
-                          (breakdown?.standby?.travelEarnings?.night || 0) : 0;
-                        
-                        const total = breakdown?.isFixedDay ? 
-                          breakdown?.fixedEarnings :
-                          (breakdown.ordinary?.total || 0) + 
-                          totalStandbyCalculated + 
-                          (breakdown.allowances?.travel || 0) + 
-                          (breakdown.allowances?.standby || 0);
+                        // TOTALE FINALE - Usa il valore calcolato dal CalculationService (come nel form)
+                        const total = breakdown?.fixedEarnings;
                         
                         if (!breakdown?.isFixedDay) {
                           calcHtml += `
@@ -4560,13 +4597,36 @@ const TimeEntryForm = ({ route, navigation }) => {
                   </html>
                 `;
 
-                // Generazione PDF ottimizzata per A4
-                const { uri } = await Print.printToFileAsync({
-                  html: htmlContent,
-                  base64: false,
-                  width: 595,  // Larghezza A4 in punti (210mm)
-                  height: 842  // Altezza A4 in punti (297mm)
-                });
+                // Generazione PDF con gestione errori migliorata
+                let pdfUri;
+                try {
+                  console.log('🎯 Avvio generazione PDF...');
+                  
+                  // Validate HTML content before PDF generation
+                  if (!htmlContent || htmlContent.length < 100) {
+                    throw new Error('Contenuto HTML non valido o troppo breve');
+                  }
+                  
+                  pdfUri = await Print.printToFileAsync({
+                    html: htmlContent,
+                    base64: false,
+                    width: 595,  // Larghezza A4 in punti (210mm)
+                    height: 842, // Altezza A4 in punti (297mm)
+                    margins: {
+                      left: 40,
+                      right: 40,
+                      top: 40,
+                      bottom: 40
+                    }
+                  });
+                  
+                  console.log('✅ PDF generato con successo:', pdfUri.uri);
+                } catch (pdfError) {
+                  console.error('❌ Errore specifico generazione PDF:', pdfError);
+                  throw new Error(`Errore nella generazione del PDF: ${pdfError.message}`);
+                }
+                
+                const { uri } = pdfUri;
 
                 if (await Sharing.isAvailableAsync()) {
                   // Genera nome file con data dell'inserimento e nome app

@@ -2,12 +2,12 @@
   "expo": {
     "name": "WorkT - Tracker Ore Lavoro",
     "slug": "workt",
-    "version": "1.2.2",
+    "version": "1.3.1",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
-    "description": "App professionale per il tracking delle ore di lavoro con calcolo automatico dello stipendio secondo CCNL Metalmeccanico PMI. Build nativa con aggiornamenti automatici OTA.",
+    "description": "App professionale per il tracking delle ore di lavoro con calcolo automatico dello stipendio secondo CCNL Metalmeccanico PMI. Sistema backup intelligente ottimizzato v1.3.1: statistiche accurate, notifiche continue settimane/mesi, aggiornamenti fluidi, pulizia automatica.",
     "platforms": [
       "ios",
       "android"
@@ -94,7 +94,7 @@
         "expo-channel-name": "production"
       },
       "checkAutomatically": "ON_LOAD",
-      "fallbackToCacheTimeout": 10000,
+      "fallbackToCacheTimeout": 0,
       "enabled": true
     }
   }

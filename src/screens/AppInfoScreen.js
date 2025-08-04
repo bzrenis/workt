@@ -22,6 +22,36 @@ const AppInfoScreen = ({ navigation }) => {
 
   const changelog = [
     {
+      version: '1.3.1',
+      date: '4 Agosto 2025',
+      changes: [
+        'OTTIMIZZAZIONE: Statistiche backup sempre accurate con sistema fallback automatico',
+        'RISOLTO: TimeEntry eliminato refresh doppio e schermata bianca momentanea',
+        'RIVOLUZIONARIO: Notifiche continue per settimane/mesi con AppState listener',
+        'INTELLIGENTE: Pulizia automatica backup in eccesso ogni 30 secondi',
+        'PERFORMANCE: Sistema debounce avanzato per aggiornamenti fluidi',
+        'ESTESO: Promemoria lavoro 7 giorni, reperibilità 14 giorni (vs 3 precedenti)',
+        'AUTOMATICO: Riprogrammazione notifiche ogni apertura app (soglia 1+ ora)',
+        'UI/UX: Picker ottimizzati, rimosso bottone refresh duplicato',
+        'MEMORIA: Gestione corretta listener AppState per prevenire memory leak'
+      ]
+    },
+    {
+      version: '1.3.0',
+      date: '4 Agosto 2025',
+      changes: [
+        'CRITICO: Backup completo con tutte le impostazioni di sistema incluse',
+        'NUOVO: Sistema backup multi-formato (automatico/manuale/array) universale',
+        'NUOVO: Ripristino intelligente con compatibilità backup legacy',
+        'PERFETTO: Stampa PDF identica ai calcoli del form (bug critico risolto)',
+        'CORRETTO: Campo reperibilità mapping form.reperibilita vs form.standby',
+        'CORRETTO: Visualizzazione "ATTIVA"/"NON ATTIVA" per reperibilità automatica',
+        'MIGLIORATO: Metadati backup arricchiti con dettaglio dati inclusi',
+        'MIGLIORATO: DatabaseService.restoreFromBackup() multi-formato avanzato',
+        'TECNICO: AutoBackupService.performAutoBackup() include settings/standby/workEntries'
+      ]
+    },
+    {
       version: '1.2.2',
       date: '3 Agosto 2025',
       changes: [
@@ -197,15 +227,15 @@ const AppInfoScreen = ({ navigation }) => {
             style={[styles.testButton, { backgroundColor: theme.colors.primary }]}
             onPress={async () => {
               try {
-                const result = await global.forceUpdatePopup();
-                console.log('✅ Test popup completato:', result);
+                const result = await global.forceUpdateNotificationV131();
+                console.log('✅ Test popup v1.3.1 completato:', result);
               } catch (error) {
-                console.error('❌ Errore test popup:', error);
+                console.error('❌ Errore test popup v1.3.1:', error);
               }
             }}
           >
             <MaterialCommunityIcons name="rocket-launch" size={20} color="white" />
-            <Text style={styles.testButtonText}>Testa Popup v1.2.2</Text>
+            <Text style={styles.testButtonText}>Testa Popup v1.3.1</Text>
           </TouchableOpacity>
         </FadeInCard>
 

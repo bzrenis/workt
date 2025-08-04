@@ -10,6 +10,7 @@ import Constants from 'expo-constants';
 import * as Notifications from 'expo-notifications';
 import * as Updates from 'expo-updates';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { initNativeBackgroundBackup } from './src/services/NativeBackgroundBackup';
 
 // 🧪 TEST BACKUP NATIVO - Carica il comando globale
 try {
@@ -50,6 +51,49 @@ try {
   console.log('🚀 Comandi: testUpdateCompleted(), testUpdateAvailable(), checkForUpdates(), forceShowUpdateMessage()');
 } catch (testError) {
   console.log('⚠️ Test aggiornamenti non caricati:', testError.message);
+}
+
+// 🎯 NOTIFICA AGGIORNAMENTO v1.3.0 - Carica sistema notifiche personalizzate
+try {
+  const { forceUpdateNotificationV130, checkUpdateStatus, resetUpdateSystem, resetV130PopupFlag } = require('./force-update-notification-v1-3-0');
+  global.forceUpdateNotificationV130 = forceUpdateNotificationV130;
+  global.checkUpdateStatus = checkUpdateStatus;
+  global.resetUpdateSystem = resetUpdateSystem;
+  global.resetV130PopupFlag = resetV130PopupFlag;
+  console.log('🎯 Notifiche aggiornamento v1.3.0 caricate!');
+  console.log('🎯 Comandi: forceUpdateNotificationV130(), checkUpdateStatus(), resetUpdateSystem(), resetV130PopupFlag()');
+} catch (testError) {
+  console.log('⚠️ Notifiche aggiornamento v1.3.0 non caricate:', testError.message);
+}
+
+// 🧪 CARICA SISTEMA TEST AGGIORNAMENTO v1.3.1
+if (__DEV__) {
+  require('./test-update-system-v1-3-1.js');
+}
+
+// 🎭 CARICA TESTER COMPONENTI DEVELOPMENT
+if (__DEV__) {
+  require('./test-development-components.js');
+}
+
+// 🚨 CARICA PULIZIA EMERGENZA POPUP
+if (__DEV__) {
+  require('./emergency-popup-cleanup.js');
+}
+
+// 🧹 CARICA SISTEMA PULIZIA AGGIORNAMENTI
+if (__DEV__) {
+  require('./clean-update-system.js');
+}
+
+// 🚀 CARICA COMANDI PUBBLICAZIONE OTA v1.3.1
+if (__DEV__) {
+  require('./publish-ota-v1-3-1.js');
+}
+
+// 🎯 CARICA NOTIFICHE FORCE UPDATE v1.3.1
+if (__DEV__) {
+  require('./force-update-notification-v1-3-1.js');
 }
 
 // 🔍 DEBUG VERSIONI - Comando per verificare stato versioni
@@ -116,6 +160,59 @@ try {
   console.log('🔧 Comandi: forceUpdatePopup(), checkCurrentVersionState()');
 } catch (forceError) {
   console.log('⚠️ Force update popup non caricato:', forceError.message);
+}
+
+// 📱 RILEVAMENTO BUILD NATIVA - Distingue aggiornamenti nativi da OTA
+try {
+  const { checkNativeBuildUpdate, forceNativeBuildPopup, getBuildInfo, resetNativeBuildSystem } = require('./native-build-update-detector');
+  global.checkNativeBuildUpdate = checkNativeBuildUpdate;
+  global.forceNativeBuildPopup = forceNativeBuildPopup;
+  global.getBuildInfo = getBuildInfo;
+  global.resetNativeBuildSystem = resetNativeBuildSystem;
+  console.log('📱 Rilevamento build nativa caricato!');
+  console.log('📱 Comandi: checkNativeBuildUpdate(), forceNativeBuildPopup(), getBuildInfo(), resetNativeBuildSystem()');
+} catch (nativeError) {
+  console.log('⚠️ Rilevamento build nativa non caricato:', nativeError.message);
+}
+
+// 🧪 TEST BUILD NATIVA - Sistema completo di test per aggiornamenti nativi
+try {
+  const { testNativeBuildDetection, resetForNewTest, testAllUpdateScenarios, testOTAvsNativeComparison } = require('./test-native-build-system');
+  global.testNativeBuildDetection = testNativeBuildDetection;
+  global.resetForNewTest = resetForNewTest;
+  global.testAllUpdateScenarios = testAllUpdateScenarios;
+  global.testOTAvsNativeComparison = testOTAvsNativeComparison;
+  console.log('🧪 Test build nativa caricato!');
+  console.log('🧪 Comandi: testNativeBuildDetection(), resetForNewTest(), testAllUpdateScenarios(), testOTAvsNativeComparison()');
+} catch (testNativeError) {
+  console.log('⚠️ Test build nativa non caricato:', testNativeError.message);
+}
+
+// 🔔 TEST NOTIFICHE BACKUP - Sistema di test per controllo notifiche backup
+try {
+  const { testBackupNotificationControl, testBackupWithDifferentNotificationStates, checkBackupNotificationStatus, resetNotificationTestState } = require('./test-backup-notifications');
+  global.testBackupNotificationControl = testBackupNotificationControl;
+  global.testBackupWithDifferentNotificationStates = testBackupWithDifferentNotificationStates;
+  global.checkBackupNotificationStatus = checkBackupNotificationStatus;
+  global.resetNotificationTestState = resetNotificationTestState;
+  console.log('🔔 Test notifiche backup caricato!');
+  console.log('🔔 Comandi: testBackupNotificationControl(), testBackupWithDifferentNotificationStates(), checkBackupNotificationStatus(), resetNotificationTestState()');
+} catch (testNotificationError) {
+  console.log('⚠️ Test notifiche backup non caricato:', testNotificationError.message);
+}
+
+// 📍 BACKUP PATH INSPECTOR - Visualizza percorsi e dettagli backup completi
+try {
+  const { inspectAllBackups, findBackupByName, verifyBackupPaths, showLatestBackup, copyBackupPath } = require('./backup-path-inspector');
+  global.inspectAllBackups = inspectAllBackups;
+  global.findBackupByName = findBackupByName;
+  global.verifyBackupPaths = verifyBackupPaths;
+  global.showLatestBackup = showLatestBackup;
+  global.copyBackupPath = copyBackupPath;
+  console.log('📍 Backup path inspector caricato!');
+  console.log('📍 Comandi: inspectAllBackups(), findBackupByName("nome"), verifyBackupPaths(), showLatestBackup(), copyBackupPath("nome")');
+} catch (inspectorError) {
+  console.log('⚠️ Backup path inspector non caricato:', inspectorError.message);
 }
 
 // ✅ HANDLER NOTIFICHE CORRETTO - Mostra solo notifiche legittime
@@ -219,6 +316,10 @@ import VacationSettingsScreen from './src/screens/VacationSettingsScreen';
 import HourlyRatesSettingsScreen from './src/screens/HourlyRatesSettingsScreen';
 import CalculationMethodSettingsScreen from './src/screens/CalculationMethodSettingsScreen';
 import AppInfoScreen from './src/screens/AppInfoScreen';
+
+// 🏷️ COMPONENTI MODALITÀ DEVELOPMENT
+import DevelopmentWatermark from './src/components/DevelopmentWatermark';
+import DevelopmentBanner from './src/components/DevelopmentBanner';
 
 import { useDatabase } from './src/hooks';
 import DatabaseHealthService from './src/services/DatabaseHealthService';
@@ -470,6 +571,23 @@ export default function App() {
       console.log('- Constants.executionEnvironment:', Constants.executionEnvironment);
       console.log('- __DEV__:', __DEV__);
       
+      // 📱 CONTROLLO BUILD NATIVA: Prima di tutto controlla se è cambiata la build
+      setTimeout(async () => {
+        try {
+          console.log('📱 Controllo aggiornamento build nativa...');
+          const nativeUpdateResult = await global.checkNativeBuildUpdate();
+          
+          if (nativeUpdateResult?.updateDetected) {
+            console.log('🎯 AGGIORNAMENTO BUILD NATIVA RILEVATO:', nativeUpdateResult);
+            // Il popup viene gestito automaticamente da checkNativeBuildUpdate
+          } else {
+            console.log('✅ Nessun aggiornamento build nativa rilevato');
+          }
+        } catch (nativeError) {
+          console.log('⚠️ Errore controllo build nativa:', nativeError);
+        }
+      }, 1500); // Controlla build nativa dopo 1.5 secondi
+      
       // ⚠️ RITARDA L'AVVIO DEI SERVIZI PER EVITARE DATABASE LOCK
       setTimeout(() => {
         console.log('🚀 App: Avvio servizi dopo inizializzazione database...');
@@ -480,7 +598,63 @@ export default function App() {
         // Inizializza aggiornamenti automatici
         setTimeout(() => {
           console.log('🔄 App: Inizializzazione servizio aggiornamenti...');
+          
+          // 🎯 CONTROLLO SPECIFICO v1.3.0: POPUP SEMPRE VISIBILE per aggiornamento
+          const checkV130Update = async () => {
+            try {
+              const lastKnownVersion = await AsyncStorage.getItem('last_known_version');
+              const hasShownV130Popup = await AsyncStorage.getItem('v1_3_0_popup_shown');
+              
+              console.log('📋 Versione precedente nota:', lastKnownVersion);
+              console.log('📋 Popup v1.3.0 già mostrato:', hasShownV130Popup);
+              
+              // MOSTRA SEMPRE il popup se:
+              // 1. Non c'è versione precedente (prima installazione/reset)
+              // 2. La versione è diversa da 1.3.0 (aggiornamento effettivo)
+              // 3. Il popup v1.3.0 non è mai stato mostrato (per sicurezza)
+              const shouldShowPopup = !lastKnownVersion || 
+                                    lastKnownVersion !== '1.3.0' || 
+                                    hasShownV130Popup !== 'true';
+              
+              if (shouldShowPopup) {
+                console.log('🎯 MOSTRANDO POPUP v1.3.0 - Condizioni:', {
+                  lastKnownVersion,
+                  hasShownV130Popup,
+                  shouldShowPopup
+                });
+                
+                setTimeout(() => {
+                  global.forceUpdateNotificationV130();
+                }, 3000); // Aspetta 3 secondi per permettere all'app di caricarsi
+              } else {
+                console.log('✅ Popup v1.3.0 già mostrato, non necessario');
+              }
+            } catch (error) {
+              console.error('❌ Errore controllo v1.3.0:', error);
+              // In caso di errore, mostra comunque il popup per sicurezza
+              setTimeout(() => {
+                global.forceUpdateNotificationV130();
+              }, 3000);
+            }
+          };
+          
+          checkV130Update();
           UpdateService.checkOnAppStart();
+          
+          // 🚨 BACKUP POPUP v1.3.0: Se per qualche motivo il controllo sopra fallisce,
+          // forza comunque la visualizzazione del popup dopo 5 secondi
+          setTimeout(async () => {
+            try {
+              const hasShownV130Popup = await AsyncStorage.getItem('v1_3_0_popup_shown');
+              if (hasShownV130Popup !== 'true') {
+                console.log('🚨 BACKUP: Forzando popup v1.3.0 per sicurezza...');
+                global.forceUpdateNotificationV130();
+              }
+            } catch (error) {
+              console.log('🚨 BACKUP: Errore controllo backup popup, forzo comunque:', error);
+              global.forceUpdateNotificationV130();
+            }
+          }, 5000); // Backup dopo 5 secondi
         }, 1000);
         
 
@@ -662,6 +836,10 @@ export default function App() {
     }
   }, [isInitialized]);
 
+  useEffect(() => {
+    initNativeBackgroundBackup();
+  }, []);
+
   if (isLoading || !isInitialized) {
     return <LoadingScreen />;
   }
@@ -676,6 +854,10 @@ export default function App() {
         <NavigationContainer>
           <MainTabs />
           <StatusBar style="auto" />
+          
+          {/* 🏷️ FILIGRANE MODALITÀ DEVELOPMENT */}
+          <DevelopmentWatermark />
+          <DevelopmentBanner />
         </NavigationContainer>
       </SafeAreaProvider>
     </ThemeProvider>

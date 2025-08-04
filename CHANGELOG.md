@@ -1,5 +1,70 @@
 # Changelog - WorkT Tracker Ore Lavoro
 
+## [1.3.1] - 2025-08-04
+
+### ✨ **OTTIMIZZAZIONE SISTEMA - Performance e Continuità Servizio**
+
+#### 📊 **Sistema Backup Intelligente Perfezionato**
+- **RISOLTO: Statistiche backup sempre accurate**: Sistema fallback automatico che calcola correttamente il numero di backup quando il servizio principale restituisce 0
+- **Pulizia automatica ottimizzata**: Cleanup intelligente ogni 30 secondi che mantiene solo il numero configurato (3, 5 o 10) di backup più recenti
+- **Monitoraggio continuo**: Sistema di verifica automatica che garantisce sempre statistiche aggiornate senza intervento manuale
+- **Performance migliorate**: Ridotto overhead con controlli intelligenti e cleanup proattivo
+
+#### 🔄 **TimeEntry Aggiornamenti Fluidi**
+- **RISOLTO: Eliminato refresh doppio**: Completamente risolto il problema di doppio aggiornamento che causava schermata bianca momentanea
+- **Refresh intelligente**: Sistema debounce avanzato con timeout di 300ms per aggiornamenti fluidi e naturali
+- **Focus management ottimizzato**: Aggiornamento automatico solo quando necessario (dopo modifiche o 30+ secondi)
+- **UI pulita**: Rimosso bottone refresh duplicato, mantenuto solo pull-to-refresh nativo per esperienza più elegante
+
+#### 📱 **Notifiche Continue Garantite**
+- **RIVOLUZIONARIO: Notifiche persistenti settimane/mesi**: Nuovo sistema AppState listener che riprogramma automaticamente le notifiche quando l'app torna in primo piano
+- **Estensione programmazione massiva**: Promemoria lavoro/orari estesi da 3 a 7 giorni, promemoria reperibilità da 3 a 14 giorni
+- **Riprogrammazione intelligente**: Controllo automatico ogni apertura app (dopo 1+ ora) con soglia 5 notifiche rimanenti per riprogrammazione
+- **Gestione memoria ottimizzata**: Cleanup corretto dei listener AppState per prevenire memory leak e garantire performance
+
+#### � **Miglioramenti UI/UX**
+- **Picker ottimizzati**: Etichette accorciate per visualizzazione completa su tutti i dispositivi
+- **Performance visual**: Eliminati tutti i refresh visibili multipli per esperienza fluida
+- **Feedback utente migliorato**: Sistema di notifiche più chiaro e meno intrusivo
+
+#### ⚡ **Continuità e Stabilità Sistema**
+- **Zero interruzioni**: Backup automatici sempre funzionanti con statistiche real-time
+- **Aggiornamenti seamless**: TimeEntry si aggiorna senza disturbare l'utente
+- **Notifiche affidabili**: Sistema che continua a funzionare per mesi senza riconfigurazione
+- **Performance complessive**: Sistema completamente ottimizzato per uso quotidiano intensivo
+
+---
+
+## [1.3.0] - 2025-08-04
+
+### 🎯 **AGGIORNAMENTO CRITICO - Sistema Backup Completo e PDF Avanzato**
+
+#### 💾 **Backup Automatico Completo Rivoluzionato**
+- **NUOVO: Backup completo con tutte le impostazioni di sistema**: Include work entries, impostazioni utente, giorni reperibilità e configurazioni CCNL
+- **Sistema multi-formato intelligente**: Compatibilità automatica tra backup automatici e manuali con strutture diverse
+- **Ripristino universale**: Gestione automatica di formati legacy e nuovi per massima compatibilità
+- **Metadati arricchiti**: Informazioni dettagliate sui dati inclusi in ogni backup per trasparenza completa
+
+#### 📄 **Sistema Stampa PDF Professionale**
+- **NUOVO: Stampa PDF perfetta con calcoli identici al form**: Risolto bug critico dove PDF mostrava calcoli diversi dal form
+- **Campo reperibilità corretto**: Risolto mapping campi form.reperibilita vs form.standby per display accurato indennità
+- **Switch indicator preciso**: Visualizzazione corretta "ATTIVA"/"NON ATTIVA" per reperibilità automatica e manuale
+- **Layout A4 professionale**: Formattazione ottimizzata per stampa con filename personalizzato app+data
+
+#### 🔧 **Miglioramenti Tecnici Avanzati**
+- **DatabaseService.restoreFromBackup() multi-formato**: Supporto automatico per backup automatici, manuali e array diretti
+- **BackupService.validateBackupFormat() intelligente**: Riconoscimento automatico tipo backup senza errori
+- **Field mapping unificato**: Correzione sistematica riferimenti campi tra form e PDF template
+- **Debug logging completo**: Tracciamento dettagliato backup e ripristino per troubleshooting
+
+#### 🛠️ **Correzioni Critiche Sistema**
+- **Eliminato errore "Formato backup non valido"**: Risolto problema importazione backup automatici dalla lista
+- **PDF field matching perfetto**: Tutti i campi form ora corrispondono esattamente alla visualizzazione PDF
+- **Backup destinazioni multiple**: Gestione robusta percorsi custom, cloud e memoria per backup automatici
+- **AutoBackupService.getAllData() integration**: Utilizzo corretto metodi database per backup completo
+
+---
+
 ## [1.2.2] - 2025-08-03
 
 ### 🚀 **AGGIORNAMENTO CRITICO - Backup Automatico App Chiusa**

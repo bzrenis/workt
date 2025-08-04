@@ -522,25 +522,65 @@ const TimeEntryScreen = () => {
     }
   }, [settings, calculationService, entries, refreshEntries]);
   
-  // Wrapper per refresh manuale: svuota breakdowns PRIMA di aggiornare entries
+  // Ref per tracciare l'ultimo refresh e debounce
+  const lastRefreshRef = useRef(0);
+  const refreshTimeoutRef = useRef(null);
+  
+  // Wrapper per refresh manuale: svuota breakdowns PRIMA di aggiornare entries con debounce
   const handleManualRefresh = useCallback(() => {
+    const now = Date.now();
+    const timeSinceLastRefresh = now - (lastRefreshRef.current || 0);
+    
+    // Debounce: evita refresh troppo frequenti
+    if (timeSinceLastRefresh < 1000) {
+      console.log('🔄 Refresh troppo frequente, debounce attivo');
+      
+      // Cancella il timeout precedente se esistente
+      if (refreshTimeoutRef.current) {
+        clearTimeout(refreshTimeoutRef.current);
+      }
+      
+      // Imposta un nuovo timeout per il refresh
+      refreshTimeoutRef.current = setTimeout(() => {
+        console.log('🔄 Refresh eseguito dopo debounce');
+        setBreakdowns({});
+        refreshEntries();
+        lastRefreshRef.current = Date.now();
+      }, 1000 - timeSinceLastRefresh);
+      
+      return;
+    }
+    
+    // Refresh immediato se è passato abbastanza tempo
+    console.log('🔄 Refresh manuale immediato');
     setBreakdowns({});
     refreshEntries();
+    lastRefreshRef.current = now;
   }, [refreshEntries]);
 
-  // Listener per il ritorno dal form
+  // Listener per il ritorno dal form - versione ottimizzata
   useEffect(() => {
     const unsubscribe = navigation.addListener('focus', () => {
-      // Solo se stiamo tornando da una navigazione (non al primo caricamento)
+      const now = Date.now();
+      const timeSinceLastRefresh = now - (lastRefreshRef.current || 0);
+      
+      // Controlla se ci sono parametri di refresh
       const navigationState = navigation.getState();
       const currentRoute = navigationState.routes[navigationState.index];
       
-      // Se abbiamo un parametro refreshFromForm, significa che stiamo tornando dal form
       if (currentRoute.params?.refreshFromForm) {
-        console.log('🔄 TimeEntryScreen: Ritorno dal form, refreshing entries');
+        console.log('🔄 TimeEntryScreen: Parametro refresh dal form trovato');
         handleManualRefresh();
-        // Rimuovi il parametro per evitare refresh multipli
         navigation.setParams({ refreshFromForm: undefined });
+        return;
+      }
+      
+      // Refresh automatico solo se è passato molto tempo (30 secondi)
+      if (timeSinceLastRefresh > 30000) {
+        console.log('🔄 TimeEntryScreen: Refresh automatico su focus (è passato molto tempo)');
+        handleManualRefresh();
+      } else {
+        console.log(`🔄 TimeEntryScreen: Focus ricevuto, ma refresh recente (${Math.round(timeSinceLastRefresh/1000)}s fa)`);
       }
     });
 
@@ -800,6 +840,15 @@ const TimeEntryScreen = () => {
       DataUpdateService.removeAllListeners('workEntriesUpdated');
     };
   }, [selectedYear, selectedMonth, refreshEntries]);
+
+  // Cleanup per i timeout quando il componente viene smontato
+  useEffect(() => {
+    return () => {
+      if (refreshTimeoutRef.current) {
+        clearTimeout(refreshTimeoutRef.current);
+      }
+    };
+  }, []);
 
   // Array dei mesi in italiano
   const mesiItaliani = [
